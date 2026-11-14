@@ -2,13 +2,14 @@
 // Workout data is not cached here: the app keeps that itself and syncs it.
 // Bump VERSION whenever the list of files changes.
 
-const VERSION = 'thoenefit-v1';
+const VERSION = 'thoenefit-v2';
 const SHELL = [
   './',
   'index.html',
   'app.css',
   'js/app.js',
   'js/store.js',
+  'js/search.js',
   'js/ui.js',
   'manifest.webmanifest',
   'icons/icon-192.png',

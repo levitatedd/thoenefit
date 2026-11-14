@@ -31,11 +31,12 @@ To try it from your phone on the same Wi-Fi, start it with `php -S 0.0.0.0:8000 
 ```sh
 php tests/run.php            # server: generator, progression, sync, accounts, export
 node tests/sync.test.mjs     # phone-side offline queue
+node tests/search.test.mjs   # exercise search: spelling, typos, aliases, ranking
 ```
 
 `tests/e2e.mjs` drives the whole app in Chrome at phone sizes. It needs Playwright and is optional; the instructions are at the top of that file.
 
-Every push to `main` runs the first two on GitHub, including a run of the server checks against MySQL.
+Every push to `main` runs the first three on GitHub, including a run of the server checks against MySQL.
 
 ## Deploy to DreamHost
 
@@ -175,6 +176,7 @@ web/                    the folder the web server serves (uploaded on deploy)
   index.html app.css    app shell
   js/app.js             screens
   js/store.js           server calls and the offline workout queue
+  js/search.js          exercise search (typos, aliases, similar exercises)
   js/ui.js              small interface helpers
   sw.js                 keeps the app's files on the phone for offline use
   api.php               entry point for all server calls
