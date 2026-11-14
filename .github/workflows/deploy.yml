@@ -17,7 +17,7 @@ jobs:
     name: Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Server checks on SQLite
         run: php tests/run.php
       - name: Server checks on MySQL (what DreamHost runs)
@@ -37,7 +37,7 @@ jobs:
       LFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
       SFTP_PATH: ${{ secrets.SFTP_PATH }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check that the server details are set
         id: cfg
@@ -55,20 +55,40 @@ jobs:
           esac
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
+      - name: Check the connection to the server
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          # Accept a host pasted as sftp://host/ or user@host as well as a bare hostname.
+          HOST="${SFTP_HOST#*://}"; HOST="${HOST#*@}"; HOST="${HOST%%/*}"; HOST="${HOST%%:*}"
+          echo "HOST=$HOST" >> "$GITHUB_ENV"
+          if ! getent hosts "$HOST" >/dev/null; then
+            echo "::error::SFTP_HOST does not resolve to a server. Use the hostname DreamHost shows for the user (or the site's domain), with nothing before or after it."
+            exit 1
+          fi
+          if ! timeout 15 bash -c "exec 3<>/dev/tcp/$HOST/22" 2>/dev/null; then
+            echo "::error::Reached SFTP_HOST but port 22 (SFTP) did not answer."
+            exit 1
+          fi
+          echo "Server found and SFTP port is open."
+
       - name: Upload the web folder over SFTP
         if: steps.cfg.outputs.ready == 'true'
         run: |
-          command -v lftp >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq lftp)
+          command -v lftp >/dev/null || (sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq lftp >/dev/null)
           # Uploads new and changed files. Nothing on the server is deleted, so
           # certificates, your config file and anything else already there are left alone.
-          lftp --env-password -e "
-            set sftp:auto-confirm yes;
-            set net:max-retries 3;
-            set net:timeout 30;
+          if ! lftp -c "
             set cmd:fail-exit yes;
-            mirror --reverse --verbose --no-perms --parallel=4 web/ '$SFTP_PATH/';
-            bye
-          " "sftp://$SFTP_USER@$SFTP_HOST"
+            set sftp:auto-confirm yes;
+            set net:max-retries 2;
+            set net:timeout 30;
+            open --env-password --user '$SFTP_USER' 'sftp://$HOST';
+            cd '$SFTP_PATH';
+            mirror --reverse --verbose --no-perms --parallel=4 web/ .;
+          "; then
+            echo "::error::Upload failed. If the line above says 'Login failed', check SFTP_USER and SFTP_PASSWORD. If it says 'No such file', check SFTP_PATH (it should be the site's web folder, for example /home/USERNAME/fit.example.com)."
+            exit 1
+          fi
 
       - name: Done
         if: steps.cfg.outputs.ready == 'true'
