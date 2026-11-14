@@ -1,0 +1,11 @@
+# Local database and secrets never go to GitHub
+/data/
+thoenefit-config.php
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sql
+*.sql.gz
+
+node_modules/
+.DS_Store

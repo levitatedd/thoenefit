@@ -1,0 +1,75 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Server checks on SQLite
+        run: php tests/run.php
+      - name: Server checks on MySQL (what DreamHost runs)
+        run: |
+          sudo systemctl start mysql.service
+          TF_TEST_DB=mysql TF_MYSQL_HOST=127.0.0.1 TF_MYSQL_USER=root TF_MYSQL_PASSWORD=root php tests/run.php
+      - name: Offline queue checks
+        run: node tests/sync.test.mjs
+
+  deploy:
+    name: Upload to DreamHost
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      SFTP_HOST: ${{ secrets.SFTP_HOST }}
+      SFTP_USER: ${{ secrets.SFTP_USER }}
+      LFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+      SFTP_PATH: ${{ secrets.SFTP_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the server details are set
+        id: cfg
+        run: |
+          if [ -z "$SFTP_HOST" ] || [ -z "$SFTP_USER" ] || [ -z "$LFTP_PASSWORD" ] || [ -z "$SFTP_PATH" ]; then
+            echo "::notice::Deploy skipped. Add the repository secrets SFTP_HOST, SFTP_USER, SFTP_PASSWORD and SFTP_PATH (see README) to turn it on."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$SFTP_PATH" in
+            /|/home|/home/|"~"|"~/"|.|./)
+              echo "::error::SFTP_PATH must be the site's web folder (for example /home/username/fit.example.com), not '$SFTP_PATH'."
+              exit 1
+              ;;
+          esac
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the web folder over SFTP
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          command -v lftp >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq lftp)
+          # Uploads new and changed files. Nothing on the server is deleted, so
+          # certificates, your config file and anything else already there are left alone.
+          lftp --env-password -e "
+            set sftp:auto-confirm yes;
+            set net:max-retries 3;
+            set net:timeout 30;
+            set cmd:fail-exit yes;
+            mirror --reverse --verbose --no-perms --parallel=4 web/ '$SFTP_PATH/';
+            bye
+          " "sftp://$SFTP_USER@$SFTP_HOST"
+
+      - name: Done
+        if: steps.cfg.outputs.ready == 'true'
+        run: echo "::notice::Deployed. Database changes apply themselves the next time the app is opened."

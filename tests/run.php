@@ -1,0 +1,289 @@
+<?php
+declare(strict_types=1);
+
+// Server-side checks. Runs against a throwaway SQLite database:
+//   php tests/run.php
+
+require dirname(__DIR__) . '/web/private/src/bootstrap.php';
+
+use TF\Auth;
+use TF\Catalog;
+use TF\Db;
+use TF\Generator;
+use TF\HttpError;
+use TF\Migrator;
+use TF\Workouts;
+
+$pass = 0;
+$fail = 0;
+function check(string $name, bool $ok, string $detail = ''): void
+{
+    global $pass, $fail;
+    if ($ok) {
+        $pass++;
+        echo "  ok    $name\n";
+    } else {
+        $fail++;
+        echo "  FAIL  $name" . ($detail ? "  ($detail)" : '') . "\n";
+    }
+}
+function uuid(): string
+{
+    $b = random_bytes(16);
+    $b[6] = chr((ord($b[6]) & 0x0f) | 0x40);
+    $b[8] = chr((ord($b[8]) & 0x3f) | 0x80);
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($b), 4));
+}
+function throws(callable $fn, int $status): bool
+{
+    try {
+        $fn();
+    } catch (HttpError $e) {
+        return $e->status === $status;
+    }
+    return false;
+}
+
+$file = sys_get_temp_dir() . '/thoenefit-test-' . getmypid() . '.sqlite';
+@unlink($file);
+if (getenv('TF_TEST_DB') === 'mysql') {
+    // Same checks against a real MySQL server (used by the GitHub workflow):
+    //   TF_TEST_DB=mysql TF_MYSQL_HOST=127.0.0.1 TF_MYSQL_USER=root TF_MYSQL_PASSWORD=root php tests/run.php
+    $c = ['driver' => 'mysql', 'host' => getenv('TF_MYSQL_HOST') ?: '127.0.0.1', 'name' => 'thoenefit_test', 'user' => getenv('TF_MYSQL_USER') ?: 'root', 'password' => (string) getenv('TF_MYSQL_PASSWORD')];
+    $admin = new PDO('mysql:host=' . $c['host'], $c['user'], $c['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $admin->exec('DROP DATABASE IF EXISTS thoenefit_test');
+    $admin->exec('CREATE DATABASE thoenefit_test CHARACTER SET utf8mb4');
+    $db = new Db($c);
+    echo 'Running against MySQL ' . $db->val('SELECT VERSION()') . "\n";
+} else {
+    $db = new Db(['driver' => 'sqlite', 'path' => $file]);
+}
+
+echo "Migrations and catalog\n";
+$applied = Migrator::ensure($db);
+check('migrations apply on an empty database', $applied === [1, 2]);
+check('running them again changes nothing', Migrator::ensure($db) === []);
+$n = (int) $db->val('SELECT COUNT(*) FROM exercises');
+check('catalog seeded (' . $n . ' exercises)', $n === count(Catalog::exercises()) && $n >= 80);
+Catalog::sync($db);
+check('re-seeding does not duplicate exercises', (int) $db->val('SELECT COUNT(*) FROM exercises') === $n);
+$valid = array_flip(Catalog::equipmentKeys());
+$bad = [];
+foreach (Catalog::exercises() as $e) {
+    foreach ($e[3] as $eq) {
+        if (!isset($valid[$eq])) {
+            $bad[] = "$e[0]:$eq";
+        }
+    }
+    foreach (array_merge($e[5], $e[6]) as $m) {
+        if (!isset(Catalog::MUSCLES[$m])) {
+            $bad[] = "$e[0]:$m";
+        }
+    }
+    if (!isset(Catalog::PATTERNS[$e[4]]) || !isset(Catalog::KINDS[$e[2]])) {
+        $bad[] = $e[0];
+    }
+}
+check('every catalog tag is a known equipment, muscle, movement and kind', !$bad, implode(' ', $bad));
+check('catalog slugs are unique', count(array_unique(array_column(Catalog::exercises(), 0))) === count(Catalog::exercises()));
+
+echo "Accounts\n";
+$auth = new Auth($db, []);
+$uid = $auth->createUser('Mike', 'correct horse battery', 'Mike');
+$uid2 = $auth->createUser('sam', 'another long password');
+check('passwords are stored hashed', password_verify('correct horse battery', $db->val('SELECT password_hash FROM users WHERE id=?', [$uid])) && strpos($db->val('SELECT password_hash FROM users WHERE id=?', [$uid]), 'correct') === false);
+check('short passwords are rejected', throws(fn() => $auth->createUser('tiny', 'short'), 422));
+check('duplicate usernames are rejected', throws(fn() => $auth->createUser('MIKE', 'correct horse battery'), 409));
+check('wrong password is refused', throws(fn() => $auth->login('mike', 'nope'), 401));
+$u = $auth->login('mike', 'correct horse battery');
+check('right password signs in', (int) $u['id'] === $uid);
+check('session token is stored only as a hash', (int) $db->val('SELECT COUNT(*) FROM auth_sessions WHERE LENGTH(token_hash)=64') === 1);
+for ($i = 0; $i < 8; $i++) {
+    try {
+        $auth->login('sam', 'wrong');
+    } catch (HttpError $e) {
+    }
+}
+check('repeated failures lock sign-in for a while', throws(fn() => $auth->login('sam', 'another long password'), 429));
+
+echo "Generator\n";
+$mkGym = function (int $uid, string $name, array $equipment) use ($db): array {
+    $id = $db->insert('gyms', ['user_id' => $uid, 'name' => $name, 'equipment' => json_encode($equipment), 'increments' => '{}', 'created_at' => TF\now_utc()]);
+    return Generator::gymShape($db->one('SELECT * FROM gyms WHERE id=?', [$id]));
+};
+$big = $mkGym($uid, 'Iron Works', Catalog::equipmentKeys());
+$home = $mkGym($uid, 'Home', ['dumbbells', 'bench']);
+$none = $mkGym($uid, 'Hotel room', []);
+$other = $mkGym($uid, 'Second gym', Catalog::equipmentKeys());
+$user = $db->one('SELECT * FROM users WHERE id=?', [$uid]);
+$gen = new Generator($db);
+$wk = new Workouts($db);
+$exById = [];
+foreach (Catalog::forUser($db, $uid) as $e) {
+    $exById[$e['id']] = $e;
+}
+$bySlug = [];
+foreach ($db->all('SELECT id, slug FROM exercises') as $r) {
+    $bySlug[$r['slug']] = (int) $r['id'];
+}
+
+$violations = [];
+$thin = [];
+foreach ([[$big, 3], [$home, 3], [$none, 2]] as [$gym, $min]) {
+    foreach (['full', 'upper', 'lower', 'push', 'pull', 'legs'] as $day) {
+        $w = $gen->generate($user, $gym, ['day_type' => $day, 'minutes' => 60]);
+        foreach ($w['exercises'] as $b) {
+            foreach ($exById[$b['exercise_id']]['equipment'] as $need) {
+                if (!in_array($need, $gym['equipment'], true)) {
+                    $violations[] = "{$gym['name']}/$day: {$b['name']} needs $need";
+                }
+            }
+        }
+        if (count($w['exercises']) < $min && !($gym['name'] === 'Hotel room' && $day === 'pull')) {
+            $thin[] = "{$gym['name']}/$day=" . count($w['exercises']);
+        }
+    }
+}
+check('never picks an exercise the gym lacks equipment for (3 gyms x 6 days)', !$violations, implode('; ', $violations));
+check('every built-in split day fills a session', !$thin, implode(' ', $thin));
+$w = $gen->generate($user, $none, ['day_type' => 'pull']);
+check('a gym with no pulling equipment says so instead of inventing exercises', count($w['skipped']) > 0);
+
+$a = $gen->generate($user, $big, ['day_type' => 'push', 'now' => 1800000000]);
+$b = $gen->generate($user, $big, ['day_type' => 'push', 'now' => 1800000000]);
+check('same inputs give the same workout', json_encode($a) === json_encode($b));
+$short = $gen->generate($user, $big, ['day_type' => 'push', 'minutes' => 25]);
+$long = $gen->generate($user, $big, ['day_type' => 'push', 'minutes' => 90]);
+check('time available changes the number of exercises (' . count($short['exercises']) . ' vs ' . count($long['exercises']) . ')', count($short['exercises']) < count($long['exercises']) && $short['est_minutes'] <= 35);
+check('each suggestion carries a reason', !array_filter($a['exercises'], fn($x) => strlen($x['reason']) < 20));
+
+$first = $a['exercises'][0];
+$second = $a['exercises'][1];
+$regen = $gen->generate($user, $big, ['day_type' => 'push', 'locked' => [$first['slot'] => $first['exercise_id']], 'avoid' => array_column($a['exercises'], 'exercise_id')]);
+check('a locked exercise survives regenerate', $regen['exercises'][0]['exercise_id'] === $first['exercise_id'] && $regen['exercises'][0]['locked']);
+check('regenerate swaps the unlocked ones', $regen['exercises'][1]['exercise_id'] !== $second['exercise_id']);
+$alts = $gen->alternatives($uid, $home, $bySlug['dumbbell-bench-press']);
+$altOk = $alts && !array_filter($alts, function ($x) use ($exById, $home) {
+    return array_diff($exById[$x['exercise_id']]['equipment'], $home['equipment']);
+});
+check('swap alternatives respect the gym too', (bool) $altOk);
+
+echo "Logging, progression and sync\n";
+// Helper: build a workout document the way the phone does.
+$doc = function (array $gym, string $day, array $lifts, string $when, string $status = 'completed') {
+    $exs = [];
+    foreach ($lifts as [$exId, $min, $max, $sets]) {
+        $rows = [];
+        foreach ($sets as $s) {
+            $rows[] = ['id' => uuid(), 'weight' => $s[0], 'reps' => $s[1], 'warmup' => $s[2] ?? false, 'done' => $s[3] ?? true, 'done_at' => $when];
+        }
+        $exs[] = ['id' => uuid(), 'exercise_id' => $exId, 'rep_min' => $min, 'rep_max' => $max, 'target_sets' => count($rows), 'sets' => $rows];
+    }
+    return ['id' => uuid(), 'gym_id' => $gym['id'], 'day_type' => $day, 'status' => $status, 'unit' => 'lb', 'started_at' => $when, 'completed_at' => $status === 'completed' ? $when : null, 'rev' => 1, 'exercises' => $exs];
+};
+$bench = $bySlug['barbell-bench-press'];
+$press = $bySlug['machine-chest-press'];
+$ago = fn(int $days) => gmdate('Y-m-d\TH:i:s\Z', time() - $days * 86400);
+
+$blk = $gen->block($user, $big, $exById[$bench]);
+check('no history: no weight suggested, and it says why', $blk['suggested_weight'] === null && $blk['action'] === 'new');
+
+// Session 1: warm-up + three working sets, all at the top of 6-10.
+$d1 = $doc($big, 'push', [[$bench, 6, 10, [[45, 10, true], [135, 10], [135, 10], [135, 10]]]], $ago(4));
+$r = $wk->save($uid, $d1);
+check('workout saves', $r['ok'] === true);
+$blk = $gen->block($user, $big, $exById[$bench]);
+check('top of the range on every working set -> next increment (135 -> ' . $blk['suggested_weight'] . ')', $blk['suggested_weight'] === 140.0 && $blk['action'] === 'increase' && $blk['suggested_reps'] === 6);
+check('warm-up sets are ignored by progression', count($blk['previous']['sets']) === 3);
+
+// Editing that past workout (one set was really 8 reps) must change the advice.
+$d1['exercises'][0]['sets'][3]['reps'] = 8;
+$d1['rev'] = 2;
+$wk->save($uid, $d1);
+$blk = $gen->block($user, $big, $exById[$bench]);
+check('editing a past workout updates the next recommendation (stay at 135)', $blk['suggested_weight'] === 135.0 && $blk['action'] === 'stay' && $blk['suggested_reps'] === 9);
+
+// Idempotent sync: the same save delivered three times, then an out-of-date one.
+$before = (int) $db->val('SELECT COUNT(*) FROM workout_sets');
+$wk->save($uid, $d1);
+$wk->save($uid, $d1);
+check('re-sending the same save creates no duplicate sets', (int) $db->val('SELECT COUNT(*) FROM workout_sets') === $before && (int) $db->val('SELECT COUNT(*) FROM workout_exercises WHERE workout_id=?', [$d1['id']]) === 1);
+$stale = $d1;
+$stale['rev'] = 1;
+$stale['exercises'][0]['sets'][3]['reps'] = 10;
+$r = $wk->save($uid, $stale);
+check('an older queued edit arriving late is rejected, not applied', $r['ok'] === false && !empty($r['conflict']) && $r['workout']['exercises'][0]['sets'][3]['reps'] === 8);
+
+// Resume: an in-progress workout comes back exactly as saved.
+$act = $doc($big, 'pull', [[$bySlug['barbell-row'], 6, 10, [[95, 8], [95, null, false, false]]]], $ago(0), 'active');
+$wk->save($uid, $act);
+$got = $wk->active($uid);
+check('an unfinished workout can be resumed with its sets intact', $got && $got['id'] === $act['id'] && count($got['exercises'][0]['sets']) === 2 && $got['exercises'][0]['sets'][0]['done'] === true && $got['exercises'][0]['sets'][1]['done'] === false);
+$blk = $gen->block($user, $big, $exById[$bySlug['barbell-row']]);
+check('an unfinished workout does not count as history yet', $blk['action'] === 'new');
+// Adding a set while offline and syncing later: rev 2 replaces rev 1 wholesale.
+$act['exercises'][0]['sets'][1] = ['id' => $act['exercises'][0]['sets'][1]['id'], 'weight' => 95, 'reps' => 8, 'done' => true];
+$act['exercises'][0]['sets'][] = ['id' => uuid(), 'weight' => 95, 'reps' => 7, 'done' => true];
+$act['rev'] = 5;
+$wk->save($uid, $act);
+$wk->save($uid, $act);
+$got = $wk->active($uid);
+check('queued edits apply once after reconnect', count($got['exercises'][0]['sets']) === 3 && $got['rev'] === 5);
+$act['status'] = 'completed';
+$act['completed_at'] = $ago(0);
+$act['rev'] = 6;
+$wk->save($uid, $act);
+check('finishing clears the in-progress workout', $wk->active($uid) === null);
+
+echo "Equipment variants, units and rotation\n";
+$dm = $doc($big, 'push', [[$press, 6, 10, [[100, 10], [100, 10], [100, 10]]]], $ago(3));
+$wk->save($uid, $dm);
+$here = $gen->block($user, $big, $exById[$press]);
+$there = $gen->block($user, $other, $exById[$press]);
+check('machine history stays with the gym it was logged at', $here['suggested_weight'] === 110.0 && $there['suggested_weight'] === null && strpos($there['reason'], 'another gym') !== false);
+$benchElsewhere = $gen->block($user, $other, $exById[$bench]);
+check('barbell history follows you between gyms', $benchElsewhere['suggested_weight'] === 135.0);
+$kgUser = ['unit' => 'kg'] + $user;
+$kg = $gen->block($kgUser, $big, $exById[$bench]);
+check('pound history converts to a loadable kilogram weight (' . $kg['suggested_weight'] . ' kg)', $kg['suggested_weight'] === 60.0 || $kg['suggested_weight'] === 62.5);
+$custom = $big;
+$custom['increments'] = ['barbell' => 2.5];
+$d2 = $doc($big, 'push', [[$bench, 6, 10, [[135, 10], [135, 10], [135, 10]]]], $ago(2));
+$wk->save($uid, $d2);
+check('a gym\'s own weight increment is used', $gen->block($user, $custom, $exById[$bench])['suggested_weight'] === 137.5);
+$ppl = ['split_type' => 'ppl'] + $user;
+check('push/pull/legs moves to the next day after the last workout (' . $gen->nextDayType($uid, 'ppl') . ')', $gen->nextDayType($uid, 'ppl') === 'legs');
+check('upper/lower starts at upper when the last day was not part of it', $gen->nextDayType($uid, 'upper_lower') === 'upper');
+
+echo "Recovery estimate\n";
+$hard = $doc($big, 'push', [[$bench, 6, 10, [[135, 8], [135, 8], [135, 8], [135, 8]]], [$bySlug['cable-fly'], 10, 15, [[30, 12], [30, 12], [30, 12]]]], $ago(0));
+$wk->save($uid, $hard);
+$stats = $gen->muscleStats($uid);
+check('just-trained chest reads as not recovered (' . $stats['chest']['recovery'] . '%), untouched quads as fresh', $stats['chest']['recovery'] < 50 && $stats['quads']['recovery'] === 100);
+check('weekly sets count primary muscles fully and secondary at half', $stats['chest']['weekly_sets'] >= 7 && $stats['triceps']['weekly_sets'] > 0 && $stats['triceps']['weekly_sets'] < $stats['chest']['weekly_sets']);
+$tired = $gen->generate($user, $big, ['day_type' => 'push']);
+check('a session for a tired muscle drops a set and says so', $tired['exercises'][0]['target_sets'] === 2 && strpos($tired['exercises'][0]['reason'], 'Estimated recovery') !== false);
+
+echo "History, export and privacy\n";
+$hist = $wk->history($uid);
+check('history lists finished workouts newest first', count($hist) === 5 && $hist[0]['started_at'] >= $hist[1]['started_at']);
+$sessions = $wk->exerciseHistory($uid, $bench);
+check('per-exercise trend has one point per session', count($sessions) === 3 && $sessions[0]['date'] <= $sessions[1]['date']);
+$fh = fopen('php://memory', 'w+');
+$wk->exportCsv($uid, $fh);
+rewind($fh);
+$csv = stream_get_contents($fh);
+check('CSV export has a header and one row per set', substr_count(trim($csv), "\n") === (int) $db->val('SELECT COUNT(*) FROM workout_sets') && strpos($csv, 'Barbell Bench Press') !== false);
+check('one account cannot read another\'s workout', $wk->get($uid2, $d1['id']) === null);
+check('one account cannot overwrite another\'s workout', throws(fn() => $wk->save($uid2, $d1), 403));
+check('one account cannot delete another\'s workout', throws(fn() => $wk->delete($uid2, $d1['id']), 403));
+$wk->delete($uid, $d2['id']);
+check('deleting a workout removes its sets', (int) $db->val('SELECT COUNT(*) FROM workout_sets WHERE workout_id=?', [$d2['id']]) === 0);
+
+unset($db);
+@unlink($file);
+@unlink($file . '-wal');
+@unlink($file . '-shm');
+
+echo "\n$pass passed, $fail failed\n";
+exit($fail ? 1 : 0);
