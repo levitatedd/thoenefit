@@ -59,9 +59,11 @@ jobs:
         if: steps.cfg.outputs.ready == 'true'
         run: |
           # Accept a host pasted as sftp://host/ or user@host as well as a bare hostname.
-          HOST="${SFTP_HOST#*://}"; HOST="${HOST#*@}"; HOST="${HOST%%/*}"; HOST="${HOST%%:*}"
+          HOST="$(printf '%s' "$SFTP_HOST" | tr -d '[:space:]')"
+          HOST="${HOST#*://}"; HOST="${HOST#*@}"; HOST="${HOST%%/*}"; HOST="${HOST%%:*}"
           echo "HOST=$HOST" >> "$GITHUB_ENV"
           if ! getent hosts "$HOST" >/dev/null; then
+            echo "The SFTP_HOST secret is ${#HOST} characters long and $(printf '%s' "$HOST" | tr -cd '.' | wc -c) of them are dots."
             echo "::error::SFTP_HOST does not resolve to a server. Use the hostname DreamHost shows for the user (or the site's domain), with nothing before or after it."
             exit 1
           fi
