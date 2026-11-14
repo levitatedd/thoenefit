@@ -8,7 +8,7 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - Fast set logging with a rest timer, autosave, and offline queueing
 - Double progression, tracked per exercise and per equipment variant
 - History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
-- Several accounts, no public sign-up
+- Several accounts, no public sign-up; the first account is the admin and adds the others
 
 ## Run it on your computer
 
@@ -102,6 +102,14 @@ php ~/fit.example.com/private/bin/create-user.php --reset sam     # new password
 ```
 
 Each account has its own gyms, workouts, and custom exercises. People can change their own password in Settings.
+
+**The admin.** The first account ever created is the admin. On a database that already had accounts when roles were added, the earliest-created account became the admin. The admin sees Settings, then Manage users, and can create accounts there with a starting password to pass on. Accounts made that way, or with `create-user.php` once an account exists, are regular users. There is still no public sign-up: every account-management request is checked on the server and refused unless it comes from the signed-in admin.
+
+To see who the admin is, open Manage users, or run this over SSH with your database details:
+
+```sh
+mysql -h mysql.example.com -u DBUSER -p DBNAME -e "SELECT username, role, created_at FROM users ORDER BY created_at"
+```
 
 ### Updates and database changes
 

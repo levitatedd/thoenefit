@@ -47,6 +47,18 @@ function throws(callable $fn, int $status): bool
 
 $file = sys_get_temp_dir() . '/thoenefit-test-' . getmypid() . '.sqlite';
 @unlink($file);
+// A second, empty database for the upgrade test further down.
+$freshDb = function (string $suffix) use ($file): Db {
+    if (getenv('TF_TEST_DB') === 'mysql') {
+        $c = ['driver' => 'mysql', 'host' => getenv('TF_MYSQL_HOST') ?: '127.0.0.1', 'name' => 'thoenefit_test_' . $suffix, 'user' => getenv('TF_MYSQL_USER') ?: 'root', 'password' => (string) getenv('TF_MYSQL_PASSWORD')];
+        $admin = new PDO('mysql:host=' . $c['host'], $c['user'], $c['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $admin->exec('DROP DATABASE IF EXISTS ' . $c['name']);
+        $admin->exec('CREATE DATABASE ' . $c['name'] . ' CHARACTER SET utf8mb4');
+        return new Db($c);
+    }
+    @unlink("$file-$suffix");
+    return new Db(['driver' => 'sqlite', 'path' => "$file-$suffix"]);
+};
 if (getenv('TF_TEST_DB') === 'mysql') {
     // Same checks against a real MySQL server (used by the GitHub workflow):
     //   TF_TEST_DB=mysql TF_MYSQL_HOST=127.0.0.1 TF_MYSQL_USER=root TF_MYSQL_PASSWORD=root php tests/run.php
@@ -62,7 +74,7 @@ if (getenv('TF_TEST_DB') === 'mysql') {
 
 echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
-check('migrations apply on an empty database', $applied === [1, 2]);
+check('migrations apply on an empty database', $applied === [1, 2, 3]);
 check('running them again changes nothing', Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
 check('catalog seeded (' . $n . ' exercises)', $n === count(Catalog::exercises()) && $n >= 80);
@@ -92,6 +104,14 @@ echo "Accounts\n";
 $auth = new Auth($db, []);
 $uid = $auth->createUser('Mike', 'correct horse battery', 'Mike');
 $uid2 = $auth->createUser('sam', 'another long password');
+check('the first account created is the admin', $db->val('SELECT role FROM users WHERE id=?', [$uid]) === 'admin');
+check('accounts created after it are regular users', $db->val('SELECT role FROM users WHERE id=?', [$uid2]) === 'user');
+$adminRow = $db->one('SELECT * FROM users WHERE id=?', [$uid]);
+$samRow = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+Auth::requireAdmin($adminRow);
+check('account management is refused for a regular user', throws(fn() => Auth::requireAdmin($samRow), 403) && throws(fn() => Auth::requireAdmin(['id' => 9]), 403));
+$listed = $auth->listUsers();
+check('the account list shows who is who without password hashes', count($listed) === 2 && $listed[0]['role'] === 'admin' && $listed[1]['username'] === 'sam' && !isset($listed[0]['password_hash']) && strpos(json_encode($listed), '$2y$') === false);
 check('passwords are stored hashed', password_verify('correct horse battery', $db->val('SELECT password_hash FROM users WHERE id=?', [$uid])) && strpos($db->val('SELECT password_hash FROM users WHERE id=?', [$uid]), 'correct') === false);
 check('short passwords are rejected', throws(fn() => $auth->createUser('tiny', 'short'), 422));
 check('duplicate usernames are rejected', throws(fn() => $auth->createUser('MIKE', 'correct horse battery'), 409));
@@ -317,6 +337,36 @@ check('a kilogram account keeps kilograms', $w['unit'] === 'kg' && $w['exercises
 check('an import does not disturb the split rotation', $gen->nextDayType($uid3, 'ppl') === 'push');
 check('one account\'s import is invisible to another', $wk->get($uid, $hist[0]['id']) === null);
 check('undo removes only imported workouts', $imp->purge($uid3) === 2 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid3]) === 0 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid]) > 0);
+
+echo "Upgrading a database that already has accounts\n";
+$old = $freshDb('upgrade');
+Migrator::ensure($old, 2);
+check('an older database has no roles yet', !(new Migrator($old))->hasColumn('users', 'role') && Migrator::current($old) === 2);
+// Ids deliberately out of step with creation dates: the earliest-created account must win, not the lowest id.
+foreach ([['later', '2026-03-01 10:00:00'], ['earliest', '2025-01-05 08:00:00'], ['middle', '2025-06-01 09:00:00']] as [$name, $when]) {
+    $old->insert('users', ['username' => $name, 'password_hash' => 'x', 'display_name' => $name, 'created_at' => $when]);
+}
+check('the migration applies', Migrator::ensure($old) === [3]);
+$roles = [];
+foreach ($old->all('SELECT username, role FROM users') as $r) {
+    $roles[$r['username']] = $r['role'];
+}
+check('the earliest-created account becomes the admin, the rest stay regular users', $roles === ['later' => 'user', 'earliest' => 'admin', 'middle' => 'user'], json_encode($roles));
+$authOld = new Auth($old, []);
+$newId = $authOld->createUser('newcomer', 'a long enough password');
+check('accounts added afterwards are regular users', $old->val('SELECT role FROM users WHERE id=?', [$newId]) === 'user' && (int) $old->val("SELECT COUNT(*) FROM users WHERE role='admin'") === 1);
+$fn = require dirname(__DIR__) . '/web/private/migrations/003_user_roles.php';
+$fn($old, new Migrator($old));
+check('running the migration again changes nothing', (int) $old->val("SELECT COUNT(*) FROM users WHERE role='admin'") === 1 && $old->val("SELECT username FROM users WHERE role='admin'") === 'earliest');
+$empty = $freshDb('empty');
+Migrator::ensure($empty);
+check('a brand-new database has no admin until the first account is created', (int) $empty->val('SELECT COUNT(*) FROM users') === 0);
+unset($old, $authOld, $empty);
+foreach (['upgrade', 'empty'] as $sfx) {
+    @unlink("$file-$sfx");
+    @unlink("$file-$sfx-wal");
+    @unlink("$file-$sfx-shm");
+}
 
 unset($db);
 @unlink($file);

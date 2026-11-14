@@ -39,9 +39,12 @@ final class Migrator
     }
 
     /** Applies pending migrations; returns the versions it applied. */
-    public static function ensure(Db $db): array
+    public static function ensure(Db $db, ?int $upTo = null): array
     {
         $files = self::files();
+        if ($upTo !== null) {
+            $files = array_filter($files, static fn($v) => $v <= $upTo, ARRAY_FILTER_USE_KEY);
+        }
         $latest = $files ? max(array_keys($files)) : 0;
         $current = self::current($db);
         if ($current >= $latest) {
@@ -63,6 +66,19 @@ final class Migrator
             $applied[] = $version;
         }
         return $applied;
+    }
+
+    public function hasColumn(string $table, string $column): bool
+    {
+        if ($this->db->driver === 'sqlite') {
+            foreach ($this->db->all("PRAGMA table_info($table)") as $c) {
+                if ($c['name'] === $column) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return (bool) $this->db->all("SHOW COLUMNS FROM $table LIKE " . $this->db->pdo->quote($column));
     }
 
     /** CREATE TABLE with the few spots where MySQL and SQLite differ filled in. */
