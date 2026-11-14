@@ -109,6 +109,16 @@ await page.waitForSelector('#sync.saved');
 check('status shows Saved once the server has the sets', (await page.textContent('#sync')) === 'Saved');
 check('no sideways scrolling on the workout screen', (await overflow()) <= 0);
 
+await page.click('button:has-text("Add exercise")');
+await page.fill('.sheet input[type=search]', 'lat puldown');
+await page.waitForSelector('.sheet .pick, .sheet p.muted');
+const picker = await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent));
+check('the exercise picker tolerates typos but only offers what the gym has (no Lat Pulldown machine at a garage gym)', picker.length > 0 && !picker.includes('Lat Pulldown') && picker.some((n) => /Pull-Up|Chin-Up/.test(n)), picker.join(', '));
+await page.fill('.sheet input[type=search]', 'pushup');
+check('no stray text in the picker', !/\b(false|undefined|null)\b/.test(await page.textContent('.sheet-body')));
+check('picker: "pushup" puts Push-Up first', (await page.textContent('.sheet .pick .pick-name')) === 'Push-Up');
+await shot('05a-picker');
+await page.click('.sheet button:has-text("Close")');
 await page.click('.lift:nth-of-type(2) button:has-text("Add set")');
 check('add set adds a row', (await page.locator('.lift').nth(1).locator('.set').count()) >= 3);
 const before = await page.locator('.lift').nth(1).locator('.set').count();
@@ -198,6 +208,16 @@ check(`correcting a past set changes the advice: "${target2.trim()}"`, /at 135 l
 
 console.log('Exercises, settings, small screens');
 await page.click('.tab:has-text("Exercises")');
+await page.fill('input[type=search]', 'psuh up');
+await page.waitForSelector('[data-list=similar]');
+const found = await page.$$eval('[data-list=matches] .log-title', (els) => els.map((e) => e.textContent));
+const alike = await page.$$eval('[data-list=similar] .log-title', (els) => els.map((e) => e.textContent));
+check(`a misspelled search still finds the exercise ("psuh up" -> ${found[0]})`, found[0] === 'Push-Up' && found.slice(1).every((n) => /Push-Up/.test(n)), found.join(', '));
+check('related movements appear under Similar exercises without repeating a match', alike.length > 0 && !alike.some((n) => found.includes(n)) && (await page.textContent('.list-head')) === 'Similar exercises', alike.join(', '));
+check('no stray text in the results', !/\b(false|undefined|null)\b/.test(await page.textContent('.page')));
+await page.fill('input[type=search]', 'RDL');
+check('"RDL" finds Romanian deadlifts', (await page.$$eval('[data-list=matches] .log-title', (els) => els.every((e) => /Romanian Deadlift/.test(e.textContent)))) === true);
+await shot('10a-search');
 await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');

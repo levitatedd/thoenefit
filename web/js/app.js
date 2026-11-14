@@ -1,4 +1,5 @@
 import { Api, WorkoutSync, uuid } from './store.js';
+import { searchExercises } from './search.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 
 const api = new Api('api.php');
@@ -187,6 +188,11 @@ function render() {
 
 function page(title, ...kids) {
   return h('main', { class: 'page' }, title && h('h1', {}, title), kids);
+}
+
+/** Replace an element's children, skipping anything falsy (so `cond && node` is safe). */
+function fill(el, ...kids) {
+  el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false && k !== ''));
 }
 
 function backLink(path, label) {
@@ -945,14 +951,12 @@ function addExerciseSheet(doc) {
   const have = new Set(gym ? gym.equipment : []);
   const used = new Set(doc.exercises.map((e) => e.exercise_id));
   const list = h('div', { class: 'stack' });
-  const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', oninput: () => paint() });
+  const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', oninput: () => paint() });
   let close = null;
-  const paint = () => {
-    const q = search.value.trim().toLowerCase();
-    const items = S.exercises.filter((x) => !x.archived && !used.has(x.id) && x.equipment.every((k) => have.has(k)) && (!q || x.name.toLowerCase().includes(q))).slice(0, 40);
-    list.replaceChildren(
-      ...(items.length ? items : []).map((x) =>
-        h('button', { type: 'button', class: 'pick', onclick: async (ev) => {
+  // Only exercises this gym has the equipment for, and that are not already in the workout.
+  const pool = S.exercises.filter((x) => !x.archived && !used.has(x.id) && x.equipment.every((k) => have.has(k)));
+  const row = (x) =>
+    h('button', { type: 'button', class: 'pick', onclick: async (ev) => {
           let block = null;
           if (gym) {
             ev.currentTarget.disabled = true;
@@ -967,9 +971,16 @@ function addExerciseSheet(doc) {
           close();
           sync.edit(doc.id, (d) => d.exercises.push(blockToEntry(block)));
           render();
-        } }, h('span', { class: 'pick-name' }, x.name), h('span', { class: 'pick-meta' }, x.muscles_main.map((m) => S.vocab.muscles[m]).join(', '))),
-      ),
-      !items.length && h('p', { class: 'muted' }, 'No match with the equipment at this gym.'),
+        } }, h('span', { class: 'pick-name' }, x.name), h('span', { class: 'pick-meta' }, x.muscles_main.map((m) => S.vocab.muscles[m]).join(', ')));
+  const paint = () => {
+    const q = search.value.trim();
+    const r = searchExercises(pool, q, S.vocab, { limit: 40, similarLimit: 6 });
+    fill(list,
+      r.closest && h('p', { class: 'muted' }, `Nothing at this gym matches "${q}" exactly. Closest:`),
+      ...r.matches.map(row),
+      r.similar.length > 0 && h('h3', { class: 'list-head' }, 'Similar exercises'),
+      ...r.similar.map(row),
+      !r.matches.length && h('p', { class: 'muted' }, q ? `Nothing matches "${q}" with the equipment at this gym.` : 'Every exercise this gym has equipment for is already in the workout.'),
     );
   };
   close = sheet('Add exercise', h('div', { class: 'stack' }, search, list));
@@ -1132,23 +1143,28 @@ function viewHistoryDetail(id) {
 // ---------------------------------------------------------------- exercises
 
 function viewExercises() {
-  const list = h('ul', { class: 'log' });
-  const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', value: S.exSearch || '', oninput: () => paint() });
+  const results = h('div', { class: 'stack' });
+  const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', value: S.exSearch || '', oninput: () => paint() });
   const muscle = h('select', { 'aria-label': 'Muscle', onchange: () => paint() }, h('option', { value: '' }, 'All muscles'), Object.entries(S.vocab.muscles).map(([k, v]) => h('option', { value: k, selected: S.exMuscle === k }, v)));
+  const row = (x) => h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${x.id}` },
+    h('span', { class: 'log-title' }, x.name, x.custom && h('span', { class: 'badge' }, 'Yours'), x.archived && h('span', { class: 'badge' }, 'Archived')),
+    h('span', { class: 'log-meta' }, [S.vocab.kinds[x.kind], x.muscles_main.map((m) => S.vocab.muscles[m]).join(' and ')].filter(Boolean).join(', '))));
   const paint = () => {
     S.exSearch = search.value;
     S.exMuscle = muscle.value;
-    const q = search.value.trim().toLowerCase();
-    const items = S.exercises.filter((x) => (!q || x.name.toLowerCase().includes(q)) && (!muscle.value || x.muscles_main.includes(muscle.value) || x.muscles_assist.includes(muscle.value)));
-    list.replaceChildren(
-      ...items.map((x) => h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${x.id}` },
-        h('span', { class: 'log-title' }, x.name, x.custom && h('span', { class: 'badge' }, 'Yours'), x.archived && h('span', { class: 'badge' }, 'Archived')),
-        h('span', { class: 'log-meta' }, `${S.vocab.kinds[x.kind]}, ${x.muscles_main.map((m) => S.vocab.muscles[m]).join(' and ')}`)))),
-      !items.length && h('li', { class: 'muted pad' }, 'No exercises match.'),
+    const q = search.value.trim();
+    const pool = S.exercises.filter((x) => !muscle.value || x.muscles_main.includes(muscle.value) || x.muscles_assist.includes(muscle.value));
+    const r = searchExercises(pool, q, S.vocab, { limit: q ? 60 : pool.length, similarLimit: 8 });
+    fill(results,
+      r.closest && h('p', { class: 'muted' }, `No exercise matches "${q}" exactly. Closest:`),
+      r.matches.length > 0 && h('ul', { class: 'log', 'data-list': 'matches' }, r.matches.map(row)),
+      r.similar.length > 0 && h('h2', { class: 'list-head' }, 'Similar exercises'),
+      r.similar.length > 0 && h('ul', { class: 'log', 'data-list': 'similar' }, r.similar.map(row)),
+      !r.matches.length && h('p', { class: 'muted pad' }, q ? `No exercises match "${q}".` : 'No exercises here yet.'),
     );
   };
   paint();
-  return page('Exercises', h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), list);
+  return page('Exercises', h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
 }
 
 function equipLabel(key) {
