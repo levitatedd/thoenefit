@@ -166,7 +166,7 @@ function render() {
   if (tab === 'workout') view = viewWorkout();
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
-  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : viewSettings();
+  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : viewSettings();
   else view = viewToday();
   const current = tab === 'workout' ? 'today' : tab;
   const nav = h(
@@ -1293,8 +1293,11 @@ function viewSettings() {
       h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Safari.'), h('li', {}, 'Tap the Share button (the square with an arrow pointing up).'), h('li', {}, 'Scroll down and tap Add to Home Screen, then Add.')),
       h('h3', {}, 'Pixel and other Android phones'),
       h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.'))),
+    S.user.role === 'admin' && section('Users',
+      h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
+      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users')),
     section('Account',
-      h('p', { class: 'muted' }, `Signed in as ${S.user.username}.`),
+      h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       h('form', { class: 'stack', onsubmit: async (e) => {
         e.preventDefault();
         await act(async () => {
@@ -1413,6 +1416,46 @@ function viewImport() {
         }, e.currentTarget);
       } }, 'Remove imported workouts')),
   );
+}
+
+function viewUsers() {
+  if (S.user.role !== 'admin') return page('Manage users', backLink('settings', 'Settings'), h('p', { class: 'muted' }, 'Only the admin can manage accounts.'));
+  const list = h('ul', { class: 'log' });
+  const paint = (users) => fill(list, users.map((u) => h('li', { class: 'log-row' },
+    h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
+    h('span', { class: 'log-meta' }, `${u.username}, added ${fmtDate(u.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}`))));
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'off', placeholder: 'For example: Sam' });
+  const username = h('input', { type: 'text', name: 'new_username', maxlength: 64, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const password = h('input', { type: 'text', name: 'new_password', minlength: 10, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Create account');
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    btn.disabled = true;
+    try {
+      const r = await api.post('create_user', { username: username.value, display_name: name.value, password: password.value });
+      paint(r.users);
+      toast(`Account created for ${username.value.trim().toLowerCase()}.`);
+      form.reset();
+    } catch (err) {
+      error.textContent = err.offline ? 'No connection to the server.' : err.message;
+    }
+    btn.disabled = false;
+  } },
+    field('Name', name, 'Shown in the app. Leave empty to use the username.'),
+    field('Username', username, 'What they sign in with: 2-64 letters, numbers, dots, dashes or underscores.'),
+    field('Starting password', password, 'At least 10 characters. Shown here so you can pass it on; they can change it under Settings once signed in.'),
+    error,
+    btn);
+  const loaded = asyncSection(() => api.get('users'), (data) => {
+    paint(data.users);
+    return list;
+  });
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'),
+    h('h1', {}, 'Manage users'),
+    section('Accounts', loaded),
+    section('Add a person', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form));
 }
 
 function viewGymForm(id) {

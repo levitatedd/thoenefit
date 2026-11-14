@@ -87,6 +87,10 @@ final class Api
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
+            'users' => function () use ($user) {
+                Auth::requireAdmin($user);
+                return ['users' => $this->auth->listUsers()];
+            },
         ];
         if ($method === 'GET' && $action === 'export') {
             header('Content-Type: text/csv; charset=utf-8');
@@ -109,6 +113,11 @@ final class Api
             case 'logout':
                 $this->auth->logout();
                 self::json(['ok' => true]);
+                return;
+            case 'create_user':
+                Auth::requireAdmin($user);
+                $this->auth->createUser((string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
+                self::json(['users' => $this->auth->listUsers()]);
                 return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
@@ -195,6 +204,7 @@ final class Api
             'id' => (int) $u['id'],
             'username' => $u['username'],
             'display_name' => $u['display_name'],
+            'role' => Auth::isAdmin($u) ? 'admin' : 'user',
             'unit' => $u['unit'],
             'goal' => $u['goal'],
             'experience' => $u['experience'],

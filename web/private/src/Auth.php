@@ -47,12 +47,44 @@ final class Auth
         if ($this->db->val('SELECT id FROM users WHERE username=?', [$username])) {
             throw new HttpError(409, 'That username is taken.');
         }
+        // The very first account runs the place; everyone after it is a regular user.
+        $first = (int) $this->db->val('SELECT COUNT(*) FROM users') === 0;
         return $this->db->insert('users', [
             'username' => $username,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'display_name' => $displayName !== '' ? $displayName : $username,
+            'display_name' => $displayName !== '' ? mb_substr($displayName, 0, 100) : $username,
+            'role' => $first ? 'admin' : 'user',
             'created_at' => now_utc(),
         ]);
+    }
+
+    public static function isAdmin(array $user): bool
+    {
+        return ($user['role'] ?? 'user') === 'admin';
+    }
+
+    /** Throws unless the signed-in account is the admin. Call before any account management. */
+    public static function requireAdmin(array $user): void
+    {
+        if (!self::isAdmin($user)) {
+            throw new HttpError(403, 'Only the admin can manage accounts.');
+        }
+    }
+
+    /** Accounts for the Manage Users page. Never includes password hashes. */
+    public function listUsers(): array
+    {
+        $out = [];
+        foreach ($this->db->all('SELECT id, username, display_name, role, created_at FROM users ORDER BY created_at, id') as $u) {
+            $out[] = [
+                'id' => (int) $u['id'],
+                'username' => $u['username'],
+                'display_name' => $u['display_name'],
+                'role' => $u['role'],
+                'created_at' => to_iso($u['created_at']),
+            ];
+        }
+        return $out;
     }
 
     public function setPassword(int $userId, string $password): void
