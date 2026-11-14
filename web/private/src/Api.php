@@ -159,6 +159,25 @@ final class Api
                 }
                 self::json(['block' => $this->gen->block($user, $gym, $ex)]);
                 return;
+            case 'import_fitbod':
+                @set_time_limit(180);
+                $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                $imp = new FitbodImport($this->db);
+                $parsed = FitbodImport::parse((string) ($in['csv'] ?? ''));
+                if (!$parsed['workouts']) {
+                    throw new HttpError(422, 'No sets with reps were found in that file.');
+                }
+                $plan = $imp->plan($uid, $parsed, (array) ($in['choices'] ?? []));
+                $out = ['summary' => $imp->summary($parsed, $plan), 'exercises' => $plan];
+                if (!empty($in['commit'])) {
+                    $out['imported'] = $imp->run($uid, $gym, $user['unit'], $parsed, $plan);
+                    $out['catalog'] = Catalog::forUser($this->db, $uid, true);
+                }
+                self::json($out);
+                return;
+            case 'remove_fitbod':
+                self::json(['removed' => (new FitbodImport($this->db))->purge($uid)]);
+                return;
             case 'save_workout':
                 self::json($this->workouts->save($uid, (array) ($in['workout'] ?? [])));
                 return;

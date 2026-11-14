@@ -7,7 +7,7 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - Rule-based workout generation with a reason for every pick and weight
 - Fast set logging with a rest timer, autosave, and offline queueing
 - Double progression, tracked per exercise and per equipment variant
-- History you can edit, per-exercise trends, custom exercises, CSV export
+- History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
 - Several accounts, no public sign-up
 
 ## Run it on your computer
@@ -107,6 +107,16 @@ Each account has its own gyms, workouts, and custom exercises. People can change
 Push to `main`. The upload replaces changed files and deletes nothing. Database changes are numbered files in `web/private/migrations/`; they apply themselves the first time the app is opened after a deploy. To apply them by hand: `php ~/fit.example.com/private/bin/migrate.php`.
 
 After changing the list of files the app needs offline, bump `VERSION` in `web/sw.js` so phones fetch the new set.
+
+## Import from Fitbod
+
+In the app: Settings, then Import from Fitbod. Choose the CSV that Fitbod's "Export Workout Data" produces, pick the gym to file the workouts under, and press Check file. Nothing is saved until you press Import.
+
+- Rows are grouped into workouts by their timestamp. Weights are converted from Fitbod's kilograms to your unit.
+- Rows with no reps (cardio, planks and other timed holds) are left out.
+- Fitbod exercises that are the same lift as a built-in exercise use it. The rest are added as your own exercises, with equipment, movement and muscles guessed from the name; edit them under Exercises. You can change or leave out any exercise on the check screen.
+- Imported history feeds weight suggestions and trend charts like any other workout.
+- Importing the same file again replaces the earlier import. "Remove imported workouts" on the same screen undoes it.
 
 ## Backups and restore
 

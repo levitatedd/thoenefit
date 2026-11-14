@@ -57,6 +57,7 @@ final class Catalog
         'knee_extension' => 'Leg extension',
         'calf' => 'Calf raise',
         'core' => 'Core',
+        'other' => 'Other (never suggested automatically)',
     ];
 
     /** Equipment a gym profile can tick, grouped for the settings screen. */

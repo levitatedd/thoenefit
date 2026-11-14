@@ -209,13 +209,18 @@ export function lineChart(points, { unit = '' } = {}) {
   const x = (i) => pad.l + (points.length === 1 ? (W - pad.l - pad.r) / 2 : (i * (W - pad.l - pad.r)) / (points.length - 1));
   const y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ');
-  const dots = points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${i === points.length - 1 ? 4.5 : 3}"/>`).join('');
+  // With a long history the line alone reads better; only the latest point keeps its dot.
+  const dense = points.length > 40;
+  const dots = points
+    .map((p, i) => (dense && i !== points.length - 1 ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${i === points.length - 1 ? 4.5 : 3}"/>`))
+    .join('');
   const fig = h('figure', { class: 'chart' });
   const first = points[0];
   const last = points[points.length - 1];
+  if (dense) fig.classList.add('dense');
   fig.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="From ${fmtW(first.value)} ${unit} on ${first.label} to ${fmtW(last.value)} ${unit} on ${last.label}"><path d="${d}"/>${dots}</svg>`;
   fig.append(
-    h('figcaption', {}, h('span', {}, `${first.label}: ${fmtW(first.value)} ${unit}`), h('span', {}, `${last.label}: ${fmtW(last.value)} ${unit}`)),
+    h('figcaption', {}, h('span', {}, `${first.label}: ${fmtW(first.value)} ${unit}`), points.length > 2 && h('span', {}, `Best: ${fmtW(Math.max(...vals))} ${unit}`), h('span', {}, `${last.label}: ${fmtW(last.value)} ${unit}`)),
   );
   return fig;
 }

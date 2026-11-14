@@ -291,31 +291,29 @@ final class Workouts
     public function exerciseHistory(int $uid, int $exerciseId): array
     {
         $rows = $this->db->all(
-            "SELECT we.id AS we_id, we.variant_key, w.id AS workout_id, w.started_at, w.unit, w.gym_name
-             FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
-             WHERE we.user_id=? AND we.exercise_id=? AND w.status='completed'
-             ORDER BY w.started_at",
+            "SELECT we.id AS we_id, we.variant_key, w.id AS workout_id, w.started_at, w.unit, w.gym_name, s.weight, s.reps
+             FROM workout_exercises we
+             JOIN workouts w ON w.id=we.workout_id
+             JOIN workout_sets s ON s.workout_exercise_id=we.id
+             WHERE we.user_id=? AND we.exercise_id=? AND w.status='completed' AND s.done=1 AND s.warmup=0
+             ORDER BY w.started_at, we.pos, s.pos",
             [$uid, $exerciseId]
         );
         $out = [];
         foreach ($rows as $r) {
-            $sets = [];
-            foreach ($this->db->all('SELECT weight, reps FROM workout_sets WHERE workout_exercise_id=? AND done=1 AND warmup=0 ORDER BY pos', [$r['we_id']]) as $s) {
-                $sets[] = ['weight' => (float) $s['weight'], 'reps' => (int) $s['reps']];
+            if (!isset($out[$r['we_id']])) {
+                $out[$r['we_id']] = [
+                    'workout_id' => $r['workout_id'],
+                    'date' => to_iso($r['started_at']),
+                    'unit' => $r['unit'],
+                    'gym_name' => $r['gym_name'],
+                    'variant_key' => $r['variant_key'],
+                    'sets' => [],
+                ];
             }
-            if (!$sets) {
-                continue;
-            }
-            $out[] = [
-                'workout_id' => $r['workout_id'],
-                'date' => to_iso($r['started_at']),
-                'unit' => $r['unit'],
-                'gym_name' => $r['gym_name'],
-                'variant_key' => $r['variant_key'],
-                'sets' => $sets,
-            ];
+            $out[$r['we_id']]['sets'][] = ['weight' => (float) $r['weight'], 'reps' => (int) $r['reps']];
         }
-        return $out;
+        return array_values($out);
     }
 
     /** Streams every logged set as CSV. */

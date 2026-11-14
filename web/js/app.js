@@ -165,7 +165,7 @@ function render() {
   if (tab === 'workout') view = viewWorkout();
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
-  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : viewSettings();
+  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : viewSettings();
   else view = viewToday();
   const current = tab === 'workout' ? 'today' : tab;
   const nav = h(
@@ -463,7 +463,7 @@ function viewToday() {
     },
     S.gyms.map((g) => h('option', { value: g.id, selected: g.id === gym.id }, g.name)),
   );
-  const days = Object.keys(S.vocab.day_labels).filter((d) => d !== 'custom');
+  const days = [...new Set(Object.values(S.vocab.split_days).flat())];
   const preferred = S.vocab.split_days[S.user.split_type] || [];
   const ordered = [...preferred, ...days.filter((d) => !preferred.includes(d))];
   const daySelect = h(
@@ -547,7 +547,8 @@ function targetLine(b, unit) {
 
 function lastLine(previous) {
   if (!previous || !previous.sets.length) return 'No history yet';
-  return `Last: ${fmtSets(previous.sets, previous.unit)} on ${fmtDate(previous.date, { month: 'short', day: 'numeric' })}`;
+  const thisYear = new Date(previous.date).getFullYear() === new Date().getFullYear();
+  return `Last: ${fmtSets(previous.sets, previous.unit)} on ${fmtDate(previous.date, thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
 function planRow(b, gym) {
@@ -1020,22 +1021,38 @@ function asyncSection(load, build) {
 }
 
 function viewHistory() {
-  return page(
-    'History',
-    asyncSection(
-      () => api.get('history', '&limit=60'),
-      (data) =>
-        data.workouts.length
-          ? h('ul', { class: 'log' }, data.workouts.map((w) =>
-              h('li', {}, h('a', { class: 'log-row', href: `#/history/${w.id}` },
-                h('span', { class: 'log-date' }, fmtDate(w.started_at)),
-                h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
-                h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
-                h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : '')),
-              ))))
-          : h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')),
-    ),
-  );
+  const PAGE = 50;
+  const list = h('ul', { class: 'log' });
+  const more = h('button', { class: 'btn block', type: 'button', hidden: true }, 'Show older workouts');
+  const note = h('p', { class: 'muted pad' }, 'Loading');
+  let offset = 0;
+  const load = async () => {
+    more.disabled = true;
+    try {
+      const data = await api.get('history', `&limit=${PAGE}&offset=${offset}`);
+      note.hidden = true;
+      if (!data.workouts.length && offset === 0) {
+        list.replaceWith(h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')));
+        return;
+      }
+      list.append(...data.workouts.map((w) =>
+        h('li', {}, h('a', { class: 'log-row', href: `#/history/${w.id}` },
+          h('span', { class: 'log-date' }, fmtDate(w.started_at, offset || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
+          h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
+          h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
+          h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : '')),
+        ))));
+      offset += data.workouts.length;
+      more.hidden = data.workouts.length < PAGE;
+    } catch (e) {
+      note.hidden = false;
+      note.textContent = e.offline ? 'History needs a connection.' : e.message;
+    }
+    more.disabled = false;
+  };
+  more.onclick = load;
+  load();
+  return page('History', note, list, more);
 }
 
 function viewHistoryDetail(id) {
@@ -1157,18 +1174,19 @@ function viewExercise(id) {
       const show = (key) => {
         const mine = sessions.filter((s) => s.variant_key === key);
         const unit = mine[mine.length - 1].unit;
+        const oneYear = new Date(mine[0].date).getFullYear() === new Date(mine[mine.length - 1].date).getFullYear();
         const pts = mine.map((s) => {
           const top = Math.max(...s.sets.map((x) => x.weight));
           const best = Math.max(...s.sets.filter((x) => x.weight === top).map((x) => x.reps));
-          return { label: fmtDate(s.date, { month: 'short', day: 'numeric' }), top, best, s };
+          return { label: fmtDate(s.date, oneYear ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }), top, best, s };
         });
         box.replaceChildren(
           h('h3', {}, 'Top weight'),
           lineChart(pts.map((p) => ({ label: p.label, value: p.top })), { unit }),
           h('h3', {}, 'Best reps at top weight'),
           lineChart(pts.map((p) => ({ label: p.label, value: p.best })), { unit: 'reps' }),
-          h('h3', {}, 'Sessions'),
-          h('ul', { class: 'log' }, [...mine].reverse().map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}` }, h('span', { class: 'log-date' }, fmtDate(s.date)), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : 'Sessions'),
+          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}` }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
         );
       };
       const last = sessions[sessions.length - 1].variant_key;
@@ -1251,7 +1269,8 @@ function viewSettings() {
       h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),
     section('Your data',
       h('a', { class: 'btn block', href: 'api.php?a=export', download: '' }, 'Export all sets as CSV'),
-      h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.')),
+      h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.'),
+      h('a', { class: 'btn block', href: '#/settings/import' }, 'Import from Fitbod')),
     section('Add to your Home Screen',
       h('p', {}, 'Installed, ThoeneFit opens full screen like an app and keeps working when the gym has no signal.'),
       h('h3', {}, 'iPhone'),
@@ -1279,6 +1298,104 @@ function viewSettings() {
         }, e.currentTarget);
       } }, 'Sign out')),
     h('p', { class: 'muted small center' }, 'ThoeneFit'),
+  );
+}
+
+function viewImport() {
+  const gym = activeGym();
+  if (!gym) return page('Import from Fitbod', backLink('settings', 'Settings'), h('p', { class: 'muted' }, 'Add a gym first. Imported workouts are filed under one gym.'));
+  const st = { csv: null, gymId: gym.id, choices: {} };
+  const file = h('input', { type: 'file', accept: '.csv,text/csv', 'aria-label': 'Fitbod export file' });
+  const gymSelect = h('select', { onchange: (e) => (st.gymId = Number(e.target.value)) }, S.gyms.map((g) => h('option', { value: g.id, selected: g.id === gym.id }, g.name)));
+  const result = h('div', { class: 'stack' });
+  const checkBtn = h('button', { class: 'btn primary block', type: 'button' }, 'Check file');
+  const describe = (g) => `${S.vocab.kinds[g.kind]}, ${S.vocab.patterns[g.pattern].replace(/ \(.*/, '')}`.toLowerCase();
+
+  const show = (data) => {
+    const sum = data.summary;
+    const skippedNames = Object.keys(sum.not_importable);
+    const importBtn = h('button', { class: 'btn primary block', type: 'button' }, `Import ${sum.workouts.toLocaleString()} workouts`);
+    const recount = () => {
+      const skip = new Set(Object.entries(st.choices).filter(([, v]) => v === 'skip').map(([k]) => k));
+      const sets = data.exercises.reduce((n, x) => n + (skip.has(x.name) ? 0 : x.sets), 0);
+      importBtn.textContent = `Import ${sets.toLocaleString()} sets`;
+      importBtn.disabled = sets === 0;
+    };
+    importBtn.onclick = () => act(async () => {
+      const res = await api.post('import_fitbod', { csv: st.csv, gym_id: st.gymId, choices: st.choices, commit: true });
+      setExercises(res.catalog);
+      S.draft = null;
+      toast(`Imported ${res.imported.workouts.toLocaleString()} workouts and ${res.imported.sets.toLocaleString()} sets.`);
+      go('history');
+    }, importBtn);
+    const rows = data.exercises.map((x) => {
+      const builtIn = x.suggested_id ? S.exById.get(x.suggested_id) : null;
+      const sel = h('select', { 'aria-label': `What to do with ${x.name}` },
+        builtIn && h('option', { value: 'default' }, `Use ${builtIn.name}`),
+        h('option', { value: builtIn ? 'new' : 'default' }, `Add as my own exercise (${describe(x.guess)})`),
+        h('option', { value: 'skip' }, 'Leave out'),
+        h('option', { value: 'more' }, 'Use another exercise…'),
+      );
+      sel.onchange = () => {
+        if (sel.value === 'more') {
+          sel.lastChild.remove();
+          const group = h('optgroup', { label: 'Exercise library' }, S.exercises.filter((e) => !e.archived).map((e) => h('option', { value: e.id }, e.name)));
+          sel.append(group);
+          sel.value = String(group.firstChild.value);
+        }
+        if (sel.value === 'default') delete st.choices[x.name];
+        else st.choices[x.name] = sel.value;
+        recount();
+      };
+      return h('li', { class: 'map-row' }, h('span', { class: 'log-title' }, x.name), h('span', { class: 'log-meta' }, `${x.sets} sets`), sel);
+    });
+    const matched = data.exercises.filter((x) => x.suggested_id).length;
+    result.replaceChildren(
+      h('section', { class: 'card' },
+        h('h2', {}, `${sum.workouts.toLocaleString()} workouts, ${sum.sets.toLocaleString()} sets`),
+        h('p', { class: 'muted' }, `From ${fmtDate(sum.from, { month: 'short', year: 'numeric' })} to ${fmtDate(sum.to, { month: 'short', year: 'numeric' })}. Weights are converted from Fitbod's kilograms to ${S.user.unit}.`),
+        sum.not_importable_rows > 0 && h('p', { class: 'muted' }, `${sum.not_importable_rows.toLocaleString()} rows have no reps (cardio and timed holds such as ${skippedNames.slice(0, 3).join(', ')}) and are left out.`)),
+      h('h2', {}, `${data.exercises.length} exercises`),
+      h('p', { class: 'muted' }, `${matched} match an exercise already in the library. The rest are added as your own exercises with tags guessed from their names; you can edit those afterwards under Exercises. Change any row before importing.`),
+      h('ul', { class: 'log' }, rows),
+      importBtn,
+      h('p', { class: 'muted small' }, 'Importing the same file again replaces the earlier import rather than doubling it.'),
+    );
+  };
+
+  checkBtn.onclick = () => act(async () => {
+    const f = file.files[0];
+    if (!f) {
+      toast('Choose your Fitbod export file first.', 'bad');
+      return;
+    }
+    st.csv = await f.text();
+    st.choices = {};
+    result.replaceChildren(h('p', { class: 'muted' }, 'Reading the file'));
+    try {
+      show(await api.post('import_fitbod', { csv: st.csv, gym_id: st.gymId }));
+    } catch (e) {
+      result.replaceChildren();
+      throw e;
+    }
+  }, checkBtn);
+
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'),
+    h('h1', {}, 'Import from Fitbod'),
+    h('p', { class: 'muted' }, 'Use Export Workout Data in Fitbod\'s settings, save the CSV file to this phone or computer, and choose it here. Nothing is saved until you press Import.'),
+    field('Fitbod export file', file),
+    field('File the workouts under', gymSelect, 'Fitbod does not record where a set was done. This matters for machines and cables, whose history is kept per gym.'),
+    checkBtn,
+    result,
+    section('Undo an import',
+      h('button', { class: 'btn danger block', type: 'button', onclick: async (e) => {
+        if (!(await confirmSheet('Remove imported workouts?', 'Every workout that came from a Fitbod import is deleted. Workouts logged in ThoeneFit and the exercises the import added are kept.', 'Remove imported workouts', true))) return;
+        await act(async () => {
+          const r = await api.post('remove_fitbod');
+          S.draft = null;
+          toast(r.removed ? `Removed ${r.removed.toLocaleString()} imported workouts.` : 'There were no imported workouts.');
+        }, e.currentTarget);
+      } }, 'Remove imported workouts')),
   );
 }
 

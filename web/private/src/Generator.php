@@ -18,7 +18,7 @@ final class Generator
 
     public const DAY_LABELS = [
         'full' => 'Full body', 'upper' => 'Upper body', 'lower' => 'Lower body',
-        'push' => 'Push', 'pull' => 'Pull', 'legs' => 'Legs', 'custom' => 'Custom',
+        'push' => 'Push', 'pull' => 'Pull', 'legs' => 'Legs', 'custom' => 'Custom', 'fitbod' => 'Fitbod import',
     ];
 
     /**
@@ -127,9 +127,15 @@ final class Generator
     public function nextDayType(int $uid, string $split): string
     {
         $days = self::SPLIT_DAYS[$split] ?? self::SPLIT_DAYS['full'];
-        $last = $this->db->val("SELECT day_type FROM workouts WHERE user_id=? AND status='completed' ORDER BY started_at DESC LIMIT 1", [$uid]);
-        $i = array_search($last, $days, true);
-        return $i === false ? $days[0] : $days[($i + 1) % count($days)];
+        // Look past workouts that are not part of this split (imports, a one-off day of another type).
+        $recent = $this->db->all("SELECT day_type FROM workouts WHERE user_id=? AND status='completed' ORDER BY started_at DESC LIMIT 20", [$uid]);
+        foreach ($recent as $r) {
+            $i = array_search($r['day_type'], $days, true);
+            if ($i !== false) {
+                return $days[($i + 1) % count($days)];
+            }
+        }
+        return $days[0];
     }
 
     /**
@@ -534,7 +540,7 @@ final class Generator
                 if (isset($skip[$ex['id']])) {
                     continue;
                 }
-                if ($pattern === $target['pattern']) {
+                if ($pattern === $target['pattern'] && $pattern !== 'other') {
                     $same[] = $ex;
                 } elseif ($ex['compound'] === $target['compound'] && array_intersect($ex['muscles_main'], $target['muscles_main'])) {
                     $related[] = $ex;
