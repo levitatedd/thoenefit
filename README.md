@@ -24,6 +24,10 @@ The planner favors familiar lifts that fit the gym’s equipment. It uses your g
 
 If a gym has a cardio machine ticked (stationary bike, treadmill, rowing machine, elliptical or stair climber), **Today** offers **Include a warm-up**. The workout then starts with that machine: 10 minutes the first time, then the time you did last, on the machine you used last. Log it as minutes, with optional distance and level. The warm-up counts toward the workout's planned time and its duration, but not toward volume, sets per muscle, recovery or weight suggestions. On Strava it's listed in the activity description. Outdoor and standalone cardio isn't tracked here.
 
+### Estimated calories
+
+Add your body weight under **Settings → Training** to see an estimate of the calories each workout burned. When you finish a workout, you choose how hard it felt (light, moderate or hard). The estimate is MET × body weight × time, using the same idle-trimmed duration as Trends and Strava. A warm-up counts at its machine's value, and the rest of the session counts as lifting at the effort you chose. It's shown on the workout in **History**. When sending to Strava you can include it: it goes in Strava's calorie field when exercises are included, and in the description otherwise. Strava doesn't estimate calories for weight training itself. It's only an estimate, from typical values for each activity.
+
 The recovery estimate uses the sets you’ve logged. A muscle estimated below 50% gets one fewer set in a suggested workout. Sleep, soreness, and training outside the app aren’t part of that estimate.
 
 ### How offline logging works

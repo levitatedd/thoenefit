@@ -315,7 +315,7 @@ page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
 check('the finished workout carries the Strava request to the server',
   finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
-check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true}');
+check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
@@ -878,6 +878,37 @@ if (!process.env.TF_URL) {
   await page.reload();
   await page.waitForSelector('.lift');
   check('after a reload, the warm-up still shows what was logged', (await page.locator('.lift').first().locator('.set input').nth(1).inputValue()) === '1.8');
+
+  console.log('Estimated calories');
+  // #38: no body weight, no effort question. Add one in Settings, finish, and see the estimate.
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  check('without a body weight, finishing does not ask how hard it was', (await page.locator('.sheet :text("How hard was it?")').count()) === 0);
+  await page.click('.sheet button:has-text("Close")');
+  await page.goto(`${URL}#/settings`);
+  const bw = page.locator('input[aria-label^="Body weight"]');
+  await bw.fill('180');
+  await bw.press('Tab');
+  await waitForToast(page, /Body weight saved/);
+  check('body weight is saved from Settings', (await bw.inputValue()) === '180');
+  await page.goto(`${URL}#/workout`);
+  await page.waitForSelector('.lift');
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet :text("How hard was it?")');
+  check('finishing now asks how hard it was, starting at Moderate', (await page.locator('.sheet .choice[aria-pressed="true"]').textContent()).trim() === 'Moderate');
+  await page.click('.sheet .choice:has-text("Hard")');
+  await shot('15-finish-effort');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForSelector('.plan-row, .page-head');
+  await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  await page.click('.log-row');
+  await page.waitForSelector('.calories');
+  // This test workout lasted seconds, so there is no estimate, and History says why.
+  check('History explains when a workout is too short for an estimate', /under a minute/.test(await page.textContent('.calories')), await page.textContent('.calories'));
+  check('a panel with nothing to show leaves no stray text behind', !/(^|\s)null(\s|$)/.test(await page.textContent('.page')));
+  await shot('16-history-calories');
 }
 
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {

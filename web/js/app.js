@@ -1353,9 +1353,9 @@ function addExerciseSheet(doc) {
 // "Send to Strava" on the Finish sheet (#87): the choice is remembered on this device.
 function stravaOnFinish() {
   try {
-    return { send: false, summary: false, ...JSON.parse(localStorage.getItem('tf.stravaOnFinish') || '{}') };
+    return { send: false, summary: false, calories: false, ...JSON.parse(localStorage.getItem('tf.stravaOnFinish') || '{}') };
   } catch (e) {
-    return { send: false, summary: false };
+    return { send: false, summary: false, calories: false };
   }
 }
 
@@ -1372,19 +1372,29 @@ function finishSheet(doc) {
     const send = h('input', { type: 'checkbox', checked: pref.send });
     const summary = h('input', { type: 'checkbox', checked: pref.summary });
     const details = h('label', { class: 'check strava-details', hidden: !pref.send }, summary, 'Include exercises, sets, reps, and weights');
-    send.onchange = () => (details.hidden = !send.checked);
-    strava = { send, summary, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details) };
+    // Estimated calories (#38), offered once a body weight is set.
+    const calories = h('input', { type: 'checkbox', checked: pref.calories });
+    const caloriesRow = S.user.body_weight != null && h('label', { class: 'check strava-details', hidden: !pref.send }, calories, 'Include estimated calories');
+    send.onchange = () => {
+      details.hidden = !send.checked;
+      if (caloriesRow) caloriesRow.hidden = !send.checked;
+    };
+    strava = { send, summary, calories: caloriesRow ? calories : null, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details, caloriesRow) };
   }
+  // How hard it felt (#38), for the calorie estimate. Asked once a body weight is set.
+  let effort = S.user.effort || 'moderate';
+  const effortField = done && S.user.body_weight != null && field('How hard was it?', choices(EFFORTS, effort, (v) => (effort = v), { columns: 3 }), 'Used to estimate the calories you burned.');
   const body = done
     ? h('div', { class: 'stack' },
         h('p', {}, `${done} set${done === 1 ? '' : 's'} logged over ${fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)}.`),
         open > 0 && h('p', { class: 'muted' }, `${open} set${open === 1 ? ' was' : 's were'} not marked done and will be left out.`),
+        effortField,
         strava?.el,
         h('button', { class: 'btn primary block', type: 'button', onclick: () => {
           const toStrava = !!strava?.send.checked;
           if (strava) {
             try {
-              localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: toStrava, summary: strava.summary.checked }));
+              localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: toStrava, summary: strava.summary.checked, calories: !!strava.calories?.checked }));
             } catch (e) {
               // Private mode: the choice just isn't remembered.
             }
@@ -1395,7 +1405,11 @@ function finishSheet(doc) {
             d.exercises = d.exercises.filter((e) => e.sets.length);
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
-            if (toStrava) d.strava_send = { include_summary: strava.summary.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
+            if (effortField) {
+              d.effort = effort;
+              S.user.effort = effort;
+            }
+            if (toStrava) d.strava_send = { include_summary: strava.summary.checked, include_calories: !!strava.calories?.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
           }, 0);
           stopRest();
           S.draft = null;
@@ -1419,7 +1433,8 @@ function finishSheet(doc) {
 function asyncSection(load, build) {
   const box = h('div', { class: 'stack' }, h('p', { class: 'muted pad' }, 'Loading'));
   load().then(
-    (data) => box.replaceChildren(...[build(data)].flat()),
+    // Skip empty parts (a panel that has nothing to show returns null or false), so they don't render as text.
+    (data) => box.replaceChildren(...[build(data)].flat().filter((kid) => kid != null && kid !== false)),
     (e) => box.replaceChildren(h('p', { class: 'muted pad' }, e.offline ? 'This needs a connection.' : e.message)),
   );
   return box;
@@ -1492,7 +1507,7 @@ function viewHistoryDetail(id) {
   return h('main', { class: 'page' }, backOr('history', 'History'),
     asyncSection(
       () => api.get('workout', `&id=${encodeURIComponent(id)}`),
-      ({ workout, strava, strava_export: stravaExport }) => {
+      ({ workout, calories, strava, strava_export: stravaExport }) => {
         let dirty = false;
         const save = h('button', { class: 'btn primary block', type: 'button', disabled: true }, 'Save changes');
         const touch = () => {
@@ -1534,6 +1549,14 @@ function viewHistoryDetail(id) {
           }));
         };
         paint();
+        // Estimated calories (#38). Changing how hard it felt is saved with the other edits.
+        const caloriesLine = h('p', { class: 'calories' });
+        const showCalories = () => fill(caloriesLine, calories != null
+          ? [h('strong', {}, `About ${calories.toLocaleString()} calories`), h('span', { class: 'muted' }, ' (estimated)')]
+          : h('span', { class: 'muted small' }, S.user.body_weight == null ? 'Add your body weight in Settings to see estimated calories.' : 'No estimated calories: this workout is under a minute or has no recorded duration.'));
+        showCalories();
+        const effortBox = S.user.body_weight != null && workout.status === 'completed' && field('How hard was it?',
+          choices(EFFORTS, workout.effort || 'moderate', (v) => { workout.effort = v; touch(); }, { columns: 3 }));
         save.onclick = () => act(async () => {
           const bad = workout.exercises.some((e) => e.sets.some((s) => (isCardio(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
           if (bad) {
@@ -1552,9 +1575,11 @@ function viewHistoryDetail(id) {
           S.draft = null; // suggestions depend on history
           toast('Changes saved. Future suggestions use the corrected numbers.');
           paint();
+          api.get('workout', `&id=${encodeURIComponent(id)}`).then((r) => { calories = r.calories; showCalories(); }, () => {});
         }, save);
         return [
           h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
+          h('section', { class: 'card stack' }, caloriesLine, effortBox),
           box,
           save,
           workout.status === 'completed' && workoutStrava(workout, strava, stravaExport, () => dirty),
@@ -1627,10 +1652,12 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
         return;
       }
       const summary = h('input', { type: 'checkbox' });
+      const calories = h('input', { type: 'checkbox', checked: stravaOnFinish().calories });
       const send = h('button', { class: 'btn primary block', type: 'button', onclick: () => act(async () => {
         exported = await api.post('strava_export', {
           id: workout.id,
           include_summary: summary.checked,
+          include_calories: S.user.body_weight != null && calories.checked,
           utc_offset: -new Date(workout.started_at).getTimezoneOffset() * 60,
         });
         statusMessage = '';
@@ -1642,6 +1669,7 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
       const close = sheet('Send to Strava', h('div', { class: 'stack' },
         h('p', {}, 'Send this workout as a Weight Training activity. Your Strava activity visibility settings apply.'),
         h('label', { class: 'check' }, summary, 'Include exercises, sets, reps, and weights'),
+        S.user.body_weight != null && h('label', { class: 'check' }, calories, 'Include estimated calories'),
         send,
       ));
     } }, 'Send to Strava'));
@@ -1839,6 +1867,32 @@ function viewExerciseForm(id) {
 
 // ---------------------------------------------------------------- settings
 
+/** Optional body weight (#38), only used to estimate calories. Saves when you leave the field. */
+function bodyWeightField() {
+  const input = h('input', {
+    class: 'num',
+    type: 'text',
+    inputmode: 'decimal',
+    'aria-label': `Body weight in ${S.user.unit}`,
+    placeholder: S.user.unit,
+    value: S.user.body_weight == null ? '' : fmtW(S.user.body_weight),
+    onchange: (e) => act(async () => {
+      const v = parseNum(e.target.value);
+      try {
+        const r = await api.post('save_profile', { body_weight: v == null ? null : v });
+        S.user = r.user;
+        toast(v == null ? 'Body weight removed.' : 'Body weight saved.');
+      } catch (err) {
+        e.target.value = S.user.body_weight == null ? '' : fmtW(S.user.body_weight);
+        throw err;
+      }
+    }),
+  });
+  return field(`Body weight (${S.user.unit})`, input, 'Optional. Only used to estimate the calories a workout burned.');
+}
+
+const EFFORTS = [['light', 'Light'], ['moderate', 'Moderate'], ['hard', 'Hard']];
+
 function viewSettings() {
   const saveProfile = (key, value) => act(async () => {
     const r = await api.post('save_profile', { [key]: value });
@@ -1850,7 +1904,7 @@ function viewSettings() {
   const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });
   const pwBtn = h('button', { class: 'btn block', type: 'submit' }, 'Change password');
   return page('Settings',
-    section('Training', trainingFields(S.user, saveProfile), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
+    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Gyms',
       h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
       h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),
