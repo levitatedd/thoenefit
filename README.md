@@ -8,6 +8,7 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - Fast set logging with a rest timer, autosave, and offline queueing
 - Double progression, tracked per exercise and per equipment variant
 - History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
+- Share a planned workout so two or more people can train together, each with their own suggested weights
 - Several accounts, no public sign-up; the first account is the admin and adds the others
 
 ## Screenshots
@@ -178,6 +179,16 @@ Nothing is random or learned. The same profile, gym, and history always give the
 - **Weight.** Double progression: if every working set last time was at the working weight and reached the top of the rep range, the suggestion goes up by the gym's smallest increment for that equipment and reps restart at the bottom of the range. Otherwise the weight stays and the aim is more reps. Warm-up sets are ignored. You can type over any suggestion.
 - **Equipment variants.** Barbell, dumbbell, kettlebell, and bodyweight history follows you between gyms. Machine and cable history is kept separately per gym, because the same number means different things on different machines.
 - **Recovery.** An estimate from logged sets only: after a session, a muscle is treated as needing 24 hours plus 6 hours per set (half for secondary muscles), up to 96 hours. Under 50%, an exercise for that muscle gets one set fewer. It cannot see sleep, soreness, or anything done outside the app.
+
+## Training together
+
+Anyone can share the workout planned on Today, or one already in progress, with other people on the same server (the people button next to Start workout, or "Share this workout" on the workout screen). The other person sees it on their Today screen and can accept or decline.
+
+- Accepting gives them the same exercises, in the same order, with the same planned sets, rep ranges and rest. Suggested weights are worked out from their own history, so one person may see 185 lb where the other sees 45 lb.
+- The structure is taken as it stands when they accept. If the sender changed the plan, or has started and swapped an exercise since sharing, the accepted copy follows that. After accepting, the two workouts are independent; later changes are not synced.
+- Each person logs their own weights, reps and completion and gets their own entry in History.
+- If the plan includes an exercise the sender created, a copy is added to the other person's exercise library so both keep their own history for it.
+- A share that is not answered, or is accepted but not started, lapses after 24 hours.
 
 ## How offline logging works
 

@@ -11,6 +11,7 @@ final class Api
     private Auth $auth;
     private Workouts $workouts;
     private Generator $gen;
+    private Shares $shares;
 
     public static function handle(): void
     {
@@ -36,6 +37,7 @@ final class Api
         $this->auth = new Auth($app->db, $app->config);
         $this->workouts = new Workouts($app->db);
         $this->gen = new Generator($app->db);
+        $this->shares = new Shares($app->db);
     }
 
     private static function json($data, int $status = 200): void
@@ -87,6 +89,12 @@ final class Api
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
+            // Other people on this server, by display name only, for sharing a workout.
+            'people' => fn() => ['people' => $this->people($uid)],
+            'shares' => fn() => [
+                'incoming' => $this->shares->incoming($uid),
+                'outgoing' => $this->shares->outgoing($uid, (string) ($_GET['key'] ?? '')),
+            ],
             'users' => function () use ($user) {
                 Auth::requireAdmin($user);
                 return ['users' => $this->auth->listUsers()];
@@ -188,7 +196,46 @@ final class Api
                 self::json(['removed' => (new FitbodImport($this->db))->purge($uid)]);
                 return;
             case 'save_workout':
-                self::json($this->workouts->save($uid, (array) ($in['workout'] ?? [])));
+                $doc = (array) ($in['workout'] ?? []);
+                $saved = $this->workouts->save($uid, $doc);
+                if (!empty($saved['ok'])) {
+                    // A workout started from a shared plan closes that share; one started
+                    // from a plan this person shared lets later accepts follow it.
+                    if (!empty($doc['share_id'])) {
+                        $this->shares->markStarted($uid, (int) $doc['share_id'], (string) $doc['id']);
+                    }
+                    if (!empty($doc['share_key'])) {
+                        $this->shares->link($uid, (string) $doc['share_key'], (string) $doc['id']);
+                    }
+                }
+                self::json($saved);
+                return;
+            case 'share_workout':
+                $this->shares->send(
+                    $uid,
+                    (string) ($in['share_key'] ?? ''),
+                    (array) ($in['to'] ?? []),
+                    array_column($this->people($uid), 'id'),
+                    (array) ($in['plan'] ?? []),
+                    isset($in['workout_id']) ? (string) $in['workout_id'] : null
+                );
+                self::json(['outgoing' => $this->shares->outgoing($uid, (string) ($in['share_key'] ?? ''))]);
+                return;
+            case 'share_respond':
+                if (!empty($in['accept'])) {
+                    $this->shares->accept($uid, (int) ($in['id'] ?? 0));
+                } else {
+                    $this->shares->decline($uid, (int) ($in['id'] ?? 0));
+                }
+                self::json(['incoming' => $this->shares->incoming($uid)]);
+                return;
+            case 'shared_draft':
+                $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                self::json([
+                    'workout' => $this->shares->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen),
+                    // Accepting can add the sender's own exercises to this person's library.
+                    'exercises' => Catalog::forUser($this->db, $uid, true),
+                ]);
                 return;
             case 'delete_workout':
                 $this->workouts->delete($uid, (string) ($in['id'] ?? ''));
@@ -229,6 +276,18 @@ final class Api
         return Generator::gymShape($row);
     }
 
+    /** Everyone else with a working account: id and display name only. */
+    private function people(int $uid): array
+    {
+        $out = [];
+        foreach ($this->auth->listUsers() as $u) {
+            if ($u['id'] !== $uid) {
+                $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
+            }
+        }
+        return $out;
+    }
+
     private function bootstrap(array $user): array
     {
         $uid = (int) $user['id'];
@@ -246,6 +305,7 @@ final class Api
             'gyms' => $this->gyms($uid),
             'exercises' => Catalog::forUser($this->db, $uid, true),
             'active' => $active,
+            'shares' => $this->shares->incoming($uid),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
                 'presets' => Catalog::presets(),

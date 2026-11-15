@@ -13,6 +13,7 @@ use TF\FitbodImport;
 use TF\Generator;
 use TF\HttpError;
 use TF\Migrator;
+use TF\Shares;
 use TF\Workouts;
 
 $pass = 0;
@@ -74,8 +75,10 @@ if (getenv('TF_TEST_DB') === 'mysql') {
 
 echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
-check('migrations apply on an empty database', $applied === [1, 2, 3]);
+check('migrations apply on an empty database', $applied === array_keys(Migrator::files()));
 check('running them again changes nothing', Migrator::ensure($db) === []);
+$db->run('DELETE FROM schema_migrations WHERE version=2');
+check('a migration that was skipped (merged out of order) is still applied', Migrator::ensure($db) === [2] && Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
 check('catalog seeded (' . $n . ' exercises)', $n === count(Catalog::exercises()) && $n >= 80);
 Catalog::sync($db);
@@ -338,6 +341,73 @@ check('an import does not disturb the split rotation', $gen->nextDayType($uid3, 
 check('one account\'s import is invisible to another', $wk->get($uid, $hist[0]['id']) === null);
 check('undo removes only imported workouts', $imp->purge($uid3) === 2 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid3]) === 0 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid]) > 0);
 
+echo "Sharing a workout\n";
+$sh = new Shares($db);
+$uid3 = $auth->createUser('third', 'third-long-password');
+$samRow = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+$samGym = $mkGym($uid2, 'Sam gym', Catalog::equipmentKeys());
+$wk->save($uid2, $doc($samGym, 'push', [[$bench, 5, 8, [[45, 7], [45, 7], [45, 6]]]], $ago(3)));
+$customId = $db->insert('exercises', ['user_id' => $uid, 'slug' => 'custom-share-test', 'name' => 'Mike Special Press', 'kind' => 'dumbbell', 'equipment' => '[]', 'pattern' => 'horizontal_push', 'muscles_main' => '["chest"]', 'muscles_assist' => '[]', 'cues' => 'Press it.', 'priority' => 4]);
+$line = fn(int $ex, int $sets, int $min, int $max, int $rest) => ['exercise_id' => $ex, 'target_sets' => $sets, 'rep_min' => $min, 'rep_max' => $max, 'rest_seconds' => $rest];
+$plan = ['day_type' => 'push', 'exercises' => [$line($bench, 4, 5, 8, 150), $line($customId, 2, 12, 15, 60), $line($bySlug['cable-fly'], 3, 10, 15, 75)]];
+$key = uuid();
+$allowed = [$uid2, $uid3];
+check('a workout cannot be shared with yourself or with someone who has no account', throws(fn() => $sh->send($uid, $key, [$uid], $allowed, $plan), 422) && throws(fn() => $sh->send($uid, $key, [99999], $allowed, $plan), 422));
+check('a plan with no usable exercises is refused', throws(fn() => $sh->send($uid, $key, [$uid2], $allowed, ['exercises' => [$line(987654, 3, 8, 12, 90)]]), 422));
+$sh->send($uid, $key, [$uid2, $uid3], $allowed, $plan);
+$sh->send($uid, $key, [$uid2], $allowed, $plan);
+$inc = $sh->incoming($uid2);
+$shareId = $inc[0]['id'] ?? 0;
+check('the other person sees who shared it and what is in it', count($inc) === 1 && $inc[0]['from_name'] === 'Mike' && $inc[0]['status'] === 'pending' && $inc[0]['exercises'] === ['Barbell Bench Press', 'Mike Special Press', 'Cable Fly'] && $inc[0]['sets'] === 9);
+check('it can go to two people at once, and sending twice does not duplicate it', count($sh->incoming($uid3)) === 1 && count($sh->outgoing($uid, $key)) === 2 && $sh->incoming($uid) === []);
+check('only the person it was sent to can accept it, and nothing is built before they do', throws(fn() => $sh->accept($uid, $shareId), 404) && throws(fn() => $sh->draft($samRow, $samGym, $shareId, $gen), 404));
+// The sender changes the plan, then starts it and changes it again, all before the other person accepts.
+$plan['exercises'][2] = $line($bySlug['pec-deck'], 3, 10, 15, 75);
+$sh->send($uid, $key, [], $allowed, $plan);
+check('a change to the plan before it is accepted reaches the people it was sent to', $sh->incoming($uid2)[0]['exercises'][2] === 'Pec Deck Fly');
+$mikeDoc = $doc($big, 'push', [[$bench, 5, 8, [[45, 5, true], [185, 8], [185, 8], [185, 8], [185, 8]]], [$customId, 12, 15, [[30, 12], [30, 12]]], [$bySlug['dumbbell-fly'], 10, 15, [[25, 12], [25, 12], [25, 12]]]], $ago(0), 'active');
+$wk->save($uid, $mikeDoc);
+$sh->link($uid, $key, $mikeDoc['id']);
+$inc = $sh->incoming($uid2);
+check('once the sender has started, the share follows their workout as it is now (warm-ups not counted)', $inc[0]['exercises'][2] === 'Dumbbell Fly' && $inc[0]['sets'] === 9);
+$sh->accept($uid2, $shareId);
+// After the accept, the sender drops an exercise. The accepted copy must not change.
+array_pop($mikeDoc['exercises']);
+$mikeDoc['rev'] = 2;
+$wk->save($uid, $mikeDoc);
+$draft = $sh->draft($samRow, $samGym, $shareId, $gen);
+$dx = $draft['exercises'];
+check('accepting gives the same exercises in the same order', array_column($dx, 'name') === ['Barbell Bench Press', 'Mike Special Press', 'Dumbbell Fly'] && $draft['shared_by'] === 'Mike' && $draft['share_id'] === $shareId);
+check('with the same planned sets and rep ranges', array_column($dx, 'target_sets') === [4, 2, 3] && array_column($dx, 'rep_min') === [5, 12, 10] && array_column($dx, 'rep_max') === [8, 15, 15]);
+check('the structure is the one in place when it was accepted, not later changes', count($dx) === 3);
+$mine = $gen->block($user, $big, $exById[$bench], false, $plan['exercises'][0]);
+check('weights are suggested separately for each person (sender ' . $mine['suggested_weight'] . ' lb, partner ' . $dx[0]['suggested_weight'] . ' lb)', $dx[0]['suggested_weight'] === 45.0 && $mine['suggested_weight'] > 100 && $dx[2]['suggested_weight'] === null);
+$copy = $db->one('SELECT * FROM exercises WHERE id=?', [$dx[1]['exercise_id']]);
+$sh->draft($samRow, $samGym, $shareId, $gen);
+check('the sender\'s own exercise is copied into the partner\'s library once', $dx[1]['exercise_id'] !== $customId && (int) $copy['user_id'] === $uid2 && $copy['name'] === 'Mike Special Press' && (int) $db->val("SELECT COUNT(*) FROM exercises WHERE user_id=? AND name='Mike Special Press'", [$uid2]) === 1);
+// Both log their own numbers.
+$samDoc = $doc($samGym, 'push', [[$bench, 5, 8, [[45, 8], [45, 8], [45, 7], [45, 6]]], [$dx[1]['exercise_id'], 12, 15, [[15, 12], [15, 12]]], [$bySlug['dumbbell-fly'], 10, 15, [[10, 12], [10, 12], [10, 12]]]], $ago(0), 'completed');
+$wk->save($uid2, $samDoc);
+$sh->markStarted($uid2, $shareId, $samDoc['id']);
+$mikeDoc['status'] = 'completed';
+$mikeDoc['completed_at'] = $ago(0);
+$mikeDoc['rev'] = 3;
+$wk->save($uid, $mikeDoc);
+$statuses = array_column($sh->outgoing($uid, $key), 'status', 'name');
+check('starting it closes the share for that person and shows the sender', $sh->incoming($uid2) === [] && $statuses['sam'] === 'started' && $statuses['third'] === 'pending');
+$mw = $wk->get($uid, $mikeDoc['id']);
+$sw = $wk->get($uid2, $samDoc['id']);
+check('each person has their own history entry with their own numbers', $mw && $sw && $mw['id'] !== $sw['id'] && $mw['exercises'][0]['sets'][1]['weight'] === 185.0 && $sw['exercises'][0]['sets'][0]['weight'] === 45.0 && $wk->get($uid2, $mikeDoc['id']) === null && $wk->get($uid, $samDoc['id']) === null);
+$third = $sh->incoming($uid3)[0]['id'];
+$sh->decline($uid3, $third);
+check('declining removes it for that person and tells the sender', $sh->incoming($uid3) === [] && array_column($sh->outgoing($uid, $key), 'status', 'name')['third'] === 'declined' && throws(fn() => $sh->accept($uid3, $third), 404));
+$sh->send($uid, $key, [$uid3], $allowed, $plan);
+check('sharing again after a decline puts it back in front of them', count($sh->incoming($uid3)) === 1);
+$sh->send($uid, $key, [$uid2], $allowed, $plan);
+check('it can be shared again with someone who already trained from it', count($sh->incoming($uid2)) === 1 && $sh->incoming($uid2)[0]['status'] === 'pending');
+$db->run('UPDATE workout_shares SET updated_at=? WHERE id=?', [TF\now_utc(time() - 25 * 3600), $third]);
+check('a share nobody answers lapses after a day', $sh->incoming($uid3) === [] && array_column($sh->outgoing($uid, $key), 'status', 'name')['third'] === 'expired');
+
 echo "Upgrading a database that already has accounts\n";
 $old = $freshDb('upgrade');
 Migrator::ensure($old, 2);
@@ -346,7 +416,7 @@ check('an older database has no roles yet', !(new Migrator($old))->hasColumn('us
 foreach ([['later', '2026-03-01 10:00:00'], ['earliest', '2025-01-05 08:00:00'], ['middle', '2025-06-01 09:00:00']] as [$name, $when]) {
     $old->insert('users', ['username' => $name, 'password_hash' => 'x', 'display_name' => $name, 'created_at' => $when]);
 }
-check('the migration applies', Migrator::ensure($old) === [3]);
+check('the migrations apply', Migrator::ensure($old) === array_values(array_filter(array_keys(Migrator::files()), static fn($v) => $v > 2)));
 $roles = [];
 foreach ($old->all('SELECT username, role FROM users') as $r) {
     $roles[$r['username']] = $r['role'];

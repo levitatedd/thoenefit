@@ -88,6 +88,7 @@ async function boot() {
 function applyBoot(data) {
   S.user = data.user;
   S.gyms = data.gyms;
+  S.shares = data.shares || [];
   S.vocab = data.vocab;
   setExercises(data.exercises);
   if (data.csrf) api.csrf = data.csrf;
@@ -385,10 +386,25 @@ async function loadDraft({ regenerate = false } = {}) {
   S.draftError = null;
   if (route()[0] === 'today') render();
   try {
-    const res = await api.post('generate', body);
+    // A shared workout this person accepted takes the place of their own plan until they start or drop it.
+    const accepted = (S.shares || []).find((x) => x.status === 'accepted');
+    let res = null;
+    if (accepted) {
+      try {
+        res = await api.post('shared_draft', { id: accepted.id, gym_id: gym.id });
+        setExercises(res.exercises);
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        S.shares = S.shares.filter((x) => x.id !== accepted.id); // it lapsed or was withdrawn
+      }
+    }
+    if (!res) {
+      res = await api.post('generate', body);
+      S.draftOpts.day_type = res.workout.day_type;
+      S.draftOpts.minutes = res.workout.minutes;
+    }
     S.draft = res.workout;
-    S.draftOpts.day_type = res.workout.day_type;
-    S.draftOpts.minutes = res.workout.minutes;
+    pushSharedPlan();
   } catch (e) {
     S.draftError = e.offline ? 'You are offline. Connect to build a new workout.' : e.message;
   }
@@ -425,17 +441,108 @@ function startWorkout() {
     unit: d.unit,
     started_at: new Date().toISOString(),
     completed_at: null,
-    notes: null,
+    notes: d.shared_by ? `Shared by ${d.shared_by}` : null,
+    // share_id: this came from someone's shared plan. share_key: this person shared it with others.
+    share_id: d.share_id || undefined,
+    share_key: S.shareKey || undefined,
     exercises: d.exercises.map(blockToEntry),
   });
+  if (d.share_id) S.shares = (S.shares || []).filter((x) => x.id !== d.share_id);
+  S.shareKey = null;
   S.draft = null;
   primeAudio();
   go('workout');
 }
 
+// ---------------------------------------------------------------- sharing a workout
+
+/** What gets shared: exercises in order with planned sets, rep range and rest. Never weights. */
+function planOf(dayType, exercises, setsOf) {
+  return { day_type: dayType, exercises: exercises.map((e) => ({ exercise_id: e.exercise_id, target_sets: setsOf(e), rep_min: e.rep_min, rep_max: e.rep_max, rest_seconds: e.rest_seconds })) };
+}
+
+/** If the planned workout was shared and has since changed, the people who have not answered yet get the new version. */
+function pushSharedPlan() {
+  if (!S.shareKey || !S.draft || S.draft.share_id) return;
+  api.post('share_workout', { share_key: S.shareKey, to: [], plan: planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets) }).catch(() => {});
+}
+
+let sharesCheckedAt = 0;
+async function refreshShares(force = false) {
+  if (!S.user || (!force && Date.now() - sharesCheckedAt < 15000) || navigator.onLine === false) return;
+  sharesCheckedAt = Date.now();
+  try {
+    const before = JSON.stringify(S.shares || []);
+    S.shares = (await api.get('shares')).incoming;
+    if (JSON.stringify(S.shares) !== before && route()[0] === 'today') render();
+  } catch (e) {
+    // Offline or signed out: the cards simply stay as they were.
+  }
+}
+
+/** Sheet for sending a plan to other people and seeing what each has done with it. */
+async function shareSheet({ key, plan, workoutId }) {
+  const list = h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'Loading'));
+  sheet('Share this workout', h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'They get the same exercises, order and planned sets. Weights are suggested from their own history, and each of you logs your own workout.'),
+    list));
+  const label = { pending: 'Sent, waiting for them', accepted: 'Accepted', started: 'Training now', declined: 'Declined', expired: 'Not answered' };
+  const paint = (people, outgoing) => {
+    const state = Object.fromEntries(outgoing.map((o) => [o.to, o.status]));
+    fill(list,
+      !people.length && h('p', { class: 'muted' }, 'Nobody else has an account on this server yet.'),
+      people.map((p) => {
+        const st = state[p.id];
+        const again = st === 'declined' || st === 'expired' || st === 'started';
+        return h('div', { class: 'share-row', 'data-person': p.name },
+          h('div', {}, h('span', { class: 'pick-name' }, p.name), st && h('span', { class: `pick-meta share-status ${st}` }, label[st] || st)),
+          (!st || again) && h('button', { class: 'btn small primary', type: 'button', onclick: async (e) => {
+            const r = await act(() => api.post('share_workout', { share_key: key(), to: [p.id], plan: plan(), workout_id: workoutId }), e.currentTarget);
+            if (r) {
+              paint(people, r.outgoing);
+              toast(`Shared with ${p.name}.`);
+            }
+          } }, again ? 'Send again' : 'Send'));
+      }));
+  };
+  try {
+    const [people, shares] = await Promise.all([api.get('people'), api.get('shares', `&key=${encodeURIComponent(key())}`)]);
+    paint(people.people, shares.outgoing);
+  } catch (e) {
+    fill(list, h('p', { class: 'muted' }, e.offline ? 'Sharing needs a connection.' : e.message));
+  }
+}
+
+/** Cards on Today for workouts other people have shared with this person and are waiting on. */
+function shareCards() {
+  return (S.shares || []).filter((x) => x.status === 'pending').map((x) => h('section', { class: 'card share-card', 'data-share': x.id },
+    h('h2', {}, `${x.from_name} shared a workout with you`),
+    h('p', { class: 'muted' }, `${dayLabel(x.day_type)}, ${x.exercises.length} exercises, ${x.sets} sets: ${x.exercises.slice(0, 4).join(', ')}${x.exercises.length > 4 ? ` and ${x.exercises.length - 4} more` : ''}.`),
+    h('p', { class: 'muted small' }, 'You get the same exercises and sets. Weights are suggested from your own history.'),
+    h('div', { class: 'plan-actions' },
+      h('button', { class: 'btn small primary', type: 'button', onclick: (e) => respondToShare(x, true, e.currentTarget) }, 'Accept'),
+      h('button', { class: 'btn small', type: 'button', onclick: (e) => respondToShare(x, false, e.currentTarget) }, 'Decline'))));
+}
+
+async function respondToShare(share, accept, btn) {
+  const r = await act(() => api.post('share_respond', { id: share.id, accept }), btn);
+  if (!r) {
+    refreshShares(true);
+    return;
+  }
+  S.shares = r.incoming;
+  if (accept) {
+    S.draft = null; // Today now builds from the shared plan
+    S.draftError = null;
+    toast(sync.active ? `Accepted. ${share.from_name}'s workout will be on Today once your current one is finished.` : `Accepted ${share.from_name}'s workout.`);
+  }
+  render();
+}
+
 function viewToday() {
   const gym = activeGym();
   const active = sync.active;
+  refreshShares();
   const head = h('header', { class: 'page-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
@@ -447,6 +554,7 @@ function viewToday() {
       { class: 'page' },
       head,
       waiting,
+      shareCards(),
       h(
         'section',
         { class: 'card resume' },
@@ -477,7 +585,11 @@ function viewToday() {
     return h('main', { class: 'page' }, head, h('section', { class: 'card' }, h('h2', {}, 'Add a gym first'), h('p', { class: 'muted' }, 'A workout is built from the equipment at a gym profile.'), h('a', { class: 'btn primary block', href: '#/settings/gym/new' }, 'Add a gym')));
   }
 
+  // An accepted share replaces whatever plan was on screen; dropping it brings the usual plan back.
+  const acceptedShare = (S.shares || []).find((x) => x.status === 'accepted');
+  if (S.draft && !S.draftLoading && (S.draft.share_id || 0) !== (acceptedShare ? acceptedShare.id : 0)) S.draft = null;
   if (!S.draft && !S.draftLoading && !S.draftError) loadDraft();
+  const shared = S.draft && S.draft.share_id ? S.draft : null;
 
   const gymSelect = h(
     'select',
@@ -511,7 +623,11 @@ function viewToday() {
     },
     ordered.map((d) => h('option', { value: d, selected: d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d))),
   );
-  const controls = h(
+  const controls = shared
+    ? h('section', { class: 'stack' },
+        h('div', { class: 'notice shared-note' }, h('strong', {}, `Shared by ${shared.shared_by}. `), 'Same exercises, order and sets as theirs. The weights below are suggested from your own history.'),
+        field('Gym', gymSelect, 'Pick the gym you are at, so machine history lines up.'))
+    : h(
     'section',
     { class: 'controls' },
     field('Gym', gymSelect),
@@ -559,12 +675,19 @@ function viewToday() {
     { class: 'page has-bar' },
     head,
     waiting,
+    shareCards(),
     controls,
     body,
     h(
       'div',
       { class: 'action-bar' },
-      h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
+      shared
+        ? h('button', { class: 'btn', type: 'button', onclick: (e) => respondToShare({ id: shared.share_id, from_name: shared.shared_by }, false, e.currentTarget) }, 'Use my own')
+        : h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
+      !shared && h('button', { class: 'btn square', type: 'button', 'aria-label': 'Share this workout', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: () => shareSheet({
+        key: () => (S.shareKey = S.shareKey || uuid()),
+        plan: () => planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets),
+      }) }, icon('share')),
       h('button', { class: 'btn primary grow', type: 'button', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: startWorkout }, 'Start workout'),
     ),
   );
@@ -590,7 +713,7 @@ function planRow(b, gym) {
     'li',
     { class: 'plan-row' },
     h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
-    h(
+    !S.draft.share_id && h(
       'div',
       { class: 'plan-actions' },
       h(
@@ -609,6 +732,7 @@ function planRow(b, gym) {
       ),
       h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
         Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in. ${block.reason}` });
+        pushSharedPlan();
         render();
       }) }, icon('swap', 18), 'Swap'),
     ),
@@ -781,6 +905,7 @@ function startTicker() {
     paintRest();
     const el = document.getElementById('elapsed');
     if (el && sync.active) el.textContent = fmtClock((Date.now() - new Date(sync.active.started_at).getTime()) / 1000);
+    if (route()[0] === 'today' && document.visibilityState === 'visible') refreshShares(); // throttled inside
   }, 500);
 }
 
@@ -820,6 +945,14 @@ function viewWorkout() {
     head,
     cards,
     h('button', { class: 'btn block', type: 'button', onclick: () => addExerciseSheet(doc) }, icon('plus', 18), 'Add exercise'),
+    h('button', { class: 'btn block', type: 'button', onclick: () => shareSheet({
+      key: () => {
+        if (!doc.share_key) sync.edit(doc.id, (d) => (d.share_key = uuid()));
+        return sync.active.share_key;
+      },
+      plan: () => planOf(sync.active.day_type, sync.active.exercises, (e) => e.sets.filter((s) => !s.warmup).length || e.target_sets),
+      workoutId: doc.id,
+    }) }, icon('share', 18), 'Share this workout'),
     h('button', { class: 'btn primary block finish', type: 'button', onclick: () => finishSheet(doc) }, 'Finish workout'),
   );
 }
@@ -1173,7 +1306,7 @@ function viewHistoryDetail(id) {
           paint();
         }, save);
         return [
-          h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`)),
+          h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
           box,
           save,
           h('button', { class: 'btn danger block', type: 'button', onclick: async () => {
