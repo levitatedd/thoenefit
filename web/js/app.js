@@ -92,7 +92,15 @@ async function boot() {
   } catch (e) {
     updated = null;
   }
-  if (updated) toast('ThoeneFit was updated.');
+  if (updated) {
+    // Offer the notes only when this release has some.
+    loadChangelog().then(
+      ({ releases }) => (releases[0]?.version === APP_VERSION
+        ? toast("ThoeneFit was updated. Tap to see what's new.", '', () => { location.hash = '#/settings/whats-new'; })
+        : toast('ThoeneFit was updated.')),
+      () => toast('ThoeneFit was updated.'),
+    );
+  }
 }
 
 function applyBoot(data) {
@@ -228,7 +236,7 @@ function render() {
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
-  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : viewSettings();
+  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : arg === 'whats-new' ? viewWhatsNew() : viewSettings();
   else view = viewToday();
   const current = tab === 'workout' ? 'today' : tab;
   const nav = h(
@@ -1750,8 +1758,41 @@ function viewSettings() {
         }, e.currentTarget);
       } }, 'Sign out')),
     brandWide(),
-    h('p', { class: 'muted small center app-version' }, `Version ${APP_VERSION}`),
+    h('p', { class: 'muted small center app-version' }, h('a', { href: '#/settings/whats-new' }, `Version ${APP_VERSION}`)),
   );
+}
+
+/** Release notes, built by the deploy from the pull requests each release brought in. */
+async function loadChangelog() {
+  let res;
+  try {
+    res = await fetch('changelog.json', { cache: 'no-cache' });
+  } catch (e) {
+    throw Object.assign(new Error('This needs a connection.'), { offline: true });
+  }
+  if (res.status === 404) return { upcoming: null, releases: [] };
+  if (!res.ok) throw new Error('Could not load the release notes.');
+  return res.json();
+}
+
+function viewWhatsNew() {
+  const list = (label, items) => items.length > 0 && h('div', { class: 'stack' },
+    h('h3', { class: 'small muted' }, label),
+    h('ul', { class: 'notes' }, items.map((c) => h('li', {}, c.title))));
+  const release = (r, heading) => h('section', { class: 'card stack' },
+    h('h2', {}, heading),
+    list('New', r.new),
+    list('Fixed', r.fixed));
+  const content = asyncSection(loadChangelog, ({ upcoming, releases }) => {
+    const out = [];
+    if (upcoming) out.push(release(upcoming, `Coming next · ${upcoming.version}`));
+    for (const r of releases) {
+      out.push(release(r, `${r.version} · ${fmtDate(r.date + 'T12:00:00', { month: 'short', day: 'numeric', year: 'numeric' })}`));
+    }
+    if (!out.length) out.push(h('p', { class: 'muted pad' }, APP_VERSION === 'dev' ? 'Release notes are added when the app is deployed.' : 'No release notes yet.'));
+    return out;
+  });
+  return page("What's new", backLink('settings', 'Settings'), h('p', { class: 'muted' }, `You have version ${APP_VERSION}.`), content);
 }
 
 function viewImport() {

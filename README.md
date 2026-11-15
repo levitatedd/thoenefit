@@ -101,6 +101,7 @@ php tests/run.php
 node tests/sync.test.mjs
 node tests/search.test.mjs
 node tests/version.test.mjs
+node tests/changelog.test.mjs
 ```
 
 GitHub Actions also runs the PHP checks against MySQL. For the phone-sized Chrome walkthrough, see the Playwright instructions at the top of [tests/e2e.mjs](tests/e2e.mjs).
@@ -119,6 +120,15 @@ Pushing to `main` runs checks and uploads `web/` over SFTP. You can also run **T
 ### Version number
 
 The bottom of Settings shows the app version, such as `Version 0.1.104`. Each deploy to `main` raises the last number by one on its own; staging shows the number the next release will get, such as `0.1.105-staging`. To start a new minor or major version, change [`VERSION`](VERSION) (for example to `0.2.0`) and release it.
+
+### What's new
+
+Tapping the version opens **What's new**: each release and what it brought, newest first. Nobody writes these notes. Each deploy builds them from the titles of the pull requests a release brought in (see [`.github/scripts/changelog.mjs`](.github/scripts/changelog.mjs)), so:
+
+- **Name branches by what they are.** `feature/...` is listed under **New**, `fix/...` under **Fixed**. Anything else, such as `chore/...`, is left out.
+- **Title pull requests for the people using the app.** The title is the note, for example "Save and reuse workout templates".
+- A release with no features or fixes doesn't appear. On staging, work that is merged but not yet released is listed at the top as **Coming next**.
+- When the app reloads after a deploy, the "ThoeneFit was updated" message can be tapped to open the notes, but only if that release has any.
 
 ### Updates and database changes
 
