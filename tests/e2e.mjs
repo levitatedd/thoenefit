@@ -662,6 +662,33 @@ await shot('11-settings');
 check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
 
+console.log("What's new");
+await page.click('.app-version a');
+await page.waitForSelector('h1:has-text("What\'s new")');
+await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
+if (!process.env.TF_URL) {
+  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  const notesFile = new globalThis.URL('../web/changelog.json', import.meta.url);
+  try {
+    writeFileSync(notesFile, JSON.stringify({
+      upcoming: { version: '0.1.5-staging', new: [{ title: 'Log cardio', pr: 9 }], fixed: [] },
+      releases: [{ version: '0.1.4', date: '2026-11-15', new: [{ title: 'Save and reuse workout templates', pr: 7 }], fixed: [{ title: 'Fix graph labels being cut off', pr: 8 }] }],
+    }));
+    await page.reload();
+    await page.waitForSelector('.page .card');
+    const cards = await page.$$eval('.page .card', (els) => els.map((el) => el.innerText));
+    check('upcoming work is listed first, then each release with New and Fixed', cards.length === 2 && /Coming next · 0\.1\.5-staging/.test(cards[0]) && /Log cardio/.test(cards[0]) && /0\.1\.4 · Nov 15, 2026/.test(cards[1]) && /New\s+Save and reuse workout templates/.test(cards[1]) && /Fixed\s+Fix graph labels being cut off/.test(cards[1]), cards.join(' | '));
+    await shot('12-whats-new');
+  } finally {
+    unlinkSync(notesFile);
+  }
+} else {
+  check('tapping the version opens What\'s new', (await page.textContent('h1')) === "What's new");
+}
+await page.click('a:has-text("Settings")');
+await page.waitForSelector('text=Add to your Home Screen');
+
 console.log('Staying up to date');
 if (!process.env.TF_URL) {
   const { readFileSync, writeFileSync } = await import('node:fs');

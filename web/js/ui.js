@@ -88,16 +88,17 @@ export function fmtSets(sets, unit) {
 }
 
 let toastTimer = null;
-export function toast(message, kind = '') {
+export function toast(message, kind = '', onTap = null) {
   let el = document.getElementById('toast');
   if (!el) {
     el = h('div', { id: 'toast', role: 'status' });
     document.body.append(el);
   }
   el.textContent = message;
-  el.className = `toast show ${kind}`;
+  el.className = `toast show ${kind}${onTap ? ' tappable' : ''}`;
+  el.onclick = onTap ? () => { el.className = 'toast'; onTap(); } : null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.className = 'toast'), 3200);
+  toastTimer = setTimeout(() => (el.className = 'toast'), onTap ? 6000 : 3200);
 }
 
 /** Bottom sheet. Returns a close function. */
