@@ -64,6 +64,15 @@ check('each exercise explains why', (await page.$$eval('.plan-row .why', (els) =
 check('no sideways scrolling at iPhone width', (await overflow()) <= 0);
 await shot('03-today');
 
+const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
+await page.click('.plan-row:nth-child(3) h3 a');
+await page.waitForSelector('.facts');
+check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
+check('the way back is labelled Today', (await page.textContent('.back')).trim() === 'Today');
+await shot('03a-history-from-today');
+await page.click('.back');
+await page.waitForSelector('.plan-row');
+check('going back returns to the same planned workout at the same spot', (await names()).join() === first.join() && Math.abs((await page.evaluate(() => window.scrollY)) - y0) < 5);
 await page.click('.plan-row:nth-child(1) button:has-text("Lock")');
 await page.click('.plan-row:nth-child(2) button:has-text("Swap")');
 await page.waitForSelector('.sheet .pick');
@@ -109,6 +118,19 @@ await page.waitForSelector('#sync.saved');
 check('status shows Saved once the server has the sets', (await page.textContent('#sync')) === 'Saved');
 check('no sideways scrolling on the workout screen', (await overflow()) <= 0);
 
+await page.locator('.lift').first().locator('h2 a').click();
+await page.waitForSelector('.facts');
+check('tapping the name during a workout opens its history, with a way back to the workout', (await page.textContent('h1')) === liftName && (await page.textContent('.back')).trim() === 'Workout');
+await page.click('.back');
+await page.waitForSelector('.lift');
+check('the workout is exactly as it was left', (await page.locator('.lift').first().locator('.set.done').count()) === setRows);
+await page.click('.tab:has-text("Exercises")');
+await page.fill('input[type=search]', liftName);
+await page.click(`.log-row:has-text("${liftName}")`);
+await page.waitForSelector('.facts');
+check('opened from the library, the way back is still Exercises', (await page.textContent('.back')).trim() === 'Exercises');
+await page.goto(`${URL}#/workout`);
+await page.waitForSelector('.lift');
 await page.click('button:has-text("Add exercise")');
 await page.fill('.sheet input[type=search]', 'lat puldown');
 await page.waitForSelector('.sheet .pick, .sheet p.muted');
