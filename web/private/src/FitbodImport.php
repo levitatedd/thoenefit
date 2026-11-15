@@ -92,6 +92,9 @@ final class FitbodImport
         'Cable Crunch' => 'cable-crunch',
         'Leg Raise' => 'lying-leg-raise',
         'Crunches' => 'crunch',
+        // Cardio machines, imported as time, distance and level (#18).
+        'Cycling - Stationary' => 'stationary-bike',
+        'Stair Stepper' => 'stair-climber',
         // Added with the built-ins for #65.
         'Cable Rope Tricep Extension' => 'cable-rope-triceps-extension',
         'Dumbbell Front Raise' => 'dumbbell-front-raise',
@@ -252,6 +255,13 @@ final class FitbodImport
         'Smith Machine Behind the Back Shrug' => 'smith-machine-behind-the-back-shrug',
     ];
 
+    /**
+     * Fitbod names logged with time instead of reps that are imported as cardio
+     * (#18). Outdoor activities (Running, Cycling, Walking, Hiking) are left out:
+     * those are recorded elsewhere. So are timed holds such as Plank.
+     */
+    public const CARDIO = ['Cycling - Stationary', 'Stair Stepper'];
+
     private Db $db;
 
     public function __construct(Db $db)
@@ -296,6 +306,16 @@ final class FitbodImport
                 continue;
             }
             $reps = (int) round((float) trim((string) ($r[$col['Reps']] ?? '0')));
+            $num = static fn(string $c) => isset($col[$c]) ? max(0.0, (float) trim((string) ($r[$col[$c]] ?? '0'))) : 0.0;
+            if ($reps <= 0 && in_array($name, self::CARDIO, true) && $num('Duration(s)') > 0) {
+                // [name, reps, kg, warm-up, seconds, metres, level]
+                $workouts[now_utc($ts)][] = [$name, 0, 0.0, false, (int) round($num('Duration(s)')), $num('Distance(m)') ?: null, $num('Resistance') ?: null];
+                $n = &$names[$name];
+                $n['sets'] = ($n['sets'] ?? 0) + 1;
+                $n['weighted'] = false;
+                unset($n);
+                continue;
+            }
             if ($reps <= 0) {
                 // Cardio and timed holds have no reps; there is nothing to progress on.
                 $skipped[$name] = ($skipped[$name] ?? 0) + 1;
@@ -630,12 +650,17 @@ final class FitbodImport
             foreach ($parsed['workouts'] as $date => $sets) {
                 $wid = self::uuidFrom("fitbod|$uid|$date");
                 $groups = []; // exercise id => sets, in order of first appearance
-                foreach ($sets as [$name, $reps, $kg, $warm]) {
+                foreach ($sets as $row) {
+                    [$name, $reps, $kg, $warm] = $row;
                     if (!isset($target[$name])) {
                         continue;
                     }
+                    if (Catalog::isTimed($target[$name][1])) {
+                        $groups[$target[$name][0]][] = [null, null, 0, $row[4] ?? null, isset($row[5]) ? round($row[5], 1) : null, $row[6] ?? null];
+                        continue;
+                    }
                     $w = $unit === 'kg' ? $kg : $kg * self::LB_PER_KG;
-                    $groups[$target[$name][0]][] = [round($w / $step) * $step, $reps, $warm ? 1 : 0];
+                    $groups[$target[$name][0]][] = [round($w / $step) * $step, $reps, $warm ? 1 : 0, null, null, null];
                 }
                 if (!$groups) {
                     continue;
@@ -645,10 +670,12 @@ final class FitbodImport
                 $pos = 0;
                 foreach ($groups as $exId => $list) {
                     $weid = self::uuidFrom("$wid|e|$exId");
-                    $reps = array_column($list, 1);
-                    $rowsE[] = [$weid, $wid, $uid, $exId, Catalog::variantKey((int) $exId, $kinds[$exId], $gym['id']), $pos++, count($list), min($reps), max($reps), 90, null, null];
-                    foreach ($list as $i => [$w, $r, $warm]) {
-                        $rowsS[] = [self::uuidFrom("$weid|s|$i"), $weid, $wid, $i, $w, $r, $warm, 1, $date];
+                    $timed = Catalog::isTimed($kinds[$exId]);
+                    $reps = $timed ? [1] : array_column($list, 1);
+                    $seconds = $timed ? (int) array_sum(array_column($list, 3)) : null;
+                    $rowsE[] = [$weid, $wid, $uid, $exId, Catalog::variantKey((int) $exId, $kinds[$exId], $gym['id']), $pos++, count($list), min($reps), max($reps), $timed ? 0 : 90, null, null, $seconds];
+                    foreach ($list as $i => [$w, $r, $warm, $dur, $dist, $lvl]) {
+                        $rowsS[] = [self::uuidFrom("$weid|s|$i"), $weid, $wid, $i, $w, $r, $warm, 1, $date, $dur, $dist, $lvl];
                     }
                 }
             }
@@ -661,8 +688,8 @@ final class FitbodImport
                 $this->db->run("DELETE FROM workouts WHERE user_id=? AND id IN ($marks)", array_merge([$uid], $chunk));
             }
             $this->insertMany('workouts', ['id', 'user_id', 'gym_id', 'gym_name', 'day_type', 'status', 'unit', 'started_at', 'completed_at', 'notes', 'rev', 'updated_at'], $rowsW);
-            $this->insertMany('workout_exercises', ['id', 'workout_id', 'user_id', 'exercise_id', 'variant_key', 'pos', 'target_sets', 'rep_min', 'rep_max', 'rest_seconds', 'suggested_weight', 'reason'], $rowsE);
-            $this->insertMany('workout_sets', ['id', 'workout_exercise_id', 'workout_id', 'pos', 'weight', 'reps', 'warmup', 'done', 'done_at'], $rowsS);
+            $this->insertMany('workout_exercises', ['id', 'workout_id', 'user_id', 'exercise_id', 'variant_key', 'pos', 'target_sets', 'rep_min', 'rep_max', 'rest_seconds', 'suggested_weight', 'reason', 'target_seconds'], $rowsE);
+            $this->insertMany('workout_sets', ['id', 'workout_exercise_id', 'workout_id', 'pos', 'weight', 'reps', 'warmup', 'done', 'done_at', 'duration_s', 'distance_m', 'level'], $rowsS);
         });
 
         return ['workouts' => count($rowsW), 'sets' => count($rowsS), 'exercises_created' => $created];

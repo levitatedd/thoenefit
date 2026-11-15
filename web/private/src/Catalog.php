@@ -20,7 +20,16 @@ final class Catalog
         'machine' => 'Machine',
         'band' => 'Band',
         'bodyweight' => 'Bodyweight',
+        'cardio' => 'Cardio machine',
     ];
+
+    /** Kinds logged as time (with optional distance and level) instead of weight and reps. */
+    public const TIMED_KINDS = ['cardio'];
+
+    public static function isTimed(string $kind): bool
+    {
+        return in_array($kind, self::TIMED_KINDS, true);
+    }
 
     public const MUSCLES = [
         'chest' => 'Chest',
@@ -57,6 +66,7 @@ final class Catalog
         'knee_extension' => 'Leg extension',
         'calf' => 'Calf raise',
         'core' => 'Core',
+        'cardio' => 'Cardio warm-up',
         'other' => 'Other (never suggested automatically)',
     ];
 
@@ -109,6 +119,13 @@ final class Catalog
                 'hip_abduction' => 'Hip abductor / adductor',
                 'glute_kickback' => 'Glute kickback',
             ]],
+            ['group' => 'Cardio', 'items' => [
+                'stationary_bike' => 'Stationary bike',
+                'treadmill' => 'Treadmill',
+                'rowing_machine' => 'Rowing machine',
+                'elliptical' => 'Elliptical',
+                'stair_climber' => 'Stair climber',
+            ]],
         ];
     }
 
@@ -154,8 +171,8 @@ final class Catalog
     public static function defaultIncrements(string $unit): array
     {
         return $unit === 'kg'
-            ? ['barbell' => 2.5, 'dumbbell' => 2, 'kettlebell' => 4, 'cable' => 2.5, 'machine' => 5, 'band' => 0, 'bodyweight' => 2.5]
-            : ['barbell' => 5, 'dumbbell' => 5, 'kettlebell' => 5, 'cable' => 5, 'machine' => 10, 'band' => 0, 'bodyweight' => 5];
+            ? ['barbell' => 2.5, 'dumbbell' => 2, 'kettlebell' => 4, 'cable' => 2.5, 'machine' => 5, 'band' => 0, 'bodyweight' => 2.5, 'cardio' => 0]
+            : ['barbell' => 5, 'dumbbell' => 5, 'kettlebell' => 5, 'cable' => 5, 'machine' => 10, 'band' => 0, 'bodyweight' => 5, 'cardio' => 0];
     }
 
     /**
@@ -294,6 +311,15 @@ final class Catalog
             ['lying-leg-raise', 'Lying Leg Raise', 'bodyweight', [], 'core', ['abs'], [], 3, 'Lie flat and press your lower back into the floor. Raise straight legs to vertical and lower them only as far as your back stays down.'],
             ['crunch', 'Crunch', 'bodyweight', [], 'core', ['abs'], [], 4, 'Lie with knees bent and hands by your temples. Curl your shoulder blades off the floor by bringing your ribs toward your hips, and lower slowly.'],
             ['dead-bug', 'Dead Bug', 'bodyweight', [], 'core', ['abs'], [], 5, 'Lie on your back with arms up and knees over hips. Reach one arm and the opposite leg toward the floor while your lower back stays flat. Count reps per side.'],
+
+            // Cardio warm-ups (#18). Logged as time, with optional distance and level.
+            // They list no muscles, so they never count toward volume or recovery,
+            // and the "cardio" pattern is only used for the warm-up, never the main workout.
+            ['stationary-bike', 'Stationary Bike', 'cardio', ['stationary_bike'], 'cardio', [], [], 1, 'Set the seat so your knee is slightly bent at the bottom of the pedal stroke. Start easy and build to a pace where you can still talk in short sentences.'],
+            ['elliptical', 'Elliptical', 'cardio', ['elliptical'], 'cardio', [], [], 2, 'Stand tall with your weight through your whole foot and hold the handles lightly. Start easy and build to a steady, comfortable effort.'],
+            ['treadmill', 'Treadmill', 'cardio', ['treadmill'], 'cardio', [], [], 3, 'Start with a brisk walk, then raise the speed or incline until you are breathing harder but can still talk. Avoid holding the rails.'],
+            ['rowing-machine', 'Rowing Machine', 'cardio', ['rowing_machine'], 'cardio', [], [], 4, 'Push with your legs first, then lean back slightly and pull the handle to your lower ribs. Return in the reverse order: arms, body, then legs.'],
+            ['stair-climber', 'Stair Climber', 'cardio', ['stair_climber'], 'cardio', [], [], 5, 'Step with your whole foot and stand tall without leaning on the rails. Start slow and build to a steady pace.'],
 
             // Added so a first Fitbod import matches most exercises (#65). Priority 9
             // keeps the generator preferring the exercises above; "other" ones are

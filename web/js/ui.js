@@ -76,9 +76,27 @@ export function fmtClock(totalSeconds) {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
+const trim = (v, places) => String(Number(v.toFixed(places)));
+
+/** Distance for a workout's unit: miles alongside pounds, kilometres alongside kilograms. */
+export const distUnit = (unit) => (unit === 'kg' ? 'km' : 'mi');
+export const metresTo = (m, unit) => (m == null ? null : m / (unit === 'kg' ? 1000 : 1609.344));
+export const toMetres = (v, unit) => (v == null ? null : v * (unit === 'kg' ? 1000 : 1609.344));
+
+/** A cardio set (#18): "10 min · 1.7 mi · level 8". */
+export function fmtCardio(set, unit) {
+  const parts = [`${trim((set.duration_s || 0) / 60, 1)} min`];
+  if (set.distance_m) parts.push(`${trim(metresTo(set.distance_m, unit), 2)} ${distUnit(unit)}`);
+  if (set.level != null) parts.push(`level ${trim(set.level, 1)}`);
+  return parts.join(' · ');
+}
+
+export const isCardioSet = (s) => s && s.duration_s != null && s.reps == null;
+
 /** "135 lb × 10, 10, 8" when every set used one weight, otherwise "135×10, 125×8". */
 export function fmtSets(sets, unit) {
   if (!sets || !sets.length) return '';
+  if (sets.every(isCardioSet)) return sets.map((s) => fmtCardio(s, unit)).join(', ');
   const same = sets.every((s) => s.weight === sets[0].weight);
   if (same) {
     const reps = sets.map((s) => s.reps).join(', ');

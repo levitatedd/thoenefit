@@ -223,6 +223,10 @@ final class Api
                 return;
             case 'generate':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                if (isset($in['warm_up']) && is_bool($in['warm_up']) && (int) $user['warm_up'] !== (int) $in['warm_up']) {
+                    // Remember the choice for next time (#18).
+                    $this->db->run('UPDATE users SET warm_up=? WHERE id=?', [$in['warm_up'] ? 1 : 0, $uid]);
+                }
                 self::json(['workout' => $this->gen->generate($user, $gym, $in)]);
                 return;
             case 'alternatives':
@@ -332,6 +336,7 @@ final class Api
             'split_type' => $u['split_type'],
             'active_gym_id' => $u['active_gym_id'] === null ? null : (int) $u['active_gym_id'],
             'onboarded' => (int) $u['onboarded'] === 1,
+            'warm_up' => (int) ($u['warm_up'] ?? 0) === 1,
         ];
     }
 

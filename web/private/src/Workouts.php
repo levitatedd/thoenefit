@@ -74,6 +74,7 @@ final class Workouts
             $repMin = max(1, min(100, (int) ($e['rep_min'] ?? 8)));
             $repMax = max($repMin, min(100, (int) ($e['rep_max'] ?? 12)));
             $sugg = $e['suggested_weight'] ?? null;
+            $targetSeconds = $e['target_seconds'] ?? null;
             $exRows[] = [
                 'id' => $weId,
                 'workout_id' => $id,
@@ -87,6 +88,7 @@ final class Workouts
                 'rest_seconds' => max(0, min(900, (int) ($e['rest_seconds'] ?? 90))),
                 'suggested_weight' => is_numeric($sugg) ? round((float) $sugg, 2) : null,
                 'reason' => isset($e['reason']) ? mb_substr((string) $e['reason'], 0, 1000) : null,
+                'target_seconds' => is_numeric($targetSeconds) ? max(0, min(86400, (int) $targetSeconds)) : null,
             ];
             $sets = is_array($e['sets'] ?? null) ? array_values($e['sets']) : [];
             if (count($sets) > 30) {
@@ -103,6 +105,9 @@ final class Workouts
                 $seen[$sid] = true;
                 $w = $s['weight'] ?? null;
                 $r = $s['reps'] ?? null;
+                $dur = $s['duration_s'] ?? null;
+                $dist = $s['distance_m'] ?? null;
+                $lvl = $s['level'] ?? null;
                 $done = !empty($s['done']);
                 $setRows[] = [
                     'id' => $sid,
@@ -114,6 +119,10 @@ final class Workouts
                     'warmup' => empty($s['warmup']) ? 0 : 1,
                     'done' => $done ? 1 : 0,
                     'done_at' => $done ? (norm_time($s['done_at'] ?? null) ?? now_utc()) : null,
+                    // Cardio (#18): time, and optionally distance in metres and the machine's level.
+                    'duration_s' => is_numeric($dur) ? max(0, min(86400, (int) round((float) $dur))) : null,
+                    'distance_m' => is_numeric($dist) ? max(0, min(1000000, round((float) $dist, 1))) : null,
+                    'level' => is_numeric($lvl) ? max(0, min(1000, round((float) $lvl, 1))) : null,
                 ];
             }
         }
@@ -206,6 +215,9 @@ final class Workouts
                 'warmup' => (int) $s['warmup'] === 1,
                 'done' => (int) $s['done'] === 1,
                 'done_at' => to_iso($s['done_at']),
+                'duration_s' => $s['duration_s'] === null ? null : (int) $s['duration_s'],
+                'distance_m' => $s['distance_m'] === null ? null : (float) $s['distance_m'],
+                'level' => $s['level'] === null ? null : (float) $s['level'],
             ];
         }
         $out = [
@@ -236,6 +248,7 @@ final class Workouts
                 'rest_seconds' => (int) $e['rest_seconds'],
                 'suggested_weight' => $e['suggested_weight'] === null ? null : (float) $e['suggested_weight'],
                 'reason' => $e['reason'],
+                'target_seconds' => $e['target_seconds'] === null ? null : (int) $e['target_seconds'],
                 'sets' => $sets[$e['id']] ?? [],
             ];
         }
@@ -267,7 +280,12 @@ final class Workouts
             $names[$r['workout_id']][] = $r['name'];
         }
         $totals = [];
-        foreach ($this->db->all("SELECT workout_id, weight, reps FROM workout_sets WHERE workout_id IN ($marks) AND done=1 AND warmup=0", $ids) as $s) {
+        $timed = Db::marks(Catalog::TIMED_KINDS);
+        foreach ($this->db->all(
+            "SELECT s.workout_id, s.weight, s.reps FROM workout_sets s JOIN workout_exercises we ON we.id=s.workout_exercise_id JOIN exercises e ON e.id=we.exercise_id
+             WHERE s.workout_id IN ($marks) AND s.done=1 AND s.warmup=0 AND e.kind NOT IN ($timed)",
+            array_merge($ids, Catalog::TIMED_KINDS)
+        ) as $s) {
             $t = &$totals[$s['workout_id']];
             $t['sets'] = ($t['sets'] ?? 0) + 1;
             $t['volume'] = ($t['volume'] ?? 0) + (float) $s['weight'] * (int) $s['reps'];
@@ -400,7 +418,7 @@ final class Workouts
     public function exerciseHistory(int $uid, int $exerciseId): array
     {
         $rows = $this->db->all(
-            "SELECT we.id AS we_id, we.variant_key, w.id AS workout_id, w.started_at, w.unit, w.gym_name, s.weight, s.reps
+            "SELECT we.id AS we_id, we.variant_key, w.id AS workout_id, w.started_at, w.unit, w.gym_name, s.weight, s.reps, s.duration_s, s.distance_m, s.level
              FROM workout_exercises we
              JOIN workouts w ON w.id=we.workout_id
              JOIN workout_sets s ON s.workout_exercise_id=we.id
@@ -420,7 +438,9 @@ final class Workouts
                     'sets' => [],
                 ];
             }
-            $out[$r['we_id']]['sets'][] = ['weight' => (float) $r['weight'], 'reps' => (int) $r['reps']];
+            $out[$r['we_id']]['sets'][] = $r['duration_s'] !== null || $r['reps'] === null
+                ? ['duration_s' => (int) $r['duration_s'], 'distance_m' => $r['distance_m'] === null ? null : (float) $r['distance_m'], 'level' => $r['level'] === null ? null : (float) $r['level']]
+                : ['weight' => (float) $r['weight'], 'reps' => (int) $r['reps']];
         }
         return array_values($out);
     }
@@ -437,9 +457,9 @@ final class Workouts
             }
             fputcsv($out, $row, ',', '"', '');
         };
-        $put($out, ['date_utc', 'workout_id', 'gym', 'day', 'exercise', 'equipment', 'set', 'warmup', 'weight', 'unit', 'reps', 'completed']);
+        $put($out, ['date_utc', 'workout_id', 'gym', 'day', 'exercise', 'equipment', 'set', 'warmup', 'weight', 'unit', 'reps', 'completed', 'seconds', 'distance_m', 'level']);
         $rows = $this->db->all(
-            'SELECT w.started_at, w.id AS wid, w.gym_name, w.day_type, w.unit, e.name, e.kind, s.pos, s.warmup, s.weight, s.reps, s.done
+            'SELECT w.started_at, w.id AS wid, w.gym_name, w.day_type, w.unit, e.name, e.kind, s.pos, s.warmup, s.weight, s.reps, s.done, s.duration_s, s.distance_m, s.level
              FROM workout_sets s
              JOIN workout_exercises we ON we.id=s.workout_exercise_id
              JOIN workouts w ON w.id=s.workout_id
@@ -454,6 +474,8 @@ final class Workouts
                 (int) $r['pos'] + 1, (int) $r['warmup'] ? 'yes' : 'no',
                 $r['weight'] === null ? '' : rtrim(rtrim(number_format((float) $r['weight'], 2, '.', ''), '0'), '.'),
                 $r['unit'], $r['reps'] ?? '', (int) $r['done'] ? 'yes' : 'no',
+                $r['duration_s'] ?? '', $r['distance_m'] === null ? '' : rtrim(rtrim(number_format((float) $r['distance_m'], 1, '.', ''), '0'), '.'),
+                $r['level'] === null ? '' : rtrim(rtrim(number_format((float) $r['level'], 1, '.', ''), '0'), '.'),
             ]);
         }
     }
