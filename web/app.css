@@ -194,7 +194,7 @@ a {
 
 .brand-wide.lead {
   width: min(300px, 88%);
-  margin: 0 0 6px -4px;
+  margin: 0 auto 14px;
 }
 
 .brand-wide.small {

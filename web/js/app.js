@@ -275,7 +275,7 @@ function viewLogin() {
     error,
     btn,
   );
-  return h('main', { class: 'page narrow' }, brandWide('lead'), h('p', { class: 'muted' }, 'Accounts are created by whoever runs this server.'), form);
+  return h('main', { class: 'page narrow' }, brandWide('lead'), form);
 }
 
 // ---------------------------------------------------------------- onboarding and profile

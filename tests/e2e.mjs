@@ -46,6 +46,8 @@ const fav = await page.evaluate(async () => {
   const ok = await Promise.all(links.map(async (h) => (await fetch(h)).ok));
   return { links, ok };
 });
+const off = await page.$eval('img.brand-wide', (img) => { const r = img.getBoundingClientRect(); return Math.abs((r.left + r.right) / 2 - window.innerWidth / 2); });
+check('the logo is centred on the sign-in screen, with no other text above the form', off < 2 && !(await page.textContent('.page')).includes('Accounts are created'), `${off}px off centre`);
 check('the browser tab icon is the barbell logo', fav.links.includes('favicon.ico') && fav.links.includes('icons/favicon-32.png') && fav.ok.every(Boolean), JSON.stringify(fav));
 await page.fill('input[name=username]', USER);
 await page.fill('input[name=password]', 'wrong-password-here');
