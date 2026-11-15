@@ -329,7 +329,7 @@ final class Generator
      * @param array|null $plan when the sets, rep range and rest come from a shared
      *                         workout instead of this person's goal and experience
      */
-    public function block(array $user, array $gym, array $ex, bool $reduceSets = false, ?array $plan = null): array
+    public function block(array $user, array $gym, array $ex, bool $reduceSets = false, ?array $plan = null, bool $bodyweightOnly = false): array
     {
         $goal = self::GOALS[$user['goal']] ?? self::GOALS['muscle'];
         $exp = self::EXPERIENCE[$user['experience']] ?? self::EXPERIENCE['intermediate'];
@@ -350,6 +350,14 @@ final class Generator
         $variant = Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']);
         $last = $this->lastPerformance((int) $user['id'], $variant);
         $p = self::progress($last, $repMin, $repMax, self::increment($gym, $ex['kind'], $unit), $unit);
+        if ($bodyweightOnly) {
+            $p = [
+                'weight' => null,
+                'reps' => $p['reps'],
+                'action' => 'stay',
+                'why' => 'Do these sets with bodyweight only.',
+            ];
+        }
         if (!$last && $variant !== (string) $ex['id']
             && $this->db->val('SELECT COUNT(*) FROM workout_exercises WHERE user_id=? AND exercise_id=?', [$user['id'], $ex['id']])) {
             $p['why'] = 'You have done this at another gym, but machines and cable stacks differ, so numbers start fresh here. ' . substr($p['why'], strpos($p['why'], 'Pick'));
@@ -374,24 +382,20 @@ final class Generator
     }
 
     /** Exercises the gym's equipment allows, grouped by movement pattern, best pick first. */
-    private function available(int $uid, array $gym): array
+    private function available(int $uid, array $gym, bool $bodyweightOnly): array
     {
-        $have = array_flip($gym['equipment']);
         $by = [];
         foreach (Catalog::forUser($this->db, $uid) as $ex) {
-            foreach ($ex['equipment'] as $need) {
-                if (!isset($have[$need])) {
-                    continue 2;
-                }
+            if (Catalog::supports($ex, $gym['equipment'], $bodyweightOnly)) {
+                $by[$ex['pattern']][] = $ex;
             }
-            $by[$ex['pattern']][] = $ex;
         }
         return $by;
     }
 
     /**
      * @param array $opts day_type, minutes, locked (slot key => exercise id),
-     *                    avoid (exercise ids to steer away from), now (unix time)
+     *                    avoid (exercise ids to steer away from), bodyweight_only, now (unix time)
      */
     public function generate(array $user, array $gym, array $opts = []): array
     {
@@ -406,7 +410,9 @@ final class Generator
         $avoid = array_flip(array_map('intval', is_array($opts['avoid'] ?? null) ? $opts['avoid'] : []));
         $stats = $this->muscleStats($uid, $now);
         $recent = $this->recentUse($uid, $now);
-        $by = $this->available($uid, $gym);
+        $bodyweightOnly = ($opts['bodyweight_only'] ?? false) === true;
+        $by = $this->available($uid, $gym, $bodyweightOnly);
+        $equipmentContext = $bodyweightOnly ? 'without equipment' : 'with the equipment at ' . $gym['name'];
         $byId = [];
         foreach ($by as $list) {
             foreach ($list as $ex) {
@@ -474,12 +480,12 @@ final class Generator
             }
             if (!$pick) {
                 if ($isRequired) {
-                    $skipped[] = 'No ' . strtolower(Catalog::PATTERNS[$patterns[0]]) . ' option with the equipment at ' . $gym['name'] . '.';
+                    $skipped[] = 'No ' . strtolower(Catalog::PATTERNS[$patterns[0]]) . " option $equipmentContext.";
                 }
                 continue;
             }
             $tired = $stats[$muscle]['recovery'] < 50;
-            $block = $this->block($user, $gym, $pick, $tired);
+            $block = $this->block($user, $gym, $pick, $tired, bodyweightOnly: $bodyweightOnly);
             if (count($blocks) >= 3 && $total + $block['minutes'] > $minutes) {
                 if ($how === 'locked') {
                     // Locked exercises always stay, even if they run the session long.
@@ -498,7 +504,7 @@ final class Generator
             } elseif ($how === 'rotated') {
                 $why = "A different $label option, as you asked.";
             } elseif ($isRequired) {
-                $why = "First choice for $label with the equipment at {$gym['name']}.";
+                $why = "First choice for $label $equipmentContext.";
             } else {
                 $why = "Added because $mLabel has had little work this week (" . self::fmt((float) $stats[$muscle]['weekly_sets']) . ' sets).';
             }
@@ -518,6 +524,7 @@ final class Generator
             'day_label' => self::DAY_LABELS[$dayType],
             'gym_id' => $gym['id'],
             'gym_name' => $gym['name'],
+            'bodyweight_only' => $bodyweightOnly,
             'unit' => $user['unit'],
             'minutes' => $minutes,
             'est_minutes' => (int) round($total),
@@ -528,9 +535,9 @@ final class Generator
     }
 
     /** Swap candidates: same movement first, then other lifts for the same main muscle. */
-    public function alternatives(int $uid, array $gym, int $exerciseId, array $exclude = []): array
+    public function alternatives(int $uid, array $gym, int $exerciseId, array $exclude = [], bool $bodyweightOnly = false): array
     {
-        $by = $this->available($uid, $gym);
+        $by = $this->available($uid, $gym, $bodyweightOnly);
         $all = Catalog::forUser($this->db, $uid, true);
         $target = null;
         foreach ($all as $ex) {

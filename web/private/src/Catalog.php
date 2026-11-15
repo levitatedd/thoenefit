@@ -67,7 +67,8 @@ final class Catalog
             ['group' => 'Free weights', 'items' => [
                 'barbell' => 'Barbell and plates',
                 'ez_bar' => 'EZ curl bar',
-                'dumbbells' => 'Dumbbells',
+                'single_dumbbell' => 'Single dumbbell',
+                'dumbbells' => 'Dumbbell pair',
                 'kettlebells' => 'Kettlebells',
             ]],
             ['group' => 'Benches and bars', 'items' => [
@@ -76,6 +77,7 @@ final class Catalog
                 'rack' => 'Squat rack or stands',
                 'pullup_bar' => 'Pull-up bar',
                 'dip_bars' => 'Dip bars',
+                'step_box' => 'Exercise step or box',
             ]],
             ['group' => 'Cables and bands', 'items' => [
                 'cable' => 'Cable station',
@@ -97,6 +99,25 @@ final class Catalog
                 'back_extension' => 'Back extension bench',
             ]],
         ];
+    }
+
+    // A pair supplies one dumbbell. A suitable bench can still be used for a step-up.
+    public const EQUIPMENT_ALTERNATIVES = [
+        'single_dumbbell' => ['dumbbells'],
+        'step_box' => ['bench'],
+    ];
+
+    public static function supports(array $exercise, array $equipment, bool $bodyweightOnly = false): bool
+    {
+        if ($bodyweightOnly) {
+            return $exercise['kind'] === 'bodyweight' && $exercise['equipment'] === [];
+        }
+        foreach ($exercise['equipment'] as $required) {
+            if (!in_array($required, $equipment, true) && !array_intersect(self::EQUIPMENT_ALTERNATIVES[$required] ?? [], $equipment)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static function equipmentKeys(): array
@@ -136,6 +157,7 @@ final class Catalog
             // Horizontal press
             ['barbell-bench-press', 'Barbell Bench Press', 'barbell', ['barbell', 'bench', 'rack'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 1, 'Pin your shoulder blades back and down before you unrack. Lower the bar to mid-chest with forearms vertical, then press up and slightly back toward the rack. Keep both feet planted the whole time.'],
             ['dumbbell-bench-press', 'Dumbbell Bench Press', 'dumbbell', ['dumbbells', 'bench'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 2, 'Start with the dumbbells stacked over your shoulders. Lower until your elbows dip just below the bench, about 45 degrees from your ribs, then press back together without clanking the bells.'],
+            ['one-arm-dumbbell-floor-press', 'One-Arm Dumbbell Floor Press', 'dumbbell', ['single_dumbbell'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 4, 'Lie on the floor with knees bent. Press one dumbbell over your shoulder, then lower until your upper arm touches the floor. Count reps per side.'],
             ['machine-chest-press', 'Machine Chest Press', 'machine', ['chest_press'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 3, 'Set the seat so the handles line up with mid-chest. Keep your back on the pad, press until your arms are almost straight, and return slowly without letting the stack touch down.'],
             ['smith-bench-press', 'Smith Machine Bench Press', 'machine', ['smith', 'bench'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 4, 'Slide the bench so the bar tracks to mid-chest. Unhook, lower under control until the bar grazes your shirt, and press up without flaring your elbows wide.'],
             ['chest-dip', 'Chest Dip', 'bodyweight', ['dip_bars'], 'horizontal_push', ['chest'], ['triceps', 'shoulders'], 5, 'Lean your torso forward and let your elbows drift out a little. Lower until your upper arms are about level with the bars, then drive up without shrugging.'],
@@ -145,7 +167,7 @@ final class Catalog
             ['incline-dumbbell-press', 'Incline Dumbbell Press', 'dumbbell', ['dumbbells', 'incline_bench'], 'incline_push', ['chest'], ['shoulders', 'triceps'], 1, 'Set the bench around 30 degrees. Press the dumbbells up over your collarbones, then lower them wide and deep while keeping your wrists stacked over your elbows.'],
             ['incline-barbell-press', 'Incline Barbell Press', 'barbell', ['barbell', 'incline_bench', 'rack'], 'incline_push', ['chest'], ['shoulders', 'triceps'], 2, 'With the bench at about 30 degrees, lower the bar to just under your collarbones. Keep your chest lifted and press straight up over your shoulders.'],
             ['smith-incline-press', 'Smith Machine Incline Press', 'machine', ['smith', 'incline_bench'], 'incline_push', ['chest'], ['shoulders', 'triceps'], 3, 'Position the incline bench so the bar meets your upper chest. Lower slowly, pause lightly, and press without locking out hard.'],
-            ['feet-elevated-push-up', 'Feet-Elevated Push-Up', 'bodyweight', [], 'incline_push', ['chest'], ['shoulders', 'triceps', 'abs'], 5, 'Put your feet on a chair or step and your hands on the floor. Keep your body rigid, lower your face toward the floor between your hands, and press back up.'],
+            ['feet-elevated-push-up', 'Feet-Elevated Push-Up', 'bodyweight', ['step_box'], 'incline_push', ['chest'], ['shoulders', 'triceps', 'abs'], 5, 'Put your feet on a stable exercise step, box or bench and your hands on the floor. Keep your body rigid, lower your face toward the floor between your hands, and press back up.'],
 
             // Chest fly
             ['cable-fly', 'Cable Fly', 'cable', ['cable'], 'chest_fly', ['chest'], ['shoulders'], 1, 'Set both pulleys at shoulder height and step forward into a split stance. With a soft bend in your elbows, sweep your hands together in front of your chest and let them open slowly.'],
@@ -162,20 +184,21 @@ final class Catalog
             ['pike-push-up', 'Pike Push-Up', 'bodyweight', [], 'vertical_push', ['shoulders'], ['triceps'], 6, 'Start in a push-up position and walk your feet in until your hips are high. Bend your elbows to lower the top of your head toward the floor ahead of your hands, then press back up.'],
 
             // Lateral raise
-            ['dumbbell-lateral-raise', 'Dumbbell Lateral Raise', 'dumbbell', ['dumbbells'], 'lateral_raise', ['shoulders'], [], 1, 'Lean forward a touch and raise the dumbbells out to your sides until your hands reach shoulder height. Lead with your elbows and lower more slowly than you lifted.'],
+            ['dumbbell-lateral-raise', 'Dumbbell Lateral Raise', 'dumbbell', ['single_dumbbell'], 'lateral_raise', ['shoulders'], [], 1, 'Lean forward slightly and raise the dumbbell out to your side until it reaches shoulder height. Lead with your elbow, lower slowly, and repeat on the other side.'],
             ['cable-lateral-raise', 'Cable Lateral Raise', 'cable', ['cable'], 'lateral_raise', ['shoulders'], [], 2, 'Stand side-on to a low pulley and hold the handle in your far hand. Raise your arm out to the side to shoulder height and resist the cable on the way down.'],
             ['band-lateral-raise', 'Band Lateral Raise', 'band', ['bands'], 'lateral_raise', ['shoulders'], [], 3, 'Stand on the middle of the band and hold an end in each hand. Raise your arms out to shoulder height with a slight elbow bend and lower with control.'],
 
             // Triceps
             ['cable-pushdown', 'Cable Triceps Pushdown', 'cable', ['cable'], 'triceps', ['triceps'], [], 1, 'Pin your elbows to your sides and hinge forward slightly. Push the handle down until your arms are straight, then let your forearms rise to just past level.'],
             ['skull-crusher', 'EZ-Bar Skull Crusher', 'barbell', ['ez_bar', 'bench'], 'triceps', ['triceps'], [], 2, 'Lie back holding the bar over your forehead with your upper arms tilted slightly toward your head. Bend only at the elbows to lower the bar behind your hairline, then extend.'],
-            ['overhead-dumbbell-extension', 'Overhead Dumbbell Extension', 'dumbbell', ['dumbbells'], 'triceps', ['triceps'], [], 3, 'Hold one dumbbell with both hands overhead. Keep your elbows pointing forward as you lower it behind your head, then straighten your arms fully.'],
+            ['overhead-dumbbell-extension', 'Overhead Dumbbell Extension', 'dumbbell', ['single_dumbbell'], 'triceps', ['triceps'], [], 3, 'Hold one dumbbell with both hands overhead. Keep your elbows pointing forward as you lower it behind your head, then straighten your arms fully.'],
             ['close-grip-bench-press', 'Close-Grip Bench Press', 'barbell', ['barbell', 'bench', 'rack'], 'triceps', ['triceps'], ['chest', 'shoulders'], 4, 'Grip the bar at shoulder width. Tuck your elbows close as you lower to your lower chest, and press up by straightening your arms.'],
             ['band-pushdown', 'Band Pushdown', 'band', ['bands'], 'triceps', ['triceps'], [], 5, 'Anchor the band overhead. With elbows fixed at your sides, press your hands down until your arms are straight and pause before letting them rise.'],
             ['bench-dip', 'Bench Dip', 'bodyweight', ['bench'], 'triceps', ['triceps'], ['shoulders', 'chest'], 6, 'Hands on the bench edge beside your hips, legs out in front. Lower until your elbows reach roughly 90 degrees, keeping your back close to the bench, then press up.'],
             ['diamond-push-up', 'Diamond Push-Up', 'bodyweight', [], 'triceps', ['triceps'], ['chest', 'shoulders'], 7, 'Place your hands close together under your chest. Keep your elbows brushing your ribs as you lower, then press up to full lockout.'],
 
             // Vertical pull
+            ['prone-pulldown', 'Prone Bodyweight Pulldown', 'bodyweight', [], 'vertical_pull', ['lats', 'upper_back'], ['shoulders'], 8, 'Lie face down and reach both arms overhead. Lift your hands slightly and draw your elbows toward your ribs, then reach forward again. Keep your neck relaxed.'],
             ['pull-up', 'Pull-Up', 'bodyweight', ['pullup_bar'], 'vertical_pull', ['lats'], ['biceps', 'upper_back'], 1, 'Hang with an overhand grip a little wider than your shoulders. Pull your elbows down toward your back pockets until your chin clears the bar, then lower all the way.'],
             ['lat-pulldown', 'Lat Pulldown', 'machine', ['lat_pulldown'], 'vertical_pull', ['lats'], ['biceps', 'upper_back'], 2, 'Lock your thighs under the pad and lean back slightly. Pull the bar to your upper chest by driving your elbows down, and let it rise until your arms are long.'],
             ['chin-up', 'Chin-Up', 'bodyweight', ['pullup_bar'], 'vertical_pull', ['lats'], ['biceps'], 3, 'Take a shoulder-width underhand grip. Pull your chest toward the bar while keeping your shoulders away from your ears, and lower to a full hang.'],
@@ -184,7 +207,8 @@ final class Catalog
 
             // Row
             ['barbell-row', 'Barbell Row', 'barbell', ['barbell'], 'horizontal_pull', ['upper_back', 'lats'], ['biceps', 'lower_back'], 1, 'Hinge until your torso is close to parallel with the floor and keep your back flat. Pull the bar to your lower ribs, pause, and lower it without standing up.'],
-            ['one-arm-dumbbell-row', 'One-Arm Dumbbell Row', 'dumbbell', ['dumbbells', 'bench'], 'horizontal_pull', ['lats', 'upper_back'], ['biceps'], 2, 'Brace one hand and knee on the bench. Pull the dumbbell toward your hip, keeping your shoulders square to the floor, and stretch your arm fully at the bottom.'],
+            ['one-arm-dumbbell-row', 'One-Arm Dumbbell Row', 'dumbbell', ['single_dumbbell', 'bench'], 'horizontal_pull', ['lats', 'upper_back'], ['biceps'], 2, 'Brace one hand and knee on the bench. Pull the dumbbell toward your hip, keeping your shoulders square to the floor, and stretch your arm fully at the bottom.'],
+            ['one-arm-unsupported-dumbbell-row', 'One-Arm Dumbbell Row (No Bench)', 'dumbbell', ['single_dumbbell'], 'horizontal_pull', ['lats', 'upper_back'], ['biceps'], 5, 'Stagger your feet, hinge forward, and brace your free hand on your front thigh. Row the dumbbell toward your hip without twisting. Count reps per side.'],
             ['seated-cable-row', 'Seated Cable Row', 'machine', ['seated_row'], 'horizontal_pull', ['upper_back', 'lats'], ['biceps'], 3, 'Sit tall with knees slightly bent. Pull the handle to your navel while squeezing your shoulder blades together, then reach forward without rounding your lower back.'],
             ['chest-supported-row', 'Chest-Supported Dumbbell Row', 'dumbbell', ['dumbbells', 'incline_bench'], 'horizontal_pull', ['upper_back', 'lats'], ['biceps'], 4, 'Lie chest-down on an incline bench. Row both dumbbells toward your hips, hold the squeeze, and lower until your arms hang straight.'],
             ['standing-cable-row', 'Standing Cable Row', 'cable', ['cable'], 'horizontal_pull', ['upper_back', 'lats'], ['biceps'], 5, 'Set the pulley at waist height and stand in a staggered stance. Pull the handle to your side, elbow close to your body, without twisting your torso.'],
@@ -201,16 +225,16 @@ final class Catalog
             // Biceps
             ['ez-bar-curl', 'EZ-Bar Curl', 'barbell', ['ez_bar'], 'biceps', ['biceps'], ['forearms'], 1, 'Stand tall with elbows at your sides. Curl the bar to shoulder height without swinging, then lower until your arms are fully straight.'],
             ['barbell-curl', 'Barbell Curl', 'barbell', ['barbell'], 'biceps', ['biceps'], ['forearms'], 2, 'Grip the bar at shoulder width with palms up. Keep your elbows still and your torso upright as you curl, and take the lowering slowly.'],
-            ['dumbbell-curl', 'Dumbbell Curl', 'dumbbell', ['dumbbells'], 'biceps', ['biceps'], ['forearms'], 3, 'Start with palms facing your thighs and turn them up as you curl. Keep your upper arms still and lower all the way down.'],
-            ['hammer-curl', 'Hammer Curl', 'dumbbell', ['dumbbells'], 'biceps', ['biceps', 'forearms'], [], 4, 'Hold the dumbbells with palms facing each other the whole way. Curl to shoulder height with elbows fixed and lower under control.'],
+            ['dumbbell-curl', 'Dumbbell Curl', 'dumbbell', ['single_dumbbell'], 'biceps', ['biceps'], ['forearms'], 3, 'Start with your palm facing your thigh and turn it up as you curl. Do both sides. Keep your upper arms still and lower all the way down.'],
+            ['hammer-curl', 'Hammer Curl', 'dumbbell', ['single_dumbbell'], 'biceps', ['biceps', 'forearms'], [], 4, 'Keep your palm facing inward throughout. Do both sides. Curl to shoulder height with elbows fixed and lower under control.'],
             ['cable-curl', 'Cable Curl', 'cable', ['cable'], 'biceps', ['biceps'], ['forearms'], 4, 'Stand facing a low pulley with a straight bar. Curl to your chest with elbows pinned at your sides and resist the cable on the way down.'],
-            ['incline-dumbbell-curl', 'Incline Dumbbell Curl', 'dumbbell', ['dumbbells', 'incline_bench'], 'biceps', ['biceps'], ['forearms'], 5, 'Lie back on a 45 to 60 degree incline and let your arms hang behind your body. Curl without letting your elbows drift forward.'],
+            ['incline-dumbbell-curl', 'Incline Dumbbell Curl', 'dumbbell', ['single_dumbbell', 'incline_bench'], 'biceps', ['biceps'], ['forearms'], 5, 'Lie back on a 45 to 60 degree incline and let your working arm hang behind your body. Do both sides. Curl without letting your elbows drift forward.'],
             ['band-curl', 'Band Curl', 'band', ['bands'], 'biceps', ['biceps'], ['forearms'], 6, 'Stand on the band and hold the ends palms-up. Curl to your shoulders and lower slowly against the tension.'],
 
             // Squat
             ['back-squat', 'Barbell Back Squat', 'barbell', ['barbell', 'rack'], 'squat', ['quads', 'glutes'], ['hamstrings', 'lower_back', 'abs'], 1, 'Rest the bar on your upper back and take a breath into your belly. Sit down between your hips with knees tracking over your toes until your thighs reach parallel, then stand by driving the floor away.'],
             ['leg-press', 'Leg Press', 'machine', ['leg_press'], 'squat', ['quads', 'glutes'], ['hamstrings'], 2, 'Place your feet shoulder-width in the middle of the platform. Lower until your knees pass 90 degrees while your lower back stays on the pad, then press without locking your knees hard.'],
-            ['goblet-squat', 'Dumbbell Goblet Squat', 'dumbbell', ['dumbbells'], 'squat', ['quads', 'glutes'], ['abs'], 3, 'Hold one dumbbell against your chest. Keep your torso upright and squat between your knees until your elbows reach the inside of your thighs.'],
+            ['goblet-squat', 'Dumbbell Goblet Squat', 'dumbbell', ['single_dumbbell'], 'squat', ['quads', 'glutes'], ['abs'], 3, 'Hold one dumbbell against your chest. Keep your torso upright and squat between your knees until your elbows reach the inside of your thighs.'],
             ['hack-squat', 'Hack Squat', 'machine', ['hack_squat'], 'squat', ['quads'], ['glutes'], 3, 'Set your feet a little forward on the platform and keep your back flat on the pad. Lower as deep as you can control and push up through your whole foot.'],
             ['front-squat', 'Barbell Front Squat', 'barbell', ['barbell', 'rack'], 'squat', ['quads'], ['glutes', 'abs', 'upper_back'], 4, 'Rack the bar on the front of your shoulders with elbows high. Stay upright as you squat to depth and drive your elbows up as you stand.'],
             ['kettlebell-goblet-squat', 'Kettlebell Goblet Squat', 'kettlebell', ['kettlebells'], 'squat', ['quads', 'glutes'], ['abs'], 4, 'Hold the kettlebell by the horns at your chest. Squat down between your knees with your chest tall, then stand all the way up.'],
@@ -227,15 +251,16 @@ final class Catalog
             ['single-leg-rdl', 'Single-Leg Romanian Deadlift', 'bodyweight', [], 'hinge', ['hamstrings', 'glutes'], ['lower_back'], 7, 'Balance on one leg with a soft knee. Tip forward as your free leg reaches behind you, keeping hips level, then return to standing. Count reps per side.'],
 
             // Single-leg
-            ['dumbbell-reverse-lunge', 'Dumbbell Reverse Lunge', 'dumbbell', ['dumbbells'], 'lunge', ['quads', 'glutes'], ['hamstrings'], 1, 'Step back far enough that both knees reach about 90 degrees. Keep your weight on the front foot and push through it to return. Count reps per side.'],
-            ['bulgarian-split-squat', 'Bulgarian Split Squat', 'dumbbell', ['dumbbells', 'bench'], 'lunge', ['quads', 'glutes'], ['hamstrings'], 2, 'Rest your back foot on the bench and hop your front foot forward. Drop your back knee straight down, lean slightly forward, and stand through your front heel. Count reps per side.'],
+            ['dumbbell-reverse-lunge', 'Dumbbell Reverse Lunge', 'dumbbell', ['single_dumbbell'], 'lunge', ['quads', 'glutes'], ['hamstrings'], 1, 'Step back far enough that both knees reach about 90 degrees. Keep your weight on the front foot and push through it to return. Count reps per side.'],
+            ['bulgarian-split-squat', 'Bulgarian Split Squat', 'dumbbell', ['single_dumbbell', 'bench'], 'lunge', ['quads', 'glutes'], ['hamstrings'], 2, 'Rest your back foot on the bench and hop your front foot forward. Drop your back knee straight down, lean slightly forward, and stand through your front heel. Count reps per side.'],
             ['barbell-lunge', 'Barbell Reverse Lunge', 'barbell', ['barbell', 'rack'], 'lunge', ['quads', 'glutes'], ['hamstrings', 'abs'], 3, 'With the bar on your upper back, step one leg back and lower until the knee hovers above the floor. Drive through the front foot to stand. Count reps per side.'],
-            ['dumbbell-step-up', 'Dumbbell Step-Up', 'dumbbell', ['dumbbells', 'bench'], 'lunge', ['quads', 'glutes'], [], 4, 'Plant your whole foot on the bench. Stand up using the top leg only, without pushing off the floor, and lower yourself slowly. Count reps per side.'],
+            ['dumbbell-step-up', 'Dumbbell Step-Up', 'dumbbell', ['single_dumbbell', 'step_box'], 'lunge', ['quads', 'glutes'], [], 4, 'Hold a dumbbell and plant your whole foot on a stable step, box or bench. Stand up using the top leg only, without pushing off the floor, and lower yourself slowly. Count reps per side.'],
+            ['bodyweight-step-up', 'Bodyweight Step-Up', 'bodyweight', ['step_box'], 'lunge', ['quads', 'glutes'], [], 5, 'Plant your whole foot on a stable step, box or bench. Stand up using the top leg and lower slowly. Count reps per side.'],
             ['reverse-lunge', 'Bodyweight Reverse Lunge', 'bodyweight', [], 'lunge', ['quads', 'glutes'], ['hamstrings'], 6, 'Step back and lower until both knees are bent to about 90 degrees. Keep your torso tall and push through the front foot to return. Count reps per side.'],
 
             // Hip thrust
             ['barbell-hip-thrust', 'Barbell Hip Thrust', 'barbell', ['barbell', 'bench'], 'hip_thrust', ['glutes'], ['hamstrings'], 1, 'Sit with your upper back against the bench and the bar over your hip crease. Drive through your heels until your torso is level, tuck your chin, and pause at the top.'],
-            ['dumbbell-hip-thrust', 'Dumbbell Hip Thrust', 'dumbbell', ['dumbbells', 'bench'], 'hip_thrust', ['glutes'], ['hamstrings'], 2, 'Rest one dumbbell on your hips with your shoulders on the bench. Lift your hips until your thighs are level with your torso and squeeze before lowering.'],
+            ['dumbbell-hip-thrust', 'Dumbbell Hip Thrust', 'dumbbell', ['single_dumbbell', 'bench'], 'hip_thrust', ['glutes'], ['hamstrings'], 2, 'Rest one dumbbell on your hips with your shoulders on the bench. Lift your hips until your thighs are level with your torso and squeeze before lowering.'],
             ['glute-bridge', 'Glute Bridge', 'bodyweight', [], 'hip_thrust', ['glutes'], ['hamstrings'], 3, 'Lie on your back with knees bent and feet flat. Press through your heels to lift your hips into a straight line from knees to shoulders, and hold for a second.'],
 
             // Leg curl
@@ -249,7 +274,8 @@ final class Catalog
             ['machine-calf-raise', 'Machine Calf Raise', 'machine', ['calf_raise'], 'calf', ['calves'], [], 1, 'Stand on the balls of your feet with heels hanging off. Lower into a deep stretch, pause, and rise as high as you can.'],
             ['dumbbell-calf-raise', 'Dumbbell Calf Raise', 'dumbbell', ['dumbbells'], 'calf', ['calves'], [], 2, 'Hold a dumbbell in each hand and stand on a step or plate if you have one. Rise onto your toes, pause at the top, and lower slowly.'],
             ['leg-press-calf-raise', 'Leg Press Calf Raise', 'machine', ['leg_press'], 'calf', ['calves'], [], 3, 'Put the balls of your feet on the bottom edge of the platform with legs nearly straight. Push through your toes and let your heels drop under control. Keep the safeties engaged.'],
-            ['single-leg-calf-raise', 'Single-Leg Calf Raise', 'bodyweight', [], 'calf', ['calves'], [], 4, 'Stand on one foot on a step, holding something for balance. Drop your heel below the step, then rise all the way up. Count reps per side.'],
+            ['single-leg-calf-raise', 'Single-Leg Calf Raise', 'bodyweight', ['step_box'], 'calf', ['calves'], [], 4, 'Stand on one foot on a step, holding something for balance. Drop your heel below the step, then rise all the way up. Count reps per side.'],
+            ['standing-bodyweight-calf-raise', 'Standing Bodyweight Calf Raise', 'bodyweight', [], 'calf', ['calves'], [], 7, 'Stand on the floor with feet hip-width apart. Rise onto your toes, pause, and slowly lower your heels to the floor.'],
 
             // Core
             ['hanging-leg-raise', 'Hanging Leg Raise', 'bodyweight', ['pullup_bar'], 'core', ['abs'], ['forearms'], 1, 'Hang from the bar without swinging. Curl your pelvis up as you raise your knees or straight legs, and lower them slowly.'],

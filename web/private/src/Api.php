@@ -222,7 +222,7 @@ final class Api
                 return;
             case 'alternatives':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
-                self::json(['alternatives' => $this->gen->alternatives($uid, $gym, (int) ($in['exercise_id'] ?? 0), (array) ($in['exclude'] ?? []))]);
+                self::json(['alternatives' => $this->gen->alternatives($uid, $gym, (int) ($in['exercise_id'] ?? 0), (array) ($in['exclude'] ?? []), ($in['bodyweight_only'] ?? false) === true)]);
                 return;
             case 'suggest':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
@@ -232,10 +232,11 @@ final class Api
                         $ex = $e;
                     }
                 }
-                if (!$ex) {
+                $bodyweightOnly = ($in['bodyweight_only'] ?? false) === true;
+                if (!$ex || ($bodyweightOnly && !Catalog::supports($ex, [], true))) {
                     throw new HttpError(404, 'Exercise not found.');
                 }
-                self::json(['block' => $this->gen->block($user, $gym, $ex)]);
+                self::json(['block' => $this->gen->block($user, $gym, $ex, bodyweightOnly: $bodyweightOnly)]);
                 return;
             case 'import_fitbod':
                 @set_time_limit(180);
@@ -381,6 +382,7 @@ final class Api
             'strava' => $this->strava->connection($uid),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
+                'equipment_alternatives' => Catalog::EQUIPMENT_ALTERNATIVES,
                 'presets' => Catalog::presets(),
                 'muscles' => Catalog::MUSCLES,
                 'patterns' => Catalog::PATTERNS,
