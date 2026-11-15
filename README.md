@@ -100,6 +100,7 @@ Open <http://localhost:8000>. To test from a phone on the same Wi-Fi, bind to `0
 php tests/run.php
 node tests/sync.test.mjs
 node tests/search.test.mjs
+node tests/version.test.mjs
 ```
 
 GitHub Actions also runs the PHP checks against MySQL. For the phone-sized Chrome walkthrough, see the Playwright instructions at the top of [tests/e2e.mjs](tests/e2e.mjs).
@@ -114,6 +115,10 @@ Pushing to `main` runs checks and uploads `web/` over SFTP. You can also run **T
 2. Fill in `config.example.php` with the database settings. Save it as `~/thoenefit-config.php` on DreamHost, outside the web root, and run `chmod 600 ~/thoenefit-config.php`.
 3. Set GitHub Actions secrets `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD`, and `SFTP_PATH`. The path is the site’s web folder. The upload only runs if all four secrets are set.
 4. Deploy, then create the first account over SSH with `php ~/fit.mikethoene.com/private/bin/create-user.php mike "Mike"`.
+
+### Version number
+
+The bottom of Settings shows the app version, such as `Version 0.1.104`. Each deploy to `main` raises the last number by one on its own; staging shows the number the next release will get, such as `0.1.105-staging`. To start a new minor or major version, change [`VERSION`](VERSION) (for example to `0.2.0`) and release it.
 
 ### Updates and database changes
 

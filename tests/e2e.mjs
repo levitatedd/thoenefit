@@ -609,6 +609,7 @@ await page.waitForSelector('text=Add to your Home Screen');
 check('settings include Home Screen instructions for Safari', (await page.textContent('.page')).includes('Tap the Share button'));
 await shot('11-settings');
 check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
+check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
 
 console.log('Staying up to date');
 if (!process.env.TF_URL) {

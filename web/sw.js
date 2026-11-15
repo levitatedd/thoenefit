@@ -15,6 +15,7 @@ const SHELL = [
   'js/store.js',
   'js/search.js',
   'js/ui.js',
+  'js/version.js',
   'manifest.webmanifest',
   'favicon.ico',
   'icons/favicon-32.png',
