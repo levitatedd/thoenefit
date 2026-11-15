@@ -14,6 +14,7 @@ require_once __DIR__ . '/Generator.php';
 require_once __DIR__ . '/FitbodImport.php';
 require_once __DIR__ . '/Shares.php';
 require_once __DIR__ . '/Strava.php';
+require_once __DIR__ . '/StravaStrength.php';
 require_once __DIR__ . '/Api.php';
 
 final class HttpError extends \RuntimeException

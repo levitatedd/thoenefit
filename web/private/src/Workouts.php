@@ -192,7 +192,7 @@ final class Workouts
             return null;
         }
         $exs = $this->db->all(
-            'SELECT we.*, e.name, e.kind, e.pattern FROM workout_exercises we JOIN exercises e ON e.id=we.exercise_id WHERE we.workout_id=? ORDER BY we.pos',
+            'SELECT we.*, e.slug, e.name, e.kind, e.pattern FROM workout_exercises we JOIN exercises e ON e.id=we.exercise_id WHERE we.workout_id=? ORDER BY we.pos',
             [$w['id']]
         );
         $sets = [];
@@ -223,6 +223,7 @@ final class Workouts
             $out['exercises'][] = [
                 'id' => $e['id'],
                 'exercise_id' => (int) $e['exercise_id'],
+                'slug' => $e['slug'],
                 'name' => $e['name'],
                 'kind' => $e['kind'],
                 'pattern' => $e['pattern'],

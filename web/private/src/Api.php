@@ -153,7 +153,12 @@ final class Api
                 self::json(['strava' => $this->strava->disconnect($uid)]);
                 return;
             case 'strava_export':
-                self::json($this->strava->export($uid, (string) ($in['id'] ?? ''), ($in['include_summary'] ?? false) === true));
+                $offset = $in['utc_offset'] ?? 0;
+                self::json($this->strava->export($uid, (string) ($in['id'] ?? ''),
+                    ($in['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0));
+                return;
+            case 'strava_check_export':
+                self::json(['export' => $this->strava->checkExport($uid, (string) ($in['id'] ?? ''))]);
                 return;
             case 'logout':
                 $this->auth->logout();
