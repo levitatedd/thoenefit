@@ -31,6 +31,8 @@ jobs:
         run: node tests/search.test.mjs
       - name: Version number checks
         run: node tests/version.test.mjs
+      - name: Release notes checks
+        run: node tests/changelog.test.mjs
 
   deploy:
     name: Upload to DreamHost
@@ -101,6 +103,8 @@ jobs:
           grep -q "const BUILD = '$BUILD';" web/sw.js || { echo "::error::Could not stamp the build into web/sw.js."; exit 1; }
           sed -i "s/^export const APP_VERSION = 'dev';/export const APP_VERSION = '$APP_VERSION';/" web/js/version.js
           grep -q "export const APP_VERSION = '$APP_VERSION';" web/js/version.js || { echo "::error::Could not stamp the version into web/js/version.js."; exit 1; }
+          # The "What's new" notes, built from the pull requests each release brought in.
+          APP_VERSION="$APP_VERSION" node .github/scripts/changelog.mjs "$GITHUB_REF_NAME" > web/changelog.json
           echo "Version $APP_VERSION, build $BUILD"
 
       - name: Upload the web folder over SFTP

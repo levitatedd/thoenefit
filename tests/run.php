@@ -804,6 +804,49 @@ $nightBody = end($requests)[1];
 check('a workout left open overnight goes to Strava as the time actually trained (46 minutes, not 14 hours)',
     $nightBody['start_date_local'] === '2026-10-21T00:00:00Z' && $nightBody['elapsed_time'] === 46 * 60, json_encode([$nightBody['start_date_local'] ?? null, $nightBody['elapsed_time'] ?? null]));
 
+// #87: "Send to Strava" ticked on the Finish sheet travels with the workout and is
+// sent by the save that finishes it.
+$finishDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8], [135, 8]]]], '2026-10-22T16:00:00Z', 'active');
+$finishDoc['exercises'][0]['sets'][0]['done_at'] = '2026-10-22T16:10:00Z';
+$finishDoc['exercises'][0]['sets'][1]['done_at'] = '2026-10-22T16:40:00Z';
+check('saving a workout in progress does not count as finishing it', $wk->save($uid, $finishDoc)['completed_now'] === false);
+$finishDoc['status'] = 'completed';
+$finishDoc['completed_at'] = '2026-10-22T16:45:00Z';
+$finishDoc['rev'] = 2;
+$finishDoc['strava_send'] = ['include_summary' => false, 'utc_offset' => -21600];
+$finished = $wk->save($uid, $finishDoc);
+$before = count($requests);
+$reply = [201, ['id' => '87000000000000001']];
+$onFinish = $strava->sendOnFinish($uid, $finishDoc['id'], $finishDoc['strava_send'], $finished['completed_now']);
+check('the save that finishes a workout sends it to Strava once',
+    $finished['completed_now'] === true && $onFinish === ['activity_id' => '87000000000000001'] && count($requests) === $before + 1
+    && end($requests)[0] === 'https://www.strava.com/api/v3/activities');
+$again = $wk->save($uid, $finishDoc);
+check('repeating that save (a retry, or an edit later) does not send it again',
+    $again['completed_now'] === false && $strava->sendOnFinish($uid, $finishDoc['id'], $finishDoc['strava_send'], $again['completed_now']) === null
+    && count($requests) === $before + 1);
+
+$plainDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8]]]], '2026-10-23T16:00:00Z');
+$plainDoc['completed_at'] = '2026-10-23T16:30:00Z';
+$plain = $wk->save($uid, $plainDoc);
+check('a workout finished offline and synced for the first time counts as finished',  $plain['completed_now'] === true);
+check('finishing with Send to Strava unticked sends nothing',
+    $strava->sendOnFinish($uid, $plainDoc['id'], $plainDoc['strava_send'] ?? null, $plain['completed_now']) === null && count($requests) === $before + 1);
+check('someone not connected to Strava sends nothing',
+    $strava->sendOnFinish($uid2, $plainDoc['id'], ['include_summary' => false], true) === null && count($requests) === $before + 1);
+
+$rejectDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8]]]], '2026-10-24T16:00:00Z');
+$rejectDoc['completed_at'] = '2026-10-24T16:30:00Z';
+$rejected = $wk->save($uid, $rejectDoc);
+$reply = [429, ['message' => 'Rate limit exceeded']];
+$logged = ini_set('error_log', '/dev/null');
+$onFinish = $strava->sendOnFinish($uid, $rejectDoc['id'], ['include_summary' => true, 'utc_offset' => 0], $rejected['completed_now']);
+ini_set('error_log', $logged === false ? '' : $logged);
+check('when Strava refuses, the workout stays saved and can be sent again from History',
+    $onFinish === null && $wk->get($uid, $rejectDoc['id'])['status'] === 'completed' && $strava->exportStatus($uid, $rejectDoc['id']) === null);
+$reply = [201, ['id' => '87000000000000002']];
+check('sending it again by hand afterwards works', $strava->export($uid, $rejectDoc['id'], false) === ['activity_id' => '87000000000000002']);
+
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 

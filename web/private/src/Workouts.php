@@ -25,7 +25,7 @@ final class Workouts
         $id = strtolower($d['id']);
         $rev = max(1, (int) ($d['rev'] ?? 1));
         $status = ($d['status'] ?? 'active') === 'completed' ? 'completed' : 'active';
-        $existing = $this->db->one('SELECT user_id, rev FROM workouts WHERE id=?', [$id]);
+        $existing = $this->db->one('SELECT user_id, rev, status FROM workouts WHERE id=?', [$id]);
         if ($existing && (int) $existing['user_id'] !== $uid) {
             throw new HttpError(403, 'That workout belongs to another account.');
         }
@@ -159,7 +159,9 @@ final class Workouts
             }
         });
 
-        return ['ok' => true, 'rev' => $rev];
+        // completed_now: this save is the one that finished the workout (#87). A repeated
+        // save of an already finished workout, or a later edit, is not.
+        return ['ok' => true, 'rev' => $rev, 'completed_now' => $status === 'completed' && (!$existing || $existing['status'] !== 'completed')];
     }
 
     private function deleteRows(Db $db, string $id): void

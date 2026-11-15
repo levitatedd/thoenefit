@@ -52,6 +52,13 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && !/Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(m.text()) && errors.push(m.text()));
+// Waits for a toast with this text. Waiting for any '.toast.show' can match a toast
+// left over from an earlier step (they stay up 3.2 s), and then the next check runs
+// before the action has finished (#84).
+const waitForToast = (pg, text) => pg.waitForFunction((src) => {
+  const t = document.getElementById('toast');
+  return !!t && t.classList.contains('show') && new RegExp(src).test(t.textContent);
+}, text.source);
 const shot = async (name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png` });
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
@@ -268,8 +275,47 @@ const serverSets = boot.active.exercises.flatMap((e) => e.sets);
 check('the server has each set exactly once', new Set(serverSets.map((s) => s.id)).size === serverSets.length && serverSets.filter((s) => s.done).length === setRows + l2rows + 1, `${serverSets.length} sets`);
 
 console.log('Finish, history, next recommendation');
+// #87: "Send to Strava" on the Finish sheet. Without a Strava connection it isn't offered.
 await page.click('button:has-text("Finish workout")');
+await page.waitForSelector('.sheet button:has-text("Finish and save")');
+check('without a Strava connection the Finish sheet has no Strava option', (await page.locator('.sheet label:has-text("Send to Strava")').count()) === 0);
+await page.click('.sheet button:has-text("Close")');
+// The test server has no Strava keys, so act as a connected account.
+const connected = async (route) => {
+  const response = await route.fetch();
+  const json = await response.json();
+  if (json.strava) json.strava = { enabled: true, connected: true };
+  await route.fulfill({ response, json });
+};
+await context.route('**/api.php?a=bootstrap*', connected);
+await page.reload();
+await page.waitForSelector('.lift');
+let finishSave = null;
+const watchSave = (req) => {
+  if (!req.url().includes('a=save_workout')) return;
+  const w = req.postDataJSON()?.workout;
+  if (w?.status === 'completed') finishSave = w;
+};
+page.on('request', watchSave);
+await page.click('button:has-text("Finish workout")');
+await page.waitForSelector('.sheet label:has-text("Send to Strava")');
+const stravaBox = page.locator('.sheet label:has-text("Send to Strava") input');
+const detailsRow = page.locator('.sheet label:has-text("Include exercises")');
+check('connected to Strava, Finish offers Send to Strava, unticked the first time, details hidden until ticked',
+  !(await stravaBox.isChecked()) && !(await detailsRow.isVisible()));
+await page.click('.sheet label:has-text("Send to Strava")');
+check('ticking Send to Strava shows the option to include exercises, sets, reps and weights', await detailsRow.isVisible());
+await detailsRow.click();
+await shot('07b-finish-send-to-strava');
 await page.click('.sheet button:has-text("Finish and save")');
+await waitForToast(page, /Workout saved/);
+check('the message says it goes to Strava once it syncs', /goes to Strava once it syncs/.test(await page.textContent('.toast')));
+for (let i = 0; i < 40 && !finishSave; i++) await page.waitForTimeout(250);
+page.off('request', watchSave);
+await context.unroute('**/api.php?a=bootstrap*', connected);
+check('the finished workout carries the Strava request to the server',
+  finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
+check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
@@ -290,11 +336,18 @@ await page.waitForSelector('.lift');
 const editRow = page.locator('.lift', { hasText: liftName }).locator('.set').last();
 await editRow.locator('input').nth(1).fill(String(repMax - 3));
 await page.click('button:has-text("Save changes")');
-await page.waitForSelector('.toast.show');
+// The page redraws its exercises once the save returns; wait for that before reading it.
+await waitForToast(page, /Changes saved/);
 // #19: the Trend link on a past workout reads as a link and comes back to that workout.
 const workoutHash = await page.evaluate(() => location.hash);
 const trendLink = page.locator('.lift', { hasText: liftName }).locator('a.trend-link');
-check('the Trend link on a past workout is underlined', (await trendLink.evaluate((el) => getComputedStyle(el).textDecorationLine)).includes('underline'));
+// Looked up fresh on each try, so a redraw cannot leave the check holding a removed link (#84).
+const underlined = await page.waitForFunction((name) => {
+  const lift = [...document.querySelectorAll('.lift')].find((l) => l.textContent.includes(name));
+  const link = lift && lift.querySelector('a.trend-link');
+  return !!link && link.isConnected && getComputedStyle(link).textDecorationLine.includes('underline');
+}, liftName, { timeout: 5000 }).then(() => true, () => false);
+check('the Trend link on a past workout is underlined', underlined);
 await trendLink.click();
 await page.waitForSelector('.chart');
 check('opened from a past workout, the way back says Workout History', (await page.textContent('.back')).trim() === 'Workout History');
@@ -662,6 +715,33 @@ await shot('11-settings');
 check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
 
+console.log("What's new");
+await page.click('.app-version a');
+await page.waitForSelector('h1:has-text("What\'s new")');
+await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
+if (!process.env.TF_URL) {
+  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
+  const { writeFileSync, unlinkSync } = await import('node:fs');
+  const notesFile = new globalThis.URL('../web/changelog.json', import.meta.url);
+  try {
+    writeFileSync(notesFile, JSON.stringify({
+      upcoming: { version: '0.1.5-staging', new: [{ title: 'Log cardio', pr: 9 }], fixed: [] },
+      releases: [{ version: '0.1.4', date: '2026-11-15', new: [{ title: 'Save and reuse workout templates', pr: 7 }], fixed: [{ title: 'Fix graph labels being cut off', pr: 8 }] }],
+    }));
+    await page.reload();
+    await page.waitForSelector('.page .card');
+    const cards = await page.$$eval('.page .card', (els) => els.map((el) => el.innerText));
+    check('upcoming work is listed first, then each release with New and Fixed', cards.length === 2 && /Coming next · 0\.1\.5-staging/.test(cards[0]) && /Log cardio/.test(cards[0]) && /0\.1\.4 · Nov 15, 2026/.test(cards[1]) && /New\s+Save and reuse workout templates/.test(cards[1]) && /Fixed\s+Fix graph labels being cut off/.test(cards[1]), cards.join(' | '));
+    await shot('12-whats-new');
+  } finally {
+    unlinkSync(notesFile);
+  }
+} else {
+  check('tapping the version opens What\'s new', (await page.textContent('h1')) === "What's new");
+}
+await page.click('a:has-text("Settings")');
+await page.waitForSelector('text=Add to your Home Screen');
+
 console.log('Staying up to date');
 if (!process.env.TF_URL) {
   const { readFileSync, writeFileSync } = await import('node:fs');
@@ -680,7 +760,7 @@ if (!process.env.TF_URL) {
   try {
     writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
     await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
-    await page.waitForSelector('.toast.show');
+    await waitForToast(page, /ThoeneFit was updated/).catch(() => {});
     check('after a deploy, reopening the app reloads it and says so', /ThoeneFit was updated/.test(await page.textContent('.toast')));
   } finally {
     writeFileSync(versionFile, original);
@@ -740,7 +820,7 @@ if (!process.env.TF_URL) {
   await phone.fill('input[autocomplete=current-password]', 'buddy-password-1');
   await phone.fill('input[autocomplete=new-password]', 'buddy-password-3');
   await phone.click('button:has-text("Change password")');
-  await phone.waitForSelector('.toast.show');
+  await waitForToast(phone, /Password changed/).catch(() => {});
   check('changing the password says other devices are signed out', /Other devices are signed out/.test(await phone.textContent('.toast')));
   // The device that made the change keeps working: a write needs its new session and security token.
   await phone.goto(`${URL}#/exercises/new`);

@@ -10,3 +10,6 @@ thoenefit-staging-config.php
 
 node_modules/
 .DS_Store
+
+# Built by the deploy from the release history
+web/changelog.json

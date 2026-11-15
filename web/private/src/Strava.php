@@ -174,6 +174,28 @@ final class Strava
         return $receipt;
     }
 
+    /**
+     * Sends a workout that was just finished with "Send to Strava" ticked (#87).
+     * $request is the strava_send the app stored on the workout:
+     * {include_summary: bool, utc_offset: int}. It runs once, on the save that
+     * finished the workout, and never throws: the workout is already saved, and a
+     * failed send can be retried from the workout's page in History.
+     * Returns the export receipt, or null when nothing was sent.
+     */
+    public function sendOnFinish(int $uid, string $id, mixed $request, bool $completedNow): ?array
+    {
+        if (!$completedNow || !is_array($request) || !$this->connection($uid)['connected']) {
+            return null;
+        }
+        $offset = $request['utc_offset'] ?? 0;
+        try {
+            return $this->export($uid, $id, ($request['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0);
+        } catch (\Throwable $e) {
+            error_log('ThoeneFit: sending workout ' . $id . ' to Strava on finish failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
     public function export(int $uid, string $id, bool $summary, int $utcOffset = 0): array
     {
         $workout = (new Workouts($this->db))->get($uid, $id);
