@@ -272,6 +272,16 @@ const editRow = page.locator('.lift', { hasText: liftName }).locator('.set').las
 await editRow.locator('input').nth(1).fill(String(repMax - 3));
 await page.click('button:has-text("Save changes")');
 await page.waitForSelector('.toast.show');
+// #19: the Trend link on a past workout reads as a link and comes back to that workout.
+const workoutHash = await page.evaluate(() => location.hash);
+const trendLink = page.locator('.lift', { hasText: liftName }).locator('a.trend-link');
+check('the Trend link on a past workout is underlined', (await trendLink.evaluate((el) => getComputedStyle(el).textDecorationLine)).includes('underline'));
+await trendLink.click();
+await page.waitForSelector('.chart');
+check('opened from a past workout, the way back says Workout History', (await page.textContent('.back')).trim() === 'Workout History');
+await page.click('.back');
+await page.waitForSelector('.lift');
+check('and returns to that same workout', (await page.evaluate(() => location.hash)) === workoutHash && (await page.locator('.back').textContent()).trim() === 'History');
 await page.click('.tab:has-text("Today")');
 await page.waitForSelector('.plan-row');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
@@ -284,6 +294,14 @@ await page.click('.tab:has-text("Trends")');
 await page.waitForSelector('h2:has-text("Weekly lifting volume")');
 const trendsText = await page.textContent('.page');
 check('the Trends tab shows weekly lifting volume, weekly workout time and Recovery estimate', /Weekly workout time/.test(trendsText) && /Recovery estimate/.test(trendsText) && (await page.locator('.chart').count()) >= 1, trendsText.slice(0, 200));
+{
+  const tb = await page.locator('.chart svg').first().boundingBox();
+  await page.touchscreen.tap(tb.x + tb.width - 8, tb.y + tb.height / 2);
+  await page.waitForSelector('.chart-readout strong');
+  const weekText = await page.locator('.chart-readout').first().textContent();
+  check(`tapping a week on Trends shows that week's total and workouts (${weekText.replace(/\s+/g, ' ').trim()})`, /Week of/.test(weekText) && /workout/.test(weekText) && (await page.locator('.chart-readout').first().locator('a').count()) === 0);
+  check('no stray text on Trends', !/\b(undefined|null|NaN|false)\b/.test(await page.textContent('.page')));
+}
 check('Trends is highlighted in the tab bar', (await page.getAttribute('.tab:has-text("Trends")', 'aria-current')) === 'page');
 check('no sideways scrolling on Trends', (await overflow()) <= 0);
 
@@ -303,9 +321,51 @@ await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');
 check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) === 2);
+// #11: tap a point for its details, open that workout, and filter by date range.
+{
+  const exHash = await page.evaluate(() => location.hash);
+  const exId = Number(exHash.split('/').pop());
+  const chart = page.locator('.chart').first();
+  check('before a point is chosen, the chart says how to use it', /Tap a point/.test(await chart.locator('.chart-readout').textContent()));
+  const box = await chart.locator('svg').boundingBox();
+  await page.touchscreen.tap(box.x + box.width - 12, box.y + box.height / 2);
+  await page.waitForSelector('.chart-readout a:has-text("Open workout")');
+  const readout = await chart.locator('.chart-readout').textContent();
+  check(`tapping a point shows its date and values (${readout.replace(/\s+/g, ' ').trim().slice(0, 70)})`, /\d{4}/.test(readout) && /lb/.test(readout) && /Sets:/.test(readout));
+  check('the chosen point is marked on the chart', (await chart.locator('circle.sel').getAttribute('visibility')) === 'visible');
+  await chart.locator('svg').focus();
+  await page.keyboard.press('Home');
+  const firstTitle = await chart.locator('.chart-readout strong').textContent();
+  await page.keyboard.press('End');
+  check('the arrow, Home and End keys move between points', (await chart.locator('.chart-readout strong').textContent()) !== firstTitle || (await page.locator('.chart').first().locator('.dot').count()) === 1);
+  await chart.locator('.chart-readout a:has-text("Open workout")').click();
+  await page.waitForSelector('.lift');
+  check('Open workout goes to that session, with a way back to the exercise', /^#\/history\//.test(await page.evaluate(() => location.hash)) && (await page.textContent('.back')).trim() === liftName);
+  await page.click('.back');
+  await page.waitForSelector('.chart');
+  check('and back returns to the exercise', (await page.evaluate(() => location.hash)) === exHash);
+  // An older session, about 8 months ago, to give the ranges something to filter.
+  const boot = await api('bootstrap');
+  const when = new Date(Date.now() - 240 * 86400000).toISOString();
+  const old = { id: crypto.randomUUID(), gym_id: boot.user.active_gym_id, day_type: 'push', status: 'completed', unit: 'lb', started_at: when, completed_at: when, rev: 1,
+    exercises: [{ id: crypto.randomUUID(), exercise_id: exId, rep_min: 6, rep_max: 10, target_sets: 1, sets: [{ id: crypto.randomUUID(), weight: 95, reps: 10, done: true, done_at: when }] }] };
+  const saved = await page.evaluate(async ([t, w]) => (await fetch('api.php?a=save_workout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ workout: w }) })).status, [boot.csrf, old]);
+  await page.reload();
+  await page.waitForSelector('.range .choice');
+  const sessionsShown = async () => Number((await page.locator('h3', { hasText: /session/ }).textContent()).match(/\d+/)[0]);
+  await page.click('.range .choice:has-text("All")');
+  const allCount = await sessionsShown();
+  await page.click('.range .choice:has-text("3 months")');
+  const recentCount = await sessionsShown();
+  check(`date ranges filter the charts and sessions (All ${allCount}, 3 months ${recentCount})`, saved === 200 && allCount === recentCount + 1);
+  await page.click('.range .choice:has-text("1 year")');
+  check('1 year includes the session from 8 months ago', (await sessionsShown()) === allCount && (await page.getAttribute('.range .choice:has-text("1 year")', 'aria-pressed')) === 'true');
+  check('no sideways scrolling on the exercise page with the range control', (await overflow()) <= 0);
+  await shot('10b-exercise-chart-tapped');
+}
 await shot('10-exercise');
 const csv = await page.evaluate(async () => (await fetch('api.php?a=export', { credentials: 'same-origin' })).text());
-check('CSV export downloads every set', csv.split('\n').filter(Boolean).length === 1 + setRows + l2rows + 1 && csv.startsWith('date_utc'));
+check('CSV export downloads every set', csv.split('\n').filter(Boolean).length === 1 + setRows + l2rows + 1 + 1 && csv.startsWith('date_utc')); // + the older session added for the range check
 console.log('Admin and accounts');
 const post = (action, body, token) => page.evaluate(async ([a, b, t]) => {
   const r = await fetch(`api.php?a=${a}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify(b) });

@@ -215,6 +215,13 @@ function render() {
     return;
   }
   const [tab, arg, arg2] = route();
+  // S.backTo = {to, path, label, y}: valid only while on the page it was set for.
+  const here = route().join('/');
+  let restoreY = null;
+  if (S.backTo && S.backTo.to !== here) {
+    if (S.backTo.path === here) restoreY = S.backTo.y;
+    S.backTo = null;
+  }
   let view;
   if (tab === 'workout') view = viewWorkout();
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
@@ -241,13 +248,11 @@ function render() {
     else if (arg === 'strava-denied') toast('Allow Strava activity access to send workouts.', 'bad');
     else toast('Could not connect to Strava. Try again in Settings.', 'bad');
   }
-  // An exercise page opened from a workout remembers where to go back to,
-  // and that screen comes back at the spot it was left.
-  const onExercise = tab === 'exercises' && arg && arg !== 'new' && arg !== 'edit';
-  const back = S.backTo;
-  if (!onExercise) S.backTo = null;
-  if (!onExercise && back && back.path === tab) window.scrollTo(0, back.y);
-  else window.scrollTo(0, tab === S.lastTab && !onExercise ? window.scrollY : 0);
+  // A page opened from another one (an exercise from Today, a workout from a
+  // chart, ...) shows a back link to where it came from, and that screen comes
+  // back at the spot it was left.
+  if (restoreY !== null) window.scrollTo(0, restoreY);
+  else window.scrollTo(0, tab === S.lastTab && !S.backTo ? window.scrollY : 0);
   S.lastTab = tab;
   startTicker();
   keepAwake();
@@ -278,8 +283,13 @@ function historyLink(exerciseId, name, path, label) {
     class: 'name-link',
     href: `#/exercises/${exerciseId}`,
     'aria-label': `${name}: view history`,
-    onclick: () => (S.backTo = { path, label, y: window.scrollY }),
+    onclick: () => (S.backTo = { to: `exercises/${exerciseId}`, path, label, y: window.scrollY }),
   }, name, icon('history', 18));
+}
+
+/** Back link for a page that may have been opened from somewhere other than its own list. */
+function backOr(path, label) {
+  return S.backTo ? backLink(S.backTo.path, S.backTo.label) : backLink(path, label);
 }
 
 function backLink(path, label) {
@@ -1299,19 +1309,22 @@ function viewTrends() {
     const points = weeks.map((week) => ({
       ...week,
       label: fmtDate(week.start + 'T12:00:00', { month: 'short', day: 'numeric' }),
+      title: `Week of ${fmtDate(week.start + 'T12:00:00', { month: 'long', day: 'numeric' })}`,
+      lines: [week.workouts ? `${week.workouts} workout${week.workouts === 1 ? '' : 's'}` : 'No workouts'],
     }));
+    const whole = (v) => Math.round(v).toLocaleString();
     return h('div', { class: 'stack' },
       h('section', { class: 'card stack' },
         h('h2', {}, 'Weekly lifting volume'),
         h('p', { class: 'muted small' }, 'Logged weight × reps across completed working sets.'),
         weeks.some((w) => w.workouts > 0)
-          ? lineChart(points.map(({ label, volume }) => ({ label, value: volume })), { unit: unit + ' × reps' })
+          ? lineChart(points.map((p) => ({ ...p, value: p.volume })), { unit: unit + ' × reps', format: whole })
           : h('p', { class: 'muted' }, 'No completed workouts in the last 8 weeks.')),
       h('section', { class: 'card stack' },
         h('h2', {}, 'Weekly workout time'),
         h('p', { class: 'muted small' }, 'Start to finish, leaving out long idle stretches before the first set or after the last. A workout still over 4 hours is not counted.'),
         weeks.some((w) => w.seconds !== null)
-          ? lineChart(points.map(({ label, seconds }) => ({ label, value: (seconds ?? 0) / 60 })), { unit: 'min' })
+          ? lineChart(points.map((p) => ({ ...p, value: (p.seconds ?? 0) / 60 })), { unit: 'min', format: whole })
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
       recoveryPanel(recovery));
   });
@@ -1354,7 +1367,7 @@ function viewHistory() {
 }
 
 function viewHistoryDetail(id) {
-  return h('main', { class: 'page' }, backLink('history', 'History'),
+  return h('main', { class: 'page' }, backOr('history', 'History'),
     asyncSection(
       () => api.get('workout', `&id=${encodeURIComponent(id)}`),
       ({ workout, strava, strava_export: stravaExport }) => {
@@ -1369,7 +1382,7 @@ function viewHistoryDetail(id) {
           box.replaceChildren(...workout.exercises.map((e) => {
             let n = 0;
             return h('section', { class: 'card lift' },
-              h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name)), h('a', { class: 'btn small ghost', href: `#/exercises/${e.exercise_id}` }, 'Trend')),
+              h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name)), h('a', { class: 'trend-link', href: `#/exercises/${e.exercise_id}`, onclick: () => (S.backTo = { to: `exercises/${e.exercise_id}`, path: `history/${id}`, label: 'Workout History', y: window.scrollY }) }, 'Trend')),
               h('ol', { class: 'sets' }, e.sets.map((s, si) => {
                 if (!s.warmup) n += 1;
                 return h('li', { class: `set done ${s.warmup ? 'warm' : ''}` },
@@ -1554,32 +1567,65 @@ function viewExercise(id) {
       if (!sessions.length) return h('p', { class: 'muted' }, 'No logged sets yet. Trends appear after your first finished workout with this exercise.');
       const variants = [...new Set(sessions.map((s) => s.variant_key))];
       const box = h('div', { class: 'stack' });
-      const show = (key) => {
-        const mine = sessions.filter((s) => s.variant_key === key);
+      const DAY = 86400000;
+      const RANGES = [['3m', '3 months', 91], ['6m', '6 months', 183], ['1y', '1 year', 365], ['all', 'All', null]];
+      let key = sessions[sessions.length - 1].variant_key;
+      // A history longer than a year starts on the last year, so the line is readable (#11).
+      const spanDays = (new Date(sessions[sessions.length - 1].date) - new Date(sessions[0].date)) / DAY;
+      let range = S.exRange || (spanDays > 365 ? '1y' : 'all');
+      const rangeHere = h('div', { class: 'range' });
+      const fullDate = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
+      const show = () => {
+        const all = sessions.filter((s) => s.variant_key === key);
+        const days = RANGES.find((r) => r[0] === range)[2];
+        const from = days ? Date.now() - days * DAY : -Infinity;
+        const mine = all.filter((s) => new Date(s.date).getTime() >= from);
+        fill(rangeHere, choices(RANGES.map(([k, l]) => [k, l]), range, (v) => {
+          range = v;
+          S.exRange = v; // kept while the app is open, across exercises
+          show();
+        }, { columns: 4 }));
+        if (!mine.length) {
+          fill(box, h('p', { class: 'muted' }, `No sessions in this range. The last one was ${fmtDate(all[all.length - 1].date, fullDate)}.`));
+          return;
+        }
         const unit = mine[mine.length - 1].unit;
         const oneYear = new Date(mine[0].date).getFullYear() === new Date(mine[mine.length - 1].date).getFullYear();
         const pts = mine.map((s) => {
           const top = Math.max(...s.sets.map((x) => x.weight));
           const best = Math.max(...s.sets.filter((x) => x.weight === top).map((x) => x.reps));
-          return { label: fmtDate(s.date, oneYear ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }), top, best, s };
+          return {
+            label: fmtDate(s.date, oneYear ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }),
+            t: new Date(s.date).getTime(),
+            title: fmtDate(s.date, fullDate),
+            href: `#/history/${s.workout_id}`,
+            top,
+            best,
+            s,
+          };
         });
-        box.replaceChildren(
+        // Opening a workout from the chart comes back to this exercise.
+        const onOpen = (p) => (S.backTo = { to: `history/${p.s.workout_id}`, path: `exercises/${id}`, label: ex.name, y: window.scrollY });
+        const where = (s) => (variants.length > 1 ? [] : [s.gym_name]);
+        fill(box,
           h('h3', {}, 'Top weight'),
-          lineChart(pts.map((p) => ({ label: p.label, value: p.top })), { unit }),
+          lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' }),
           h('h3', {}, 'Best reps at top weight'),
-          lineChart(pts.map((p) => ({ label: p.label, value: p.best })), { unit: 'reps' }),
-          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : 'Sessions'),
-          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}` }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+          lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' }),
+          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
+          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
         );
       };
-      const last = sessions[sessions.length - 1].variant_key;
-      show(last);
-      if (variants.length < 2) return box;
-      const picker = h('select', { 'aria-label': 'Gym', onchange: (e) => show(e.target.value) }, variants.map((v) => h('option', { value: v, selected: v === last }, [...sessions].reverse().find((s) => s.variant_key === v).gym_name)));
-      return [field('Machine history is kept per gym', picker), box];
+      show();
+      if (variants.length < 2) return [rangeHere, box];
+      const picker = h('select', { 'aria-label': 'Gym', onchange: (e) => {
+        key = e.target.value;
+        show();
+      } }, variants.map((v) => h('option', { value: v, selected: v === key }, [...sessions].reverse().find((s) => s.variant_key === v).gym_name)));
+      return [field('Machine history is kept per gym', picker), rangeHere, box];
     },
   );
-  return h('main', { class: 'page' }, S.backTo ? backLink(S.backTo.path, S.backTo.label) : backLink('exercises', 'Exercises'),
+  return h('main', { class: 'page' }, backOr('exercises', 'Exercises'),
     h('h1', {}, ex.name),
     h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
