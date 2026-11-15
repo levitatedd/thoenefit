@@ -9,7 +9,8 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - Double progression, tracked per exercise and per equipment variant
 - History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
 - Share a planned workout so two or more people can train together, each with their own suggested weights
-- Several accounts, no public sign-up; the first account is the admin and adds the others
+- Send completed workouts to Strava, with optional sets, reps, and weights that populate Strava’s workout log and muscle map
+- Private accounts with invite-token requests and admin approval
 
 ## Screenshots
 
@@ -204,7 +205,9 @@ Anyone can share the workout planned on Today, or one already in progress, with 
 
 ## Send a workout to Strava
 
-To enable it, create a Strava API app in [Strava API Settings](https://www.strava.com/settings/api). Set its **Authorization Callback Domain** to the site's hostname. Add the `strava` block from `config.example.php` to the private server config and fill in the client ID and secret. The callback URL is the site's HTTPS address followed by `/api.php?a=strava_callback`. For staging, use `fit-test.mikethoene.com` and edit `~/thoenefit-staging-config.php`. PHP needs OpenSSL and HTTPS stream access (`allow_url_fopen`). Keep the client secret out of Git. If you rotate it, disconnect and reconnect each Strava account.
+To enable it, create a Strava API app in [Strava API Settings](https://www.strava.com/settings/api). Set its **Authorization Callback Domain** to the site's hostname. Add the `strava` block from `config.example.php` to the private server config and fill in the client ID and secret. The callback URL is the site's HTTPS address followed by `/api.php?a=strava_callback`. PHP needs OpenSSL and HTTPS stream access (`allow_url_fopen`). Keep the client secret out of Git. If you rotate it, disconnect and reconnect each Strava account.
+
+If Strava reports `redirect_uri` as invalid, check that the **Authorization Callback Domain** is `fit.mikethoene.com` in Strava and that `callback_url` is `https://fit.mikethoene.com/api.php?a=strava_callback` in `~/thoenefit-config.php`.
 
 In **Settings → Account**, connect your Strava account. Open a completed session in **History** and choose **Send to Strava**. The export creates one Weight Training activity with the workout's name, start time, and duration. Select **Include exercises, sets, reps, and weights** to send sets into Strava's strength workout details. Exercises without a Strava equivalent go in the description. Fitbod imports have no recorded duration.
 
