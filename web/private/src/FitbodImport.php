@@ -92,6 +92,164 @@ final class FitbodImport
         'Cable Crunch' => 'cable-crunch',
         'Leg Raise' => 'lying-leg-raise',
         'Crunches' => 'crunch',
+        // Added with the built-ins for #65.
+        'Cable Rope Tricep Extension' => 'cable-rope-triceps-extension',
+        'Dumbbell Front Raise' => 'dumbbell-front-raise',
+        'Dumbbell Pullover' => 'dumbbell-pullover',
+        'Dumbbell Side Bend' => 'dumbbell-side-bend',
+        'Reverse Barbell Curl' => 'reverse-grip-barbell-curl',
+        'Concentration Curl' => 'concentration-curl',
+        'Single Arm Dumbbell Tricep Extension' => 'single-arm-overhead-dumbbell-extension',
+        'Seated Barbell Shoulder Press' => 'seated-barbell-shoulder-press',
+        'Dumbbell Kickbacks' => 'dumbbell-triceps-kickback',
+        'Barbell Shrug' => 'barbell-shrug',
+        'Reverse Grip Bench Press' => 'reverse-grip-bench-press',
+        'Reverse Grip Barbell Bent Over Row' => 'reverse-grip-barbell-row',
+        'Bulgarian Split Squat' => 'bodyweight-bulgarian-split-squat',
+        'Alternating Medicine Ball Push Up' => 'alternating-medicine-ball-push-up',
+        'Cross Body Hammer Curls' => 'cross-body-hammer-curl',
+        'Dumbbell Shrug' => 'dumbbell-shrug',
+        'Dumbbell Skullcrusher' => 'dumbbell-skull-crusher',
+        'Dumbbell Incline Fly' => 'incline-dumbbell-fly',
+        'Oblique Crunch' => 'oblique-crunch',
+        'Zottman Curl' => 'zottman-curl',
+        'Stiff-Legged Barbell Good Morning' => 'stiff-legged-good-morning',
+        'Upright Row' => 'barbell-upright-row',
+        'Calf Raise' => 'calf-raise',
+        'Shotgun Row' => 'shotgun-row',
+        'Cable Upright Row' => 'cable-upright-row',
+        'Cable Rope Overhead Triceps Extension' => 'cable-rope-overhead-triceps-extension',
+        'Dumbbell Bent Over Row' => 'dumbbell-bent-over-row',
+        'Cable Wood Chop' => 'cable-wood-chop',
+        'Smith Machine Stiff-Legged Deadlift' => 'smith-machine-stiff-legged-deadlift',
+        'Dumbbell Lunge' => 'dumbbell-lunge',
+        'Seated Dumbbell Curl' => 'seated-dumbbell-curl',
+        'Low Cable Chest Fly' => 'low-to-high-cable-fly',
+        'Palms-Down Dumbbell Wrist Curl' => 'palms-down-dumbbell-wrist-curl',
+        'Machine Tricep Dip' => 'machine-triceps-dip',
+        'Ab Crunch Machine' => 'ab-crunch-machine',
+        'Leg Press' => 'plate-loaded-leg-press',
+        'Palms-Up Dumbbell Wrist Curl' => 'palms-up-dumbbell-wrist-curl',
+        'Biceps Curl To Shoulder Press' => 'biceps-curl-to-shoulder-press',
+        'Russian Twist' => 'russian-twist',
+        'Pistol Squat' => 'pistol-squat',
+        'Seated Machine Calf Press' => 'seated-calf-raise',
+        'Sit Up' => 'sit-up',
+        'Incline Hammer Curl' => 'incline-hammer-curl',
+        'Neutral Grip Pull Up' => 'neutral-grip-pull-up',
+        'Hammerstrength Chest Press' => 'hammer-strength-chest-press',
+        'Lying Hamstrings Curl' => 'lying-leg-curl',
+        'Overhead Cable Bicep Curl' => 'overhead-cable-curl',
+        'Dumbbell Sumo Squat' => 'dumbbell-sumo-squat',
+        'Machine Preacher Curl' => 'machine-preacher-curl',
+        'Glute Kickback Machine' => 'glute-kickback-machine',
+        'Barbell Bicep Drag Curl' => 'barbell-drag-curl',
+        'Arnold Dumbbell Press' => 'arnold-press',
+        'Smith Machine Close-Grip Bench Press' => 'smith-machine-close-grip-bench-press',
+        'Alternating Single Arm Kettlebell Swing' => 'alternating-single-arm-kettlebell-swing',
+        'Smith Machine Bent Over Row' => 'smith-machine-bent-over-row',
+        'Machine Tricep Extension' => 'machine-triceps-extension',
+        'Single Leg Kickback' => 'single-leg-kickback',
+        'Dumbbell Squat To Shoulder Press' => 'dumbbell-squat-to-shoulder-press',
+        'V-Bar Pulldown' => 'close-grip-v-bar-pulldown',
+        'Wide Grip Lat Pulldown' => 'wide-grip-lat-pulldown',
+        'Home Gym Leg Extension' => 'home-gym-leg-extension',
+        'Dumbbell Squat' => 'dumbbell-squat',
+        'Machine Hip Abductor' => 'hip-abductor-machine',
+        'Preacher Curl' => 'ez-bar-preacher-curl',
+        'Machine Bicep Curl' => 'machine-biceps-curl',
+        'Waiter Curls' => 'waiter-curl',
+        'Seated Back Extension' => 'seated-back-extension-machine',
+        'Cable Shoulder External Rotation' => 'cable-external-rotation',
+        'Barbell Front Raise' => 'barbell-front-raise',
+        'Single Arm Lat Pulldown' => 'single-arm-lat-pulldown',
+        'Dumbbell Back Fly' => 'dumbbell-reverse-fly',
+        'Machine Hip Adductor' => 'hip-adductor-machine',
+        'Machine Row' => 'machine-row',
+        'Cable Rear Delt Fly' => 'cable-rear-delt-fly',
+        'Close-Grip EZ-Bar Curl' => 'close-grip-ez-bar-curl',
+        'Straight-Arm Pulldown' => 'cable-straight-arm-pulldown',
+        'Dumbbell No Money Curls' => 'no-money-curl',
+        'Dumbbell Squeeze Press' => 'dumbbell-squeeze-press',
+        'Mini Loop Band Lateral Walk' => 'mini-band-lateral-walk',
+        'Bicycle Crunch' => 'bicycle-crunch',
+        'Vertical Knee Raise' => 'captain-s-chair-knee-raise',
+        'Alternating Dumbbell Bench Press' => 'alternating-dumbbell-bench-press',
+        'Single Arm Cable Bicep Curl' => 'single-arm-cable-curl',
+        'Cable Underhand Tricep Pushdown' => 'reverse-grip-cable-pushdown',
+        'Side Laterals to Front Raise' => 'lateral-to-front-raise',
+        'Cable Shoulder Internal Rotation' => 'cable-internal-rotation',
+        'Hip Thrust' => 'hip-thrust',
+        'Scissor Kick' => 'scissor-kick',
+        'Reverse Crunch' => 'reverse-crunch',
+        'Leg Pull-In' => 'seated-leg-pull-in',
+        'Side Lunge' => 'side-lunge',
+        'Home Cable Rope Tricep Pushdown' => 'home-gym-rope-pushdown',
+        'Hammerstrength Incline Chest Press' => 'hammer-strength-incline-press',
+        'Elevated Hip Bridge' => 'feet-elevated-glute-bridge',
+        'Tricep Push Up' => 'triceps-push-up',
+        'Seated Dumbbell Calf Raise' => 'seated-dumbbell-calf-raise',
+        'Single Leg Glute Bridge' => 'single-leg-glute-bridge',
+        'Wide Grip Pull Up' => 'wide-grip-pull-up',
+        'Kneeling Squat' => 'kneeling-squat',
+        'Hammerstrength Decline Chest Press' => 'hammer-strength-decline-press',
+        'Superman' => 'superman',
+        'Archer Pull Up' => 'archer-pull-up',
+        'Single Arm Overhead Press' => 'single-arm-dumbbell-press',
+        'Smith Machine Overhead Shoulder Press' => 'smith-machine-shoulder-press',
+        'Reverse Grip Pull Down' => 'reverse-grip-pulldown',
+        'Wide Grip Barbell Curl' => 'wide-grip-barbell-curl',
+        'Single Kettlebell Suitcase Deadlift' => 'kettlebell-suitcase-deadlift',
+        'Bird Dog Rows' => 'bird-dog-row',
+        'Pendlay Row' => 'pendlay-row',
+        'Good Morning' => 'barbell-good-morning',
+        'Scissor Crossover Kick' => 'scissor-crossover-kick',
+        'Around the Worlds' => 'around-the-world',
+        'Flutter Kicks' => 'flutter-kick',
+        'Hammerstrength Shoulder Press' => 'hammer-strength-shoulder-press',
+        'Seated Dumbbell Rear Delt Raise' => 'seated-rear-delt-raise',
+        'Dumbbell Cuban Shoulder Rotations' => 'cuban-rotation',
+        'Barbell Glute Bridge' => 'barbell-glute-bridge',
+        'Standing Cable Core Twist' => 'cable-standing-twist',
+        'Cable One Arm Tricep Side Extension' => 'single-arm-cable-side-extension',
+        'Standing Dumbbell Tricep Extension' => 'standing-overhead-dumbbell-extension',
+        'Barbell Pause Curl' => 'barbell-pause-curl',
+        'EZ-Bar Overhead Tricep Extension' => 'ez-bar-overhead-triceps-extension',
+        'Handle Band Straight-Arm Pulldown' => 'band-straight-arm-pulldown',
+        'Reverse Dumbbell Curl' => 'reverse-dumbbell-curl',
+        'Cable Crossover Lat Pulldown' => 'cable-crossover-pulldown',
+        'Forward Lunge with Twist' => 'lunge-with-twist',
+        'Dumbbell Floor Press' => 'dumbbell-floor-press',
+        'Rotation Push Up' => 'rotation-push-up',
+        'Smith Machine Decline Press' => 'smith-machine-decline-press',
+        'Smith Machine Single-Leg Split Squat' => 'smith-machine-split-squat',
+        'Decline Crunch' => 'decline-crunch',
+        'Decline Oblique Crunch' => 'decline-oblique-crunch',
+        'Partner Medicine Ball Full Twist' => 'partner-medicine-ball-twist',
+        'Stability Ball Pike' => 'stability-ball-pike',
+        'Rotary Torso' => 'rotary-torso-machine',
+        'Side Plank Leg Lift' => 'side-plank-leg-lift',
+        'Barbell Lunge' => 'barbell-forward-lunge',
+        'Iron Cross' => 'iron-cross',
+        'EZ Bar PJR Pull Over' => 'ez-bar-pjr-pullover',
+        'Loop Band Side Step' => 'band-side-step',
+        'EZ-Bar Pull Over' => 'ez-bar-pullover',
+        'Seated Dumbbell One-Leg Calf Raise' => 'seated-single-leg-calf-raise',
+        'Incline EZ-Bar Curl' => 'incline-ez-bar-curl',
+        'Single Arm Floor Press' => 'single-arm-dumbbell-floor-press',
+        'Cable Shoulder Internal Rotation at 90°' => 'cable-internal-rotation-at-90',
+        'Plank Surrender' => 'plank-surrender',
+        'Tate Press' => 'tate-press',
+        'Exercise Ball Pull In' => 'stability-ball-knee-tuck',
+        'Lateral Cable Tricep Extension' => 'cable-lateral-triceps-extension',
+        'Hanging Knee Raise' => 'hanging-knee-raise',
+        'Single Arm Overhead Kettlebell Squat' => 'single-arm-overhead-kettlebell-squat',
+        'Mountain Climber' => 'mountain-climber',
+        'Lunge' => 'bodyweight-forward-lunge',
+        'Assisted Dip' => 'assisted-dip',
+        'Exercise Ball Crunch' => 'stability-ball-crunch',
+        'Hammerstrength Iso Row' => 'hammer-strength-iso-row',
+        'Smith Machine Behind the Back Shrug' => 'smith-machine-behind-the-back-shrug',
     ];
 
     private Db $db;
@@ -270,6 +428,51 @@ final class FitbodImport
     public static function slug(string $name): string
     {
         return 'fitbod-' . substr(sha1(strtolower($name)), 0, 20);
+    }
+
+    /**
+     * Before new built-ins are added, hands each one the exercise an earlier
+     * import already created for its Fitbod name, so the library does not
+     * end up with two copies and the history stays on one exercise. The row
+     * keeps its id; it only takes the built-in's slug, and Catalog::sync()
+     * then fills in the built-in's name and details.
+     *
+     * Takes a default-library row first (one the admin's exercises were
+     * promoted into), otherwise the admin's own. Other accounts' own
+     * exercises are left alone.
+     *
+     * @return int how many exercises were taken over
+     */
+    public static function adoptForBuiltins(Db $db): int
+    {
+        $builtin = [];
+        foreach (Catalog::exercises() as $e) {
+            $builtin[$e[0]] = true;
+        }
+        $have = [];
+        foreach ($db->all('SELECT slug FROM exercises WHERE user_id IS NULL') as $r) {
+            $have[$r['slug']] = true;
+        }
+        $admin = $db->val("SELECT id FROM users WHERE role='admin' ORDER BY created_at, id LIMIT 1");
+        $adopted = 0;
+        foreach (self::MAP as $fitbod => $slug) {
+            if (!isset($builtin[$slug]) || isset($have[$slug])) {
+                continue;
+            }
+            $row = $db->one('SELECT id, user_id FROM exercises WHERE slug=? AND user_id IS NULL', [self::slug($fitbod)])
+                ?? ($admin ? $db->one('SELECT id, user_id FROM exercises WHERE slug=? AND user_id=?', [self::slug($fitbod), $admin]) : null);
+            if (!$row) {
+                continue;
+            }
+            if ($row['user_id'] === null) {
+                $db->run('UPDATE exercises SET slug=? WHERE id=?', [$slug, $row['id']]);
+            } else {
+                $db->run('UPDATE exercises SET slug=?, user_id=NULL, promoted_from=? WHERE id=?', [$slug, $row['user_id'], $row['id']]);
+            }
+            $have[$slug] = true;
+            $adopted++;
+        }
+        return $adopted;
     }
 
     private static function uuidFrom(string $seed): string
