@@ -180,7 +180,13 @@ function render() {
     ].map(([key, label, ic]) => h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, icon(ic, 24), h('span', {}, label))),
   );
   root.replaceChildren(view, restDock(), nav);
-  window.scrollTo(0, tab === S.lastTab ? window.scrollY : 0);
+  // An exercise page opened from a workout remembers where to go back to,
+  // and that screen comes back at the spot it was left.
+  const onExercise = tab === 'exercises' && arg && arg !== 'new' && arg !== 'edit';
+  const back = S.backTo;
+  if (!onExercise) S.backTo = null;
+  if (!onExercise && back && back.path === tab) window.scrollTo(0, back.y);
+  else window.scrollTo(0, tab === S.lastTab && !onExercise ? window.scrollY : 0);
   S.lastTab = tab;
   startTicker();
   keepAwake();
@@ -193,6 +199,16 @@ function page(title, ...kids) {
 /** Replace an element's children, skipping anything falsy (so `cond && node` is safe). */
 function fill(el, ...kids) {
   el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false && k !== ''));
+}
+
+/** Exercise name that opens that exercise's history, with a way back to the screen it was tapped on. */
+function historyLink(exerciseId, name, path, label) {
+  return h('a', {
+    class: 'name-link',
+    href: `#/exercises/${exerciseId}`,
+    'aria-label': `${name}: view history`,
+    onclick: () => (S.backTo = { path, label, y: window.scrollY }),
+  }, name, icon('history', 18));
 }
 
 function backLink(path, label) {
@@ -561,7 +577,7 @@ function planRow(b, gym) {
   return h(
     'li',
     { class: 'plan-row' },
-    h('div', { class: 'plan-main' }, h('h3', {}, b.name), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
     h(
       'div',
       { class: 'plan-actions' },
@@ -916,7 +932,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
     'section',
     { class: `card lift ${e.sets.length && e.sets.every((s) => s.done) ? 'complete' : ''}` },
     h('header', { class: 'lift-head' },
-      h('div', {}, h('h2', {}, e.name), h('p', { class: 'target' }, targetLine(e, doc.unit)), h('p', { class: 'last' }, lastLine(e.previous))),
+      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), h('p', { class: 'last' }, lastLine(e.previous))),
       h('button', { type: 'button', class: 'btn square ghost', 'aria-label': `Options for ${e.name}`, onclick: menu }, icon('more')),
     ),
     e.reason && h('details', { class: 'why-fold' }, h('summary', {}, 'Why this'), h('p', { class: 'why' }, e.reason)),
@@ -1212,11 +1228,11 @@ function viewExercise(id) {
       return [field('Machine history is kept per gym', picker), box];
     },
   );
-  return h('main', { class: 'page' }, backLink('exercises', 'Exercises'),
+  return h('main', { class: 'page' }, S.backTo ? backLink(S.backTo.path, S.backTo.label) : backLink('exercises', 'Exercises'),
     h('h1', {}, ex.name),
     h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
-    section('Trend', trend),
+    section('History', trend),
     ex.custom && h('div', { class: 'stack' },
       h('a', { class: 'btn block', href: `#/exercises/edit/${ex.id}` }, 'Edit exercise'),
       h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
