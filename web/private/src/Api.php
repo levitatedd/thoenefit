@@ -193,8 +193,8 @@ final class Api
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
                     throw new HttpError(403, 'Current password is wrong.');
                 }
-                $this->auth->setPassword($uid, (string) ($in['next'] ?? ''));
-                self::json(['ok' => true]);
+                $this->auth->changePassword($uid, (string) ($in['next'] ?? ''));
+                self::json(['ok' => true, 'csrf' => $this->auth->session['csrf']]);
                 return;
             case 'save_profile':
                 self::json(['user' => $this->saveProfile($user, $in)]);

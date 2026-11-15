@@ -608,6 +608,50 @@ if (!process.env.TF_URL) {
   await page.waitForSelector('h1:has-text("Landmine Press Special")');
   check('the admin can still edit it', (await page.locator('a:has-text("Edit exercise")').count()) === 1);
 }
+if (!process.env.TF_URL) {
+  console.log('Changing a password');
+  // The buddy account signs in on two "devices", changes its password on one, and the other is signed out.
+  const signIn = async (ctx) => {
+    const p = await ctx.newPage();
+    await p.goto(URL);
+    await p.fill('input[name=username]', newUser);
+    await p.fill('input[name=password]', 'buddy-password-1');
+    await p.click('button[type=submit]');
+    await p.waitForSelector('.tabs');
+    return p;
+  };
+  const phoneCtx = await browser.newContext();
+  const laptopCtx = await browser.newContext();
+  const phone = await signIn(phoneCtx);
+  const laptop = await signIn(laptopCtx);
+  await phone.goto(`${URL}#/settings`);
+  await phone.fill('input[autocomplete=current-password]', 'buddy-password-1');
+  await phone.fill('input[autocomplete=new-password]', 'buddy-password-3');
+  await phone.click('button:has-text("Change password")');
+  await phone.waitForSelector('.toast.show');
+  check('changing the password says other devices are signed out', /Other devices are signed out/.test(await phone.textContent('.toast')));
+  // The device that made the change keeps working: a write needs its new session and security token.
+  await phone.goto(`${URL}#/exercises/new`);
+  await phone.waitForSelector('form');
+  await phone.fill('form input[type=text]', 'Password Change Curl');
+  await phone.locator('fieldset, .field', { hasText: 'Primary muscles' }).locator('label:has-text("Biceps")').first().click();
+  await phone.click('button:has-text("Add exercise")');
+  await phone.waitForSelector('h1:has-text("Password Change Curl")', { timeout: 5000 }).catch(() => {});
+  check('the device that changed it can still save changes without signing in again', (await phone.locator('h1:has-text("Password Change Curl")').count()) === 1 && (await phone.locator('input[name=password]').count()) === 0);
+  await laptop.reload();
+  await laptop.waitForSelector('input[name=password]', { timeout: 5000 }).catch(() => {});
+  check('the other device is signed out', (await laptop.locator('input[name=password]').count()) === 1 && (await laptop.locator('.tabs').count()) === 0);
+  await laptop.fill('input[name=username]', newUser);
+  await laptop.fill('input[name=password]', 'buddy-password-1');
+  await laptop.click('button[type=submit]');
+  await laptop.waitForSelector('.form-error');
+  await laptop.fill('input[name=password]', 'buddy-password-3');
+  await laptop.click('button[type=submit]');
+  await laptop.waitForSelector('.tabs', { timeout: 5000 }).catch(() => {});
+  check('it can sign back in with the new password, not the old one', (await laptop.locator('.tabs').count()) === 1);
+  await phoneCtx.close();
+  await laptopCtx.close();
+}
 
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
