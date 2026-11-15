@@ -2,6 +2,7 @@ import { Api, WorkoutSync, uuid } from './store.js';
 import { searchExercises } from './search.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
+import * as install from './install.js';
 
 const api = new Api('api.php');
 const root = document.getElementById('app');
@@ -84,6 +85,7 @@ async function boot() {
     return;
   }
   applyBoot(data);
+  install.countVisit();
   render();
   let updated = null;
   try {
@@ -159,6 +161,79 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 window.addEventListener('online', () => checkForUpdate());
+
+// ---------------------------------------------------------------- installing (#89)
+// Android Chrome and Edge offer their own install prompt. Keep it so the reminder
+// can show an Install button instead of written steps.
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+});
+window.addEventListener('appinstalled', () => {
+  install.markInstalled();
+  installPrompt = null;
+  document.querySelectorAll('.install-card').forEach((el) => el.remove());
+});
+
+async function promptInstall(btn) {
+  const ev = installPrompt;
+  if (!ev) return false;
+  if (btn) btn.disabled = true;
+  try {
+    await ev.prompt();
+    const choice = await ev.userChoice;
+    if (choice && choice.outcome === 'accepted') {
+      install.markInstalled();
+      document.querySelectorAll('.install-card').forEach((el) => el.remove());
+    }
+  } catch (e) {
+    // The browser declined to show it again; the written steps still work.
+  }
+  installPrompt = null;
+  if (btn) btn.disabled = false;
+  return true;
+}
+
+/** The steps for one browser, numbered. */
+function installSteps(guide) {
+  return h('ol', { class: 'steps' }, guide.steps.map((step) => h('li', {}, step)));
+}
+
+/** Popup with the steps for this browser and phone. */
+function installSheet() {
+  const guide = install.detect();
+  let close = null;
+  close = sheet('Install ThoeneFit', h('div', { class: 'stack', 'data-install-guide': guide.key },
+    installPrompt && h('button', { class: 'btn primary block', type: 'button', onclick: async (e) => {
+      await promptInstall(e.currentTarget);
+      close();
+    } }, 'Install'),
+    h('p', { class: 'muted' }, installPrompt ? `Or do it from the browser (${guide.name}):` : `On ${guide.name}:`),
+    installSteps(guide),
+    h('p', { class: 'muted small' }, 'Afterwards, open ThoeneFit from its icon instead of the browser. Your workouts and history stay the same. Steps for other browsers are in Settings.')));
+}
+
+/** One-time reminder on Today for someone using ThoeneFit in a browser tab. */
+function installCard() {
+  if (!install.shouldRemind()) return null;
+  const card = h('section', { class: 'card install-card' },
+    h('h2', {}, 'Install ThoeneFit'),
+    h('p', { class: 'muted' }, 'Add it to your Home Screen so it opens full screen and keeps working when the gym has no signal.'),
+    h('div', { class: 'plan-actions' },
+      h('button', { class: 'btn small primary', type: 'button', onclick: async (e) => {
+        if (!(await promptInstall(e.currentTarget))) installSheet();
+      } }, installPrompt ? 'Install' : 'Show me how'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => {
+        install.snooze();
+        card.remove();
+      } }, 'Not now')),
+    h('button', { class: 'btn ghost small', type: 'button', onclick: () => {
+      install.neverRemind();
+      card.remove();
+    } }, "Don't show this again"));
+  return card;
+}
 
 // ---------------------------------------------------------------- staying up to date
 // An app on the Home Screen is usually resumed, not reloaded, so it could keep
@@ -772,6 +847,7 @@ function viewToday() {
     head,
     waiting,
     shareCards(),
+    installCard(),
     controls,
     body,
     h(
@@ -1742,11 +1818,18 @@ function viewSettings() {
       h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.'),
       h('a', { class: 'btn block', href: '#/settings/import' }, 'Import from Fitbod')),
     section('Add to your Home Screen',
-      h('p', {}, 'Installed, ThoeneFit opens full screen like an app and keeps working when the gym has no signal.'),
-      h('h3', {}, 'iPhone'),
-      h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Safari.'), h('li', {}, 'Tap the Share button (the square with an arrow pointing up).'), h('li', {}, 'Scroll down and tap Add to Home Screen, then Add.')),
-      h('h3', {}, 'Pixel and other Android phones'),
-      h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.')),
+      h('p', {}, install.isInstalled() ? 'You are using the installed app.' : 'Installed, ThoeneFit opens full screen like an app and keeps working when the gym has no signal.'),
+      (() => {
+        // This browser's steps first, then everyone else's (#89).
+        const mine = install.detect();
+        return [
+          h('h3', {}, mine.key === 'other' ? 'This browser' : mine.name),
+          installPrompt && h('button', { class: 'btn primary block', type: 'button', onclick: (e) => promptInstall(e.currentTarget) }, 'Install'),
+          installSteps(mine),
+          h('details', { class: 'fold' }, h('summary', {}, 'Other browsers and phones'),
+            install.GUIDES.filter((g) => g.key !== mine.key && g.key !== 'other').map((g) => [h('h3', {}, g.name), installSteps(g)])),
+        ];
+      })(),
       h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')),
     S.user.role === 'admin' && section('Users',
       h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
