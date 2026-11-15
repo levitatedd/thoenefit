@@ -103,6 +103,18 @@ foreach (Catalog::exercises() as $e) {
 }
 check('every catalog tag is a known equipment, muscle, movement and kind', !$bad, implode(' ', $bad));
 check('catalog slugs are unique', count(array_unique(array_column(Catalog::exercises(), 0))) === count(Catalog::exercises()));
+$untickable = array_column(array_filter(Catalog::exercises(), static fn($e) => $e[2] === 'machine' && !$e[3]), 1);
+check('every machine needs a checkbox, so none looks available everywhere', !$untickable, implode(', ', $untickable));
+$shapes = [];
+foreach (Catalog::exercises() as $e) {
+    $shapes[$e[0]] = ['kind' => $e[2], 'equipment' => $e[3], 'pattern' => $e[4]];
+}
+$full = Catalog::equipmentKeys();
+$without = fn(string ...$gear) => array_values(array_diff($full, $gear));
+check('specialty gear and machines are only available when ticked', Catalog::supports($shapes['machine-biceps-curl'], $full) && !Catalog::supports($shapes['machine-biceps-curl'], $without('biceps_machine')) && !Catalog::supports($shapes['ez-bar-preacher-curl'], $without('preacher_bench')) && !Catalog::supports($shapes['decline-crunch'], $without('decline_bench')) && !Catalog::supports($shapes['stability-ball-crunch'], $without('stability_ball')) && !Catalog::supports($shapes['hip-abductor-machine'], $without('hip_abduction')));
+check('stability ball and medicine ball exercises no longer count as bodyweight-only', !Catalog::supports($shapes['stability-ball-pike'], [], true) && !Catalog::supports($shapes['alternating-medicine-ball-push-up'], [], true));
+check('the Commercial gym preset includes the new gear', !array_diff(['medicine_ball', 'stability_ball', 'decline_bench', 'preacher_bench', 'biceps_machine', 'triceps_machine', 'ab_crunch', 'rotary_torso', 'hip_abduction', 'glute_kickback', 'back_extension_machine'], Catalog::presets()[0]['equipment']));
+check('machines with a checkbox can be suggested where they fit; ones with no slot still cannot', $shapes['machine-biceps-curl']['pattern'] === 'biceps' && $shapes['machine-triceps-dip']['pattern'] === 'triceps' && $shapes['ab-crunch-machine']['pattern'] === 'core' && $shapes['hip-adductor-machine']['pattern'] === 'other' && $shapes['partner-medicine-ball-twist']['pattern'] === 'other');
 
 echo "Accounts\n";
 $auth = new Auth($db, []);
@@ -390,7 +402,7 @@ $pat = $pa->createUser('pat', 'pat-password-123');
 $admRow = $pdb->one('SELECT * FROM users WHERE id=?', [$adm]);
 $patRow = $pdb->one('SELECT * FROM users WHERE id=?', [$pat]);
 $mkEx = fn(int $owner, string $name, string $slug, string $pattern = 'horizontal_push') => $pdb->insert('exercises', ['user_id' => $owner, 'slug' => $slug, 'name' => $name, 'kind' => 'machine', 'equipment' => '["chest_press"]', 'pattern' => $pattern, 'muscles_main' => '["chest"]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 4]);
-$hs = $mkEx($adm, 'Hammerstrength Chest Press', TF\FitbodImport::slug('Hammerstrength Chest Press'));
+$hs = $mkEx($adm, 'Hammerstrength Pec Press', TF\FitbodImport::slug('Hammerstrength Pec Press'));
 $roller = $mkEx($adm, 'Wrist Roller', 'custom-bbbbbbbbbbbb', 'other');
 $clash = $mkEx($adm, 'push-up', 'custom-cccccccccccc');
 $patOwn = $mkEx($pat, 'Pat Press', 'custom-dddddddddddd');
@@ -411,7 +423,7 @@ $res = Catalog::promote($pdb, $adm);
 check('the admin\'s own exercises move into the default library', $res['promoted'] === 2 && $pdb->val('SELECT user_id FROM exercises WHERE id=?', [$hs]) === null && (int) $pdb->val('SELECT promoted_from FROM exercises WHERE id=?', [$hs]) === $adm);
 check('every account can now see them, and they are no longer marked as someone\'s own', in_array($hs, $seenBy($pat), true) && in_array($roller, $seenBy($pat), true) && $shapeOf($hs)['custom'] === false && $shapeOf($hs)['shared'] === true);
 $after = $genp->block($admRow, $pg, $shapeOf($hs));
-check('existing workout history is untouched: same exercise id, same history key, same next suggestion (' . $after['suggested_weight'] . ' lb)', count($wkp->exerciseHistory($adm, $hs)) === 1 && $pdb->val('SELECT variant_key FROM workout_exercises WHERE exercise_id=?', [$hs]) === $keyBefore && $after['suggested_weight'] === $before['suggested_weight'] && $after['suggested_weight'] === 110.0 && $wkp->get($adm, $hist['id'])['exercises'][0]['name'] === 'Hammerstrength Chest Press');
+check('existing workout history is untouched: same exercise id, same history key, same next suggestion (' . $after['suggested_weight'] . ' lb)', count($wkp->exerciseHistory($adm, $hs)) === 1 && $pdb->val('SELECT variant_key FROM workout_exercises WHERE exercise_id=?', [$hs]) === $keyBefore && $after['suggested_weight'] === $before['suggested_weight'] && $after['suggested_weight'] === 110.0 && $wkp->get($adm, $hist['id'])['exercises'][0]['name'] === 'Hammerstrength Pec Press');
 $alts = array_column($genp->alternatives($pat, $og, (int) $pdb->val("SELECT id FROM exercises WHERE slug='machine-chest-press'")), 'exercise_id');
 $patDoc = $doc($og, 'push', [[$hs, 6, 10, [[40, 8]]]], $ago(1));
 check('other accounts can pick them, be offered them as alternatives, and log them', in_array($hs, $alts, true) && $wkp->save($pat, $patDoc)['ok'] === true && $genp->block($patRow, $og, $shapeOf($hs))['suggested_weight'] === 40.0);
@@ -421,10 +433,10 @@ check('other people\'s own exercises are left alone', (int) $pdb->val('SELECT us
 $rowOf = fn(int $id) => $pdb->one('SELECT * FROM exercises WHERE id=?', [$id]);
 check('the admin can still edit or archive a moved exercise; nobody else can, and built-in ones stay read-only', Catalog::canEdit($rowOf($hs), $admRow) && !Catalog::canEdit($rowOf($hs), $patRow) && !Catalog::canEdit($pdb->one("SELECT * FROM exercises WHERE slug='push-up'"), $admRow) && Catalog::canEdit($rowOf($patOwn), $patRow) && !Catalog::canEdit($rowOf($patOwn), $admRow));
 check('moving again changes nothing', Catalog::promote($pdb, $adm)['promoted'] === 0 && (int) $pdb->val('SELECT COUNT(*) FROM exercises WHERE promoted_from IS NOT NULL') === 2);
-$planned = (new TF\FitbodImport($pdb))->plan($pat, ['names' => ['Hammerstrength Chest Press' => ['sets' => 3, 'weighted' => true]]]);
+$planned = (new TF\FitbodImport($pdb))->plan($pat, ['names' => ['Hammerstrength Pec Press' => ['sets' => 3, 'weighted' => true]]]);
 check('a Fitbod import by another account uses the moved exercise instead of making a duplicate', $planned[0]['action'] === 'match' && $planned[0]['exercise_id'] === $hs);
 Catalog::sync($pdb);
-check('refreshing the built-in catalog leaves moved exercises in place', $pdb->val('SELECT name FROM exercises WHERE id=?', [$hs]) === 'Hammerstrength Chest Press' && (int) $pdb->val('SELECT COUNT(*) FROM exercises WHERE user_id IS NULL') === count(Catalog::exercises()) + 2);
+check('refreshing the built-in catalog leaves moved exercises in place', $pdb->val('SELECT name FROM exercises WHERE id=?', [$hs]) === 'Hammerstrength Pec Press' && (int) $pdb->val('SELECT COUNT(*) FROM exercises WHERE user_id IS NULL') === count(Catalog::exercises()) + 2);
 // The same thing through the migration, on a database that already has accounts and exercises.
 $mdb = $freshDb('promote2');
 Migrator::ensure($mdb, 3);
@@ -438,6 +450,40 @@ $o1 = $mk2($ownerId, 'Owner Special');
 $m1 = $mk2($memberId, 'Member Special');
 Migrator::ensure($mdb);
 check('the migration moves the admin\'s exercises and nobody else\'s', $mdb->val('SELECT user_id FROM exercises WHERE id=?', [$o1]) === null && (int) $mdb->val('SELECT promoted_from FROM exercises WHERE id=?', [$o1]) === $ownerId && (int) $mdb->val('SELECT user_id FROM exercises WHERE id=?', [$m1]) === $memberId);
+
+echo "New built-ins take over exercises an earlier Fitbod import made\n";
+// Production as it was before #65: the admin imported Fitbod and their own
+// exercises were moved into the default library; a member imported too.
+$adb = $freshDb('adopt');
+Migrator::ensure($adb, 9);
+$adb->run('DELETE FROM exercises WHERE user_id IS NULL AND priority=9'); // the #65 built-ins did not exist yet
+foreach ([['owner', 'admin', '2025-01-01 00:00:00'], ['member', 'user', '2025-02-01 00:00:00']] as [$n, $role, $when]) {
+    $adb->insert('users', ['username' => $n, 'password_hash' => 'x', 'display_name' => $n, 'role' => $role, 'created_at' => $when]);
+}
+$ownerId = (int) $adb->val("SELECT id FROM users WHERE username='owner'");
+$memberId = (int) $adb->val("SELECT id FROM users WHERE username='member'");
+$imported = fn(?int $owner, string $fitbod, string $kind, ?int $from = null) => $adb->insert('exercises', ['user_id' => $owner, 'slug' => FitbodImport::slug($fitbod), 'name' => $fitbod, 'kind' => $kind, 'equipment' => '[]', 'pattern' => 'other', 'muscles_main' => '[]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 4, 'promoted_from' => $from]);
+$preacher = $imported(null, 'Machine Preacher Curl', 'machine', $ownerId);      // promoted
+$sled = $imported($ownerId, 'Leg Press', 'machine');                              // stayed the admin's: "Leg Press" was taken
+$memberZottman = $imported($memberId, 'Zottman Curl', 'dumbbell');                // another account's own
+$adb->insert('workout_exercises', ['id' => uuid(), 'workout_id' => uuid(), 'user_id' => $ownerId, 'exercise_id' => $preacher, 'variant_key' => $preacher . '@1', 'pos' => 0, 'target_sets' => 3, 'rep_min' => 8, 'rep_max' => 12]);
+Migrator::ensure($adb);
+$row = fn(int $id) => $adb->one('SELECT * FROM exercises WHERE id=?', [$id]);
+check('a promoted exercise becomes the built-in in place: same id, built-in name, details and cues', $row($preacher)['slug'] === 'machine-preacher-curl' && $row($preacher)['name'] === 'Machine Preacher Curl' && (int) $row($preacher)['priority'] === 9 && $row($preacher)['cues'] !== '' && $row($preacher)['user_id'] === null);
+check('its workout history still points at it', $adb->val('SELECT exercise_id FROM workout_exercises WHERE user_id=?', [$ownerId]) == $preacher);
+check('the library has one Machine Preacher Curl, not two', (int) $adb->val("SELECT COUNT(*) FROM exercises WHERE user_id IS NULL AND name='Machine Preacher Curl'") === 1);
+check('the admin\'s own copy that could not be promoted is taken over and renamed', $row($sled)['user_id'] === null && $row($sled)['slug'] === 'plate-loaded-leg-press' && $row($sled)['name'] === 'Plate-Loaded Leg Press' && (int) $row($sled)['promoted_from'] === $ownerId);
+check('another account\'s own exercise is left alone, and the built-in is added beside it', (int) $row($memberZottman)['user_id'] === $memberId && $row($memberZottman)['slug'] === FitbodImport::slug('Zottman Curl') && (int) $adb->val("SELECT COUNT(*) FROM exercises WHERE user_id IS NULL AND slug='zottman-curl'") === 1);
+check('every built-in is present afterwards', !array_diff(array_column(Catalog::exercises(), 0), array_column($adb->all('SELECT slug FROM exercises WHERE user_id IS NULL'), 'slug')) && (int) $adb->val('SELECT COUNT(*) FROM exercises WHERE user_id IS NULL') === count(Catalog::exercises()));
+$countAfter = (int) $adb->val('SELECT COUNT(*) FROM exercises');
+$adoptedAgain = FitbodImport::adoptForBuiltins($adb);
+Catalog::sync($adb);
+check('running it again changes nothing', $adoptedAgain === 0 && (int) $adb->val('SELECT COUNT(*) FROM exercises') === $countAfter);
+$replan = array_column((new FitbodImport($adb))->plan($ownerId, ['names' => ['Machine Preacher Curl' => ['sets' => 3, 'weighted' => true], 'Leg Press' => ['sets' => 3, 'weighted' => true]]]), null, 'name');
+check('re-importing the same Fitbod file matches the same exercises', $replan['Machine Preacher Curl']['exercise_id'] === $preacher && $replan['Leg Press']['exercise_id'] === $sled);
+unset($adb);
+@unlink("$file-adopt");
+
 unset($pa, $wkp, $genp, $pdb, $mdb);
 foreach (['promote', 'promote2'] as $sfx) {
     @unlink("$file-$sfx");
@@ -481,14 +527,16 @@ check('a file that is not a Fitbod export is refused', throws(fn() => FitbodImpo
 $plan = $imp->plan($uid3, $parsed);
 $byName = array_column($plan, null, 'name');
 check('known Fitbod names match built-in exercises', $byName['Barbell Bench Press']['action'] === 'match' && $byName['Barbell Bench Press']['exercise_id'] === $bench && $byName['Pull Up']['action'] === 'match');
-check('unknown names become your own exercises with guessed tags', $byName['Cable Rope Tricep Extension']['action'] === 'new' && $byName['Cable Rope Tricep Extension']['guess'] === ['kind' => 'cable', 'equipment' => ['cable'], 'pattern' => 'triceps', 'muscles_main' => ['triceps'], 'muscles_assist' => []]);
-check('a machine with no matching gym checkbox is never auto-suggested', $byName['Machine Preacher Curl']['guess']['pattern'] === 'other' && $byName['Barbell Shrug']['guess']['pattern'] === 'other');
+check('common Fitbod names that used to need "Add as my own" now match built-ins', $byName['Cable Rope Tricep Extension']['exercise_id'] === $bySlug['cable-rope-triceps-extension'] && $byName['Machine Preacher Curl']['exercise_id'] === $bySlug['machine-preacher-curl'] && $byName['Barbell Shrug']['exercise_id'] === $bySlug['barbell-shrug']);
+$unknown = $imp->plan($uid3, ['names' => ['Cable Rope Tricep Flick' => ['sets' => 2, 'weighted' => true]]])[0];
+check('unknown names become your own exercises with guessed tags', $unknown['action'] === 'new' && $unknown['guess'] === ['kind' => 'cable', 'equipment' => ['cable'], 'pattern' => 'triceps', 'muscles_main' => ['triceps'], 'muscles_assist' => []]);
+check('a machine with no matching gym checkbox is never auto-suggested', FitbodImport::guess('Machine Preacher Curl', true)['pattern'] === 'other' && FitbodImport::guess('Barbell Shrug', true)['pattern'] === 'other');
 $targets = array_filter(array_column($plan, 'exercise_id'));
 check('no two Fitbod exercises are merged into one built-in', count($targets) === count(array_unique($targets)) && count(array_unique(FitbodImport::MAP)) === count(FitbodImport::MAP));
 $missing = array_diff(FitbodImport::MAP, array_column(Catalog::exercises(), 0));
 check('every mapped name points at a real catalog exercise', !$missing, implode(' ', $missing));
 $res = $imp->run($uid3, $gym3, 'lb', $parsed, $plan);
-check('import writes workouts, sets and new exercises', $res === ['workouts' => 2, 'sets' => 11, 'exercises_created' => 3]);
+check('import writes workouts and sets, with every exercise matched', $res === ['workouts' => 2, 'sets' => 11, 'exercises_created' => 0]);
 $hist = $wk->history($uid3);
 $w = $wk->get($uid3, $hist[0]['id']);
 check('kilograms become pounds and warm-ups keep their flag', $w['exercises'][0]['sets'][0] ['weight'] === 45.0 && $w['exercises'][0]['sets'][0]['warmup'] === true && $w['exercises'][0]['sets'][1]['weight'] === 135.0 && $w['exercises'][1]['sets'][0]['weight'] === 25.0);
