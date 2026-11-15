@@ -51,7 +51,7 @@ api.onUnauthorized = () => {
 
 async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  root.replaceChildren(h('div', { class: 'splash' }, h('p', { class: 'wordmark' }, 'ThoeneFit'), h('p', { class: 'muted' }, 'Loading')));
+  root.replaceChildren(h('div', { class: 'splash' }, brandMark(), h('p', { class: 'muted' }, 'Loading')));
   let data = null;
   try {
     data = await api.get('bootstrap');
@@ -67,7 +67,7 @@ async function boot() {
         h(
           'div',
           { class: 'splash' },
-          h('p', { class: 'wordmark' }, 'ThoeneFit'),
+          brandMark(),
           h('p', { class: 'muted' }, e.offline ? 'No connection. Connect once to load the app, then it works offline.' : e.message),
           h('button', { class: 'btn primary', type: 'button', onclick: boot }, 'Try again'),
         ),
@@ -201,6 +201,16 @@ function fill(el, ...kids) {
   el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false && k !== ''));
 }
 
+/** The square barbell logo, for compact spots. */
+function brandMark() {
+  return h('img', { class: 'brand-mark', src: 'icons/logo-mark.png', width: 256, height: 256, alt: 'ThoeneFit' });
+}
+
+/** The wide ThoeneFit logo. variant: '' (centred footer), 'lead' (top of sign-in), 'small' (top of setup). */
+function brandWide(variant = '') {
+  return h('img', { class: `brand-wide ${variant}`.trim(), src: 'icons/logo-wide.png', width: 900, height: 146, alt: 'ThoeneFit' });
+}
+
 /** Exercise name that opens that exercise's history, with a way back to the screen it was tapped on. */
 function historyLink(exerciseId, name, path, label) {
   return h('a', {
@@ -265,7 +275,7 @@ function viewLogin() {
     error,
     btn,
   );
-  return h('main', { class: 'page narrow' }, h('p', { class: 'wordmark big' }, 'ThoeneFit'), h('p', { class: 'muted' }, 'Accounts are created by whoever runs this server.'), form);
+  return h('main', { class: 'page narrow' }, brandWide('lead'), form);
 }
 
 // ---------------------------------------------------------------- onboarding and profile
@@ -323,7 +333,7 @@ function viewOnboarding() {
   return h(
     'main',
     { class: 'page' },
-    h('p', { class: 'wordmark' }, 'ThoeneFit'),
+    brandWide('small'),
     h('h1', {}, `Welcome, ${S.user.display_name}`),
     h('p', { class: 'muted' }, 'A few choices so the first workout fits. Everything here can be changed later in Settings.'),
     h(
@@ -459,6 +469,7 @@ function viewToday() {
           'Discard workout',
         ),
       ),
+      brandWide(),
     );
   }
 
@@ -539,6 +550,7 @@ function viewToday() {
         d.exercises.map((b) => planRow(b, gym)),
       ),
       recoveryPanel(d.recovery),
+      brandWide(),
     );
   }
 
@@ -1332,7 +1344,7 @@ function viewSettings() {
           render();
         }, e.currentTarget);
       } }, 'Sign out')),
-    h('p', { class: 'muted small center' }, 'ThoeneFit'),
+    brandWide(),
   );
 }
 

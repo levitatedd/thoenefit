@@ -179,14 +179,29 @@ a {
   text-align: center;
 }
 
-.wordmark {
-  font: 700 22px/1 var(--display);
-  letter-spacing: 0.04em;
+.brand-mark {
+  width: 96px;
+  height: 96px;
 }
 
-.wordmark.big {
-  font-size: 44px;
+/* Wide logo: drawn for dark backgrounds, so it sits straight on the page. */
+.brand-wide {
+  display: block;
+  width: min(220px, 62%);
+  height: auto;
+  margin: 14px auto 6px;
 }
+
+.brand-wide.lead {
+  width: min(300px, 88%);
+  margin: 0 auto 14px;
+}
+
+.brand-wide.small {
+  width: 170px;
+  margin: 0 0 2px -2px;
+}
+
 
 .back {
   display: inline-flex;
