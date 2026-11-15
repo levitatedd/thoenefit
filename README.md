@@ -111,6 +111,8 @@ Each account has its own gyms, workouts, and custom exercises. People can change
 
 **The admin.** The first account ever created is the admin. On a database that already had accounts when roles were added, the earliest-created account became the admin. The admin sees Settings, then Manage users, and can create accounts there with a starting password to pass on. Accounts made that way, or with `create-user.php` once an account exists, are regular users. There is still no public sign-up: every account-management request is checked on the server and refused unless it comes from the signed-in admin.
 
+**Account requests.** In Manage users the admin can set an invite token. Someone who has it can choose "Request an account" on the sign-in screen and pick their own username and password. The request then waits in Manage users until the admin approves or declines it; nobody can sign in before approval, and approved people are regular users. The token is shared by everyone invited, is separate from any sign-in password, and is stored hashed, so it cannot be read back: set a new one if it is lost, or clear it to stop taking requests.
+
 To see who the admin is, open Manage users, or run this over SSH with your database details:
 
 ```sh

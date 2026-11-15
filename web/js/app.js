@@ -87,6 +87,7 @@ async function boot() {
 
 function applyBoot(data) {
   S.user = data.user;
+  S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
   S.vocab = data.vocab;
   setExercises(data.exercises);
@@ -154,9 +155,11 @@ function render() {
   clearInterval(ticker);
   ticker = null;
   if (!S.user) {
-    root.replaceChildren(viewLogin());
+    root.replaceChildren(S.authView === 'request' ? viewRequest() : viewLogin());
+    window.scrollTo(0, 0);
     return;
   }
+  S.authView = null;
   if (!S.user.onboarded) {
     root.replaceChildren(viewOnboarding());
     return;
@@ -275,7 +278,11 @@ function viewLogin() {
     error,
     btn,
   );
-  return h('main', { class: 'page narrow' }, brandWide('lead'), form);
+  const request = h('button', { class: 'btn ghost block', type: 'button', onclick: () => {
+    S.authView = 'request';
+    render();
+  } }, 'Request an account');
+  return h('main', { class: 'page narrow' }, brandWide('lead'), form, request);
 }
 
 // ---------------------------------------------------------------- onboarding and profile
@@ -1345,7 +1352,7 @@ function viewSettings() {
       h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.'))),
     S.user.role === 'admin' && section('Users',
       h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
-      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users')),
+      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       h('form', { class: 'stack', onsubmit: async (e) => {
@@ -1470,10 +1477,74 @@ function viewImport() {
 
 function viewUsers() {
   if (S.user.role !== 'admin') return page('Manage users', backLink('settings', 'Settings'), h('p', { class: 'muted' }, 'Only the admin can manage accounts.'));
-  const list = h('ul', { class: 'log' });
-  const paint = (users) => fill(list, users.map((u) => h('li', { class: 'log-row' },
-    h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
-    h('span', { class: 'log-meta' }, `${u.username}, added ${fmtDate(u.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}`))));
+  const when = (iso) => fmtDate(iso, { month: 'short', day: 'numeric', year: 'numeric' });
+  const accounts = h('ul', { class: 'log' });
+  const requests = h('div', { class: 'stack', 'data-list': 'requests' });
+  const inviteState = h('p', { class: 'muted', 'data-invite': '' });
+  const turnOff = h('button', { class: 'btn danger block', type: 'button' }, 'Stop taking requests');
+
+  // One painter for everything the server sends back, so every action leaves the page in step.
+  const paint = (data) => {
+    S.pendingRequests = data.requests.length;
+    fill(accounts, data.users.map((u) => h('li', { class: 'log-row' },
+      h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
+      h('span', { class: 'log-meta' }, `${u.username}, added ${when(u.created_at)}`))));
+    fill(requests,
+      !data.requests.length && h('p', { class: 'muted' }, data.invite.set ? 'No requests waiting.' : 'No requests waiting. Set an invite token below to let people ask for an account.'),
+      data.requests.map((r) => h('div', { class: 'card request' },
+        h('div', {}, h('h3', {}, r.display_name), h('p', { class: 'muted small' }, `Wants the username ${r.username}. Asked ${when(r.created_at)}.`)),
+        h('div', { class: 'plan-actions' },
+          h('button', { class: 'btn small primary', type: 'button', onclick: (e) => decide('approve_request', r, `${r.username} can sign in now.`, e.currentTarget) }, 'Approve'),
+          h('button', { class: 'btn small', type: 'button', onclick: async (e) => {
+            const btn = e.currentTarget;
+            if (await confirmSheet(`Decline ${r.username}?`, 'The request is deleted. They can ask again if they still have the invite token.', 'Decline request', true)) decide('decline_request', r, `Declined ${r.username}.`, btn);
+          } }, 'Decline')))));
+    inviteState.textContent = data.invite.set
+      ? `Requests are open. The token was last set ${when(data.invite.updated_at)}. It is stored scrambled, so it cannot be shown again; set a new one if you have lost it.`
+      : 'Requests are closed. Set a token to open them.';
+    turnOff.hidden = !data.invite.set;
+  };
+  const decide = (action, r, done, btn) => act(async () => {
+    paint(await api.post(action, { id: r.id }));
+    toast(done);
+  }, btn);
+
+  // Invite token
+  const token = h('input', { type: 'text', name: 'invite_token', minlength: 8, maxlength: 100, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const tokenError = h('p', { class: 'form-error', role: 'alert' });
+  const tokenBtn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save invite token');
+  const saveToken = async (value, done, btn) => {
+    tokenError.textContent = '';
+    btn.disabled = true;
+    try {
+      paint(await api.post('set_invite_token', { token: value }));
+      token.value = '';
+      toast(done);
+    } catch (err) {
+      tokenError.textContent = err.offline ? 'No connection to the server.' : err.message;
+    }
+    btn.disabled = false;
+  };
+  turnOff.onclick = async () => {
+    if (await confirmSheet('Stop taking requests?', 'The invite token stops working. Requests already waiting stay in the list.', 'Stop taking requests', true)) saveToken('', 'Account requests are closed.', turnOff);
+  };
+  const tokenForm = h('form', { class: 'stack', onsubmit: (e) => {
+    e.preventDefault();
+    saveToken(token.value, 'Invite token saved. Share it with the people you want to invite.', tokenBtn);
+  } },
+    field('New invite token', token, 'At least 8 characters. Everyone you invite uses the same one, and it is not anyone\'s sign-in password.'),
+    h('button', { class: 'btn block', type: 'button', onclick: () => {
+      const bytes = crypto.getRandomValues(new Uint8Array(12));
+      const letters = 'abcdefghjkmnpqrstuvwxyz23456789';
+      token.value = [...bytes].map((b, n) => (n && n % 4 === 0 ? '-' : '') + letters[b % letters.length]).join('');
+      token.focus();
+      token.select();
+    } }, 'Make one up for me'),
+    tokenError,
+    tokenBtn,
+    turnOff);
+
+  // Create an account directly
   const error = h('p', { class: 'form-error', role: 'alert' });
   const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'off', placeholder: 'For example: Sam' });
   const username = h('input', { type: 'text', name: 'new_username', maxlength: 64, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
@@ -1484,8 +1555,7 @@ function viewUsers() {
     error.textContent = '';
     btn.disabled = true;
     try {
-      const r = await api.post('create_user', { username: username.value, display_name: name.value, password: password.value });
-      paint(r.users);
+      paint(await api.post('create_user', { username: username.value, display_name: name.value, password: password.value }));
       toast(`Account created for ${username.value.trim().toLowerCase()}.`);
       form.reset();
     } catch (err) {
@@ -1498,14 +1568,61 @@ function viewUsers() {
     field('Starting password', password, 'At least 10 characters. Shown here so you can pass it on; they can change it under Settings once signed in.'),
     error,
     btn);
+
   const loaded = asyncSection(() => api.get('users'), (data) => {
-    paint(data.users);
-    return list;
+    paint(data);
+    return [
+      section('Requests waiting', requests),
+      section('Accounts', accounts),
+      section('Invite token', h('p', { class: 'muted' }, 'With the token, someone can ask for an account from the sign-in screen, choosing their own username and password. Nobody gets in until you approve them here.'), inviteState, tokenForm),
+      section('Add a person yourself', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form),
+    ];
   });
-  return h('main', { class: 'page' }, backLink('settings', 'Settings'),
-    h('h1', {}, 'Manage users'),
-    section('Accounts', loaded),
-    section('Add a person', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form));
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Manage users'), loaded);
+}
+
+/** Sign-in screen's "Request an account": needs the admin's invite token, creates nothing usable until approved. */
+function viewRequest() {
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const token = h('input', { type: 'text', name: 'invite_token', required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'name' });
+  const username = h('input', { type: 'text', name: 'username', maxlength: 64, required: true, autocomplete: 'username', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const password = h('input', { type: 'password', name: 'password', minlength: 10, required: true, autocomplete: 'new-password' });
+  const again = h('input', { type: 'password', name: 'password_again', minlength: 10, required: true, autocomplete: 'new-password' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Send request');
+  const backToSignIn = () => {
+    S.authView = null;
+    render();
+  };
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    if (password.value !== again.value) {
+      error.textContent = 'The two passwords do not match.';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await api.post('request_account', { token: token.value, username: username.value, display_name: name.value, password: password.value });
+      fill(box,
+        h('h1', {}, 'Request sent'),
+        h('p', {}, `The admin has to approve it before you can sign in. When they have, sign in as ${username.value.trim().toLowerCase()} with the password you just chose.`),
+        h('button', { class: 'btn primary block', type: 'button', onclick: backToSignIn }, 'Back to sign in'));
+    } catch (err) {
+      error.textContent = err.offline ? 'No connection to the server.' : err.message;
+      btn.disabled = false;
+    }
+  } },
+    field('Invite token', token, 'From the person who runs this ThoeneFit. It is only used to send this request.'),
+    field('Your name', name, 'Shown in the app. Optional.'),
+    field('Username', username, '2-64 letters, numbers, dots, dashes or underscores.'),
+    field('Password', password, 'At least 10 characters. This is your own sign-in password, not the invite token.'),
+    field('Password again', again),
+    error,
+    btn,
+    h('button', { class: 'btn ghost block', type: 'button', onclick: backToSignIn }, 'Back to sign in'));
+  const box = h('div', { class: 'stack' }, h('h1', {}, 'Request an account'), form);
+  return h('main', { class: 'page narrow request-page' }, brandWide('lead'), box);
 }
 
 function viewGymForm(id) {

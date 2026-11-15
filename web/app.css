@@ -27,6 +27,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -931,6 +935,20 @@ input[type="file"] {
   border-top: 1px solid var(--line);
   font: 700 19px/1.2 var(--display);
   color: var(--muted);
+}
+
+.badge.alert {
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+.request h3 {
+  font: 700 19px/1.2 var(--display);
+}
+
+/* The request form is taller than sign-in, so it starts nearer the top. */
+.page.narrow.request-page {
+  padding-top: 8vh;
 }
 
 .badge {
