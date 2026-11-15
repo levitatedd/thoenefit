@@ -1054,27 +1054,41 @@ input[type="file"] {
   white-space: nowrap;
 }
 
-/* Details for the point you tapped, above the chart. */
+/* Details for the point you tapped, above the chart. Its height is fixed per chart
+   (--readout-rows is set by lineChart), so the chart never moves while you scrub (#75). */
 .chart-readout {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 52px;
+  box-sizing: content-box;
+  height: calc(var(--readout-rows, 2) * 19px);
   padding-bottom: 8px;
+  overflow: hidden;
+  line-height: 19px;
 }
 
 .chart-readout-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   min-width: 0;
   font-size: 14px;
+  line-height: 19px;
   font-variant-numeric: tabular-nums;
 }
 
 .chart-readout-text strong {
   font-size: 15px;
+}
+
+.chart-readout-text > * {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp, 1);
+  line-clamp: var(--clamp, 1);
+  overflow: hidden;
+  min-height: calc(var(--clamp, 1) * 19px); /* each line keeps its place, too */
+  overflow-wrap: anywhere;
 }
 
 .chart-readout .btn {

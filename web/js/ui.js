@@ -236,7 +236,14 @@ export function lineChart(points, { unit = '', format = fmtW, onOpen, openLabel 
   const last = points[points.length - 1];
   if (dense) fig.classList.add('dense');
   const summary = `From ${format(first.value)} ${unit} on ${first.label} to ${format(last.value)} ${unit} on ${last.label}`;
-  const readout = h('div', { class: 'chart-readout', 'aria-live': 'polite' }, h('span', { class: 'muted small' }, hint));
+  // The details box above the chart keeps one height for every point, so the chart
+  // doesn't jump up and down as you drag across it (#75). Each detail line gets one
+  // row, or two if it runs long on any point (for example a long list of sets), and
+  // is cut off with an ellipsis past that. Open workout still shows everything.
+  const clamps = [];
+  for (const p of points) (p.lines || []).forEach((line, i) => (clamps[i] = Math.max(clamps[i] || 1, String(line).length > 32 ? 2 : 1)));
+  const rows = 2 + clamps.reduce((n, c) => n + c, 0);
+  const readout = h('div', { class: 'chart-readout', 'aria-live': 'polite', style: `--readout-rows: ${rows}` }, h('span', { class: 'muted small' }, hint));
   fig.append(readout);
   fig.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 ${W} ${H}" role="img" tabindex="0" aria-label="${summary}. Use the arrow keys to step through points."><path d="${d}"/>${dots}<line class="guide" x1="0" x2="0" y1="${pad.t - 6}" y2="${H - pad.b + 6}" visibility="hidden"/><circle class="sel" r="6" visibility="hidden"/></svg>`);
   const svg = fig.querySelector('svg');
@@ -259,7 +266,7 @@ export function lineChart(points, { unit = '', format = fmtW, onOpen, openLabel 
     const text = h('div', { class: 'chart-readout-text' },
       h('strong', {}, p.title || p.label),
       h('span', {}, `${format(p.value)} ${unit}`.trim()),
-      (p.lines || []).map((line) => h('span', { class: 'muted' }, line)));
+      (p.lines || []).map((line, n) => h('span', { class: 'muted', title: line, style: `--clamp: ${clamps[n] || 1}` }, line)));
     // Only points that stand for one workout get a link (Trends' weekly points do not).
     if (p.href) readout.replaceChildren(text, h('a', { class: 'btn small', href: p.href, onclick: () => onOpen && onOpen(p) }, openLabel));
     else readout.replaceChildren(text);
