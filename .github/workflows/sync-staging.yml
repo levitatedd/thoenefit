@@ -1,12 +1,17 @@
 name: Sync main back into staging
 
-# After a release reaches main, open a pull request that merges main back into
-# staging. Releases add a merge commit that only main has, and edits made
-# directly on main would otherwise never reach staging, so without this staging
-# keeps falling further "behind" main.
+# After a release reaches main, merge main back into staging. Releases add a
+# merge commit that only main has, and anything released straight to main
+# (not through staging) would otherwise never reach staging, so without this
+# staging keeps falling further "behind" main.
 #
-# It only opens the pull request. Merge it yourself, with "Create a merge
-# commit" (not squash), so staging records main's commits.
+# The merge is done here, with a merge commit, so nobody has to click it. If
+# it cannot be done (a conflict, or staging becomes protected), it falls back
+# to opening a pull request to merge by hand.
+#
+# A merge made with the workflow's own token does not start other workflows,
+# so this then starts the staging deploy itself. That keeps fit-test's
+# "-staging" version label up to date with the release that just shipped.
 
 on:
   push:
@@ -14,8 +19,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
+  actions: write
 
 concurrency:
   group: sync-staging
@@ -23,7 +29,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Open the sync pull request
+    name: Merge main into staging
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -35,28 +41,54 @@ jobs:
         run: |
           behind=$(gh api "repos/$REPO/compare/staging...main" --jq '.ahead_by')
           echo "Commits on main that staging does not have: $behind"
-          open=$(gh api "repos/$REPO/pulls?state=open&base=staging&head=$OWNER:main" --jq '.[0].number // empty')
           if [ "$behind" = "0" ]; then
             echo "Staging already has everything on main. Nothing to do."
             echo "needed=false" >> "$GITHUB_OUTPUT"
-          elif [ -n "$open" ]; then
-            echo "::notice::Sync pull request #$open is already open. It will include these commits too."
-            echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
-            echo "behind=$behind" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open the pull request
+      - name: Merge main into staging
+        id: merge
         if: steps.check.outputs.needed == 'true'
         run: |
+          # 201: merged. 204: nothing to merge. 409: conflict. Anything else: could not merge.
+          status=$(curl -sS -o merge.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$REPO/merges" \
+            -d "{\"base\":\"staging\",\"head\":\"main\",\"commit_message\":\"Sync main back into staging after release ${GITHUB_SHA::7}\"}") || true
+          [ "$status" = "201" ] || cat merge.json 2>/dev/null || true
+          echo "GitHub answered: ${status:-no response}"
+          case "$status" in
+            201)
+              echo "Merged main into staging."
+              echo "merged=true" >> "$GITHUB_OUTPUT"
+              ;;
+            204)
+              echo "Nothing to merge."
+              ;;
+            *)
+              echo "::warning::Could not merge main into staging automatically (HTTP ${status:-none}). Opening a pull request instead."
+              echo "fallback=true" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Redeploy staging
+        if: steps.merge.outputs.merged == 'true'
+        run: gh workflow run deploy.yml --repo "$REPO" --ref staging
+
+      - name: Open a pull request instead
+        if: steps.merge.outputs.fallback == 'true'
+        run: |
+          open=$(gh api "repos/$REPO/pulls?state=open&base=staging&head=$OWNER:main" --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            echo "::notice::Sync pull request #$open is already open. It will include these commits too."
+            exit 0
+          fi
           commits=$(gh api "repos/$REPO/compare/staging...main" --jq '.commits[] | "- " + .sha[0:7] + " " + (.commit.message | split("\n")[0])')
           body=$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
-            "Merges \`main\` back into \`staging\` after a release, so staging stops showing as behind main." \
+            "Merges \`main\` back into \`staging\` after a release. The sync workflow could not merge it by itself, usually because of a conflict." \
             "Commits on \`main\` that \`staging\` does not have yet:" \
             "$commits" \
-            "Merge with **Create a merge commit**, not squash, so staging records these commits. Opened automatically by the sync-staging workflow; checks do not run on pull requests opened this way, but everything here is already on main.")
-          if ! gh api "repos/$REPO/pulls" -X POST -f base=staging -f head=main -f title="Sync main back into staging" -f body="$body" --jq '"Opened " + .html_url'; then
-            echo "::warning::Could not open the pull request. In the repository's Settings > Actions > General, under Workflow permissions, tick 'Allow GitHub Actions to create and approve pull requests', then re-run this workflow. Or open it by hand: https://github.com/$REPO/compare/staging...main"
-            exit 1
-          fi
+            "Resolve any conflict, then merge with **Create a merge commit**, not squash.")
+          gh api "repos/$REPO/pulls" -X POST -f base=staging -f head=main -f title="Sync main back into staging" -f body="$body" --jq '"Opened " + .html_url'
