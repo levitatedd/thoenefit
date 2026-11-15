@@ -82,6 +82,18 @@ jobs:
           fi
           echo "Server found and SFTP port is open."
 
+      - name: Stamp the build
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          # The app compares version.json with the build it started with and reloads
+          # itself when they differ. sw.js gets the same id, so phones replace their
+          # saved copies of the app files on every deploy.
+          BUILD="${GITHUB_SHA::12}"
+          printf '{"build":"%s"}\n' "$BUILD" > web/version.json
+          sed -i "s/^const BUILD = 'dev';/const BUILD = '$BUILD';/" web/sw.js
+          grep -q "const BUILD = '$BUILD';" web/sw.js || { echo "::error::Could not stamp the build into web/sw.js."; exit 1; }
+          echo "Build $BUILD"
+
       - name: Upload the web folder over SFTP
         if: steps.cfg.outputs.ready == 'true'
         run: |

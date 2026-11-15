@@ -48,7 +48,7 @@ const fav = await page.evaluate(async () => {
 });
 const off = await page.$eval('img.brand-wide', (img) => { const r = img.getBoundingClientRect(); return Math.abs((r.left + r.right) / 2 - window.innerWidth / 2); });
 check('the logo is centred on the sign-in screen, with no other text above the form', off < 2 && !(await page.textContent('.page')).includes('Accounts are created'), `${off}px off centre`);
-check('the browser tab icon is the barbell logo', fav.links.includes('favicon.ico') && fav.links.includes('icons/favicon-32.png') && fav.ok.every(Boolean), JSON.stringify(fav));
+check('the browser tab icon is the barbell logo', fav.links.some((l) => l.startsWith('favicon.ico')) && fav.links.some((l) => l.startsWith('icons/favicon-32.png')) && fav.ok.every(Boolean), JSON.stringify(fav));
 await page.fill('input[name=username]', USER);
 await page.fill('input[name=password]', 'wrong-password-here');
 await page.click('button[type=submit]');
@@ -528,6 +528,35 @@ await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 check('settings include Home Screen instructions for Safari', (await page.textContent('.page')).includes('Tap the Share button'));
 await shot('11-settings');
+check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
+
+console.log('Staying up to date');
+if (!process.env.TF_URL) {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const versionFile = new globalThis.URL('../web/version.json', import.meta.url); // URL is the server address here
+  const original = readFileSync(versionFile, 'utf8');
+  const cachedStamp = await page.evaluate(async () => {
+    for (const k of await caches.keys()) {
+      if ((await (await caches.open(k)).keys()).some((r) => r.url.endsWith('/version.json'))) return true;
+    }
+    return false;
+  });
+  check('the build stamp is never saved by the service worker', cachedStamp === false);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForTimeout(500);
+  check('reopening the app with no new deploy does not reload it', (await page.locator('.toast.show').count()) === 0 && (await page.locator('text=Add to your Home Screen').count()) === 1);
+  try {
+    writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
+    await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
+    await page.waitForSelector('.toast.show');
+    check('after a deploy, reopening the app reloads it and says so', /ThoeneFit was updated/.test(await page.textContent('.toast')));
+  } finally {
+    writeFileSync(versionFile, original);
+  }
+  await page.waitForSelector('.tabs');
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Add to your Home Screen');
+}
 if (!process.env.TF_URL) {
   console.log('Default library');
   // The admin adds an exercise of their own, it is moved into the default library, and another account can see it.

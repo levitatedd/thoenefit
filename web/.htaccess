@@ -22,9 +22,10 @@ DirectoryIndex index.html
     Header always set Content-Security-Policy "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     Header always set Strict-Transport-Security "max-age=15552000"
 
-    # The service worker and the page shell must be re-checked on every load
-    # so a deploy reaches the phone straight away.
-    <FilesMatch "^(sw\.js|index\.html|manifest\.webmanifest)$">
+    # Every app file is re-checked with the server on each load (a quick
+    # "not modified" when nothing changed), so a deploy reaches the phone
+    # straight away instead of an old copy being reused for hours.
+    <FilesMatch "\.(html|js|css|json|webmanifest|png|ico)$">
         Header set Cache-Control "no-cache"
     </FilesMatch>
 </IfModule>
