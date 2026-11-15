@@ -274,6 +274,12 @@ final class Api
                     if (!empty($doc['share_key'])) {
                         $this->shares->link($uid, (string) $doc['share_key'], (string) $doc['id']);
                     }
+                    // Finished with "Send to Strava" ticked (#87). The workout is saved
+                    // either way; a failed send can be retried from History.
+                    $sent = $this->strava->sendOnFinish($uid, (string) $doc['id'], $doc['strava_send'] ?? null, !empty($saved['completed_now']));
+                    if ($sent !== null) {
+                        $saved['strava_export'] = $sent;
+                    }
                 }
                 self::json($saved);
                 return;
