@@ -711,6 +711,30 @@ check('a reported duplicate cannot be posted again',
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 
+echo "Weekly training trends\n";
+$trendsUid = $auth->createUser('trends-user', 'trends-user-123');
+$trendsGym = $mkGym($trendsUid, 'Trends gym', ['barbell', 'bench']);
+$sunday = $doc($trendsGym, 'push', [[$bench, 6, 10, [[50, 3], [40, 10, true], [100, 10, false, false]]]], '2026-11-02T04:30:00Z');
+$sunday['completed_at'] = '2026-11-02T05:10:00Z';
+$wk->save($trendsUid, $sunday);
+$monday = $doc($trendsGym, 'push', [[$bench, 6, 10, [[10, 10]]]], '2026-11-02T06:30:00Z');
+$monday['unit'] = 'kg';
+$wk->save($trendsUid, $monday); // Start and finish are equal, as with older imports without a duration.
+$emptySets = $doc($trendsGym, 'custom', [], '2026-11-03T06:30:00Z');
+$emptySets['completed_at'] = '2026-11-03T06:55:00Z';
+$wk->save($trendsUid, $emptySets);
+$wk->save($trendsUid, $doc($trendsGym, 'push', [[$bench, 6, 10, [[100, 10]]]], '2026-11-03T08:00:00Z', 'active'));
+$wk->save($uid, $doc($big, 'push', [[$bench, 6, 10, [[100, 10]]]], '2026-11-03T08:00:00Z'));
+$weeks = $wk->weeklyTrends($trendsUid, 'lb', 'America/Chicago', strtotime('2026-11-04T12:00:00Z'));
+check('trends use local Monday boundaries and include eight weeks with empty weeks', count($weeks) === 8 &&
+    $weeks[0]['volume'] === 0.0 && $weeks[0]['seconds'] === null &&
+    $weeks[6]['start'] === '2026-10-26' && $weeks[7]['start'] === '2026-11-02');
+check('weekly volume excludes warm-ups, unfinished sets, active workouts, and other accounts',
+    $weeks[6]['volume'] === 150.0 && abs($weeks[7]['volume'] - 220.462262) < 0.00001 &&
+    $weeks[6]['workouts'] === 1 && $weeks[7]['workouts'] === 2);
+check('weekly elapsed time counts each recorded duration once and leaves untimed imports out',
+    $weeks[6]['seconds'] === 2400 && $weeks[7]['seconds'] === 1500);
+
 echo "Upgrading a database that already has accounts\n";
 $old = $freshDb('upgrade');
 Migrator::ensure($old, 2);

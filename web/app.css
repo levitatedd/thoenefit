@@ -11,6 +11,7 @@
   --muted: #a6afbb;
   --blue: #5aa2ff;
   --green: #3dd68c;
+  --mint: #3af29c;
   --yellow: #f5c63c;
   --red: #ff6b5e;
   --ink: #0e1115;
@@ -1056,7 +1057,7 @@ input[type="file"] {
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   height: calc(var(--tabs-h) + var(--safe-b));
   padding-bottom: var(--safe-b);
   background: var(--surface);
@@ -1076,7 +1077,7 @@ input[type="file"] {
 }
 
 .tab[aria-current="page"] {
-  color: var(--chalk);
+  color: var(--mint);
 }
 
 /* ---- sheets and toasts ---- */

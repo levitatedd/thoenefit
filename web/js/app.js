@@ -170,6 +170,7 @@ function render() {
   let view;
   if (tab === 'workout') view = viewWorkout();
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
+  else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
   else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : viewSettings();
   else view = viewToday();
@@ -178,8 +179,9 @@ function render() {
     'nav',
     { class: 'tabs', 'aria-label': 'Main' },
     [
-      ['today', 'Today', 'today'],
       ['history', 'History', 'history'],
+      ['trends', 'Trends', 'trends'],
+      ['today', 'Today', 'today'],
       ['exercises', 'Exercises', 'list'],
       ['settings', 'Settings', 'gear'],
     ].map(([key, label, ic]) => h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, icon(ic, 24), h('span', {}, label))),
@@ -693,7 +695,6 @@ function viewToday() {
         { class: 'plan' },
         d.exercises.map((b) => planRow(b, gym)),
       ),
-      recoveryPanel(d.recovery),
       brandWide(),
     );
   }
@@ -773,7 +774,7 @@ function recoveryPanel(recovery) {
     bar.style.width = `${m.recovery}%`;
     return h('li', { class: 'meter' }, h('span', { class: 'meter-name' }, m.label), h('span', { class: `meter-track ${m.recovery < 50 ? 'low' : ''}` }, bar), h('span', { class: 'meter-num' }, `${m.recovery}%`), h('span', { class: 'meter-sets' }, `${fmtW(m.weekly_sets)} sets`));
   });
-  return h('details', { class: 'card fold' }, h('summary', {}, 'Recovery estimate'), h('p', { class: 'muted small' }, 'Estimated only from sets logged here in the last 7 days. It cannot see sleep, soreness or other activity, so treat it as a rough guide.'), h('ul', { class: 'meters' }, rows));
+  return h('details', { class: 'card fold', open: true }, h('summary', {}, 'Recovery estimate'), h('p', { class: 'muted small' }, 'Estimated only from sets logged here in the last 7 days. It cannot see sleep, soreness or other activity, so treat it as a rough guide.'), h('ul', { class: 'meters' }, rows));
 }
 
 async function swapSheet(gymId, exerciseId, exclude, onPick, bodyweightOnly = false) {
@@ -1242,6 +1243,31 @@ function asyncSection(load, build) {
     (e) => box.replaceChildren(h('p', { class: 'muted pad' }, e.offline ? 'This needs a connection.' : e.message)),
   );
   return box;
+}
+
+function viewTrends() {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const content = asyncSection(() => api.get('trends', '&timezone=' + encodeURIComponent(timezone)), ({ weeks, unit, recovery }) => {
+    const points = weeks.map((week) => ({
+      ...week,
+      label: fmtDate(week.start + 'T12:00:00', { month: 'short', day: 'numeric' }),
+    }));
+    return h('div', { class: 'stack' },
+      h('section', { class: 'card stack' },
+        h('h2', {}, 'Weekly lifting volume'),
+        h('p', { class: 'muted small' }, 'Logged weight × reps across completed working sets.'),
+        weeks.some((w) => w.workouts > 0)
+          ? lineChart(points.map(({ label, volume }) => ({ label, value: volume })), { unit: unit + ' × reps' })
+          : h('p', { class: 'muted' }, 'No completed workouts in the last 8 weeks.')),
+      h('section', { class: 'card stack' },
+        h('h2', {}, 'Weekly workout time'),
+        h('p', { class: 'muted small' }, 'Elapsed time from workouts with a recorded duration.'),
+        weeks.some((w) => w.seconds !== null)
+          ? lineChart(points.map(({ label, seconds }) => ({ label, value: (seconds ?? 0) / 60 })), { unit: 'min' })
+          : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
+      recoveryPanel(recovery));
+  });
+  return page('Trends', h('p', { class: 'muted' }, 'Last 8 weeks, including this week.'), content);
 }
 
 function viewHistory() {
