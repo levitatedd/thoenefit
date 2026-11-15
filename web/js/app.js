@@ -686,7 +686,7 @@ function viewToday() {
     body = h(
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
-      h('p', { class: 'summary' }, `${d.exercises.length} exercises, about ${d.est_minutes} minutes`),
+      h('p', { class: 'summary' }, `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${d.exercises.length} exercises, about ${d.est_minutes} minutes`),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
