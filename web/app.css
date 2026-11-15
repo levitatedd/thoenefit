@@ -524,7 +524,7 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   min-height: 44px;
-  margin: -10px 0;
+  margin: -10px 0 -4px;
   color: var(--chalk);
   text-decoration: underline;
   text-decoration-color: var(--line);
@@ -807,6 +807,35 @@ input.num::placeholder {
 
 .finish {
   margin-top: 8px;
+}
+
+.share-card {
+  border: 2px solid var(--green);
+}
+
+.shared-note {
+  border-left-color: var(--green);
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-status.accepted,
+.share-status.started {
+  color: var(--green);
 }
 
 .resume {
