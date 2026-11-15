@@ -267,7 +267,7 @@ final class FitbodImport
         return ['kind' => $kind, 'equipment' => $equipment, 'pattern' => $pattern, 'muscles_main' => $main, 'muscles_assist' => $assist];
     }
 
-    private static function slug(string $name): string
+    public static function slug(string $name): string
     {
         return 'fitbod-' . substr(sha1(strtolower($name)), 0, 20);
     }

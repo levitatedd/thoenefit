@@ -117,6 +117,16 @@ To see who the admin is, open Manage users, or run this over SSH with your datab
 mysql -h mysql.example.com -u DBUSER -p DBNAME -e "SELECT username, role, created_at FROM users ORDER BY created_at"
 ```
 
+### Sharing your own exercises with everyone
+
+Exercises an account adds (or that a Fitbod import creates) belong to that account and show as "Yours". To put one account's exercises into the default library for everyone:
+
+```sh
+php ~/fit.example.com/private/bin/promote-exercises.php mike
+```
+
+The exercises keep their ids, so that account's workout history, trends and suggested weights for them are unchanged. Other accounts can then see, pick and be suggested them, each with their own history. An exercise whose name the default library already has is left as the account's own and listed in the output. The admin can still edit or archive exercises moved this way; other accounts cannot.
+
 ### Updates and database changes
 
 Push to `main`. The upload replaces changed files and deletes nothing. Database changes are numbered files in `web/private/migrations/`; they apply themselves the first time the app is opened after a deploy. To apply them by hand: `php ~/fit.example.com/private/bin/migrate.php`.

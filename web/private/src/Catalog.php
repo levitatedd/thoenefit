@@ -287,6 +287,46 @@ final class Catalog
         }
     }
 
+    /**
+     * Moves one account's own exercises into the default library. The rows are
+     * changed in place and keep their ids, so workouts that used them, and the
+     * history built on those workouts, are not touched. An exercise whose name
+     * the default library already has is left alone, to avoid two with one name.
+     *
+     * @return array{promoted: int, skipped: string[]}
+     */
+    public static function promote(Db $db, int $userId): array
+    {
+        return $db->tx(static function (Db $db) use ($userId) {
+            $taken = [];
+            foreach ($db->all('SELECT name FROM exercises WHERE user_id IS NULL') as $r) {
+                $taken[mb_strtolower($r['name'])] = true;
+            }
+            $promoted = 0;
+            $skipped = [];
+            foreach ($db->all('SELECT id, name FROM exercises WHERE user_id=? ORDER BY id', [$userId]) as $r) {
+                $key = mb_strtolower($r['name']);
+                if (isset($taken[$key])) {
+                    $skipped[] = $r['name'];
+                    continue;
+                }
+                $db->run('UPDATE exercises SET user_id=NULL, promoted_from=? WHERE id=?', [$userId, $r['id']]);
+                $taken[$key] = true;
+                $promoted++;
+            }
+            return ['promoted' => $promoted, 'skipped' => $skipped];
+        });
+    }
+
+    /** Whether this account may edit or archive the exercise: its own, or (for the admin) one moved into the default library. */
+    public static function canEdit(array $row, array $user): bool
+    {
+        if ($row['user_id'] !== null) {
+            return (int) $row['user_id'] === (int) $user['id'];
+        }
+        return ($row['promoted_from'] ?? null) !== null && Auth::isAdmin($user);
+    }
+
     /** Exercises a user can see: built-ins plus their own. */
     public static function forUser(Db $db, int $userId, bool $includeArchived = false): array
     {
@@ -306,6 +346,8 @@ final class Catalog
         return [
             'id' => (int) $r['id'],
             'custom' => $r['user_id'] !== null,
+            // In the default library because the admin's own exercise was moved there, not from the built-in catalog.
+            'shared' => $r['user_id'] === null && ($r['promoted_from'] ?? null) !== null,
             'name' => $r['name'],
             'kind' => $r['kind'],
             'equipment' => json_decode($r['equipment'], true) ?: [],

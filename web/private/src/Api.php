@@ -141,10 +141,14 @@ final class Api
                 self::json(['gyms' => $gyms, 'user' => self::userShape($this->db->one('SELECT * FROM users WHERE id=?', [$uid]))]);
                 return;
             case 'save_exercise':
-                self::json(['exercise' => $this->saveExercise($uid, $in)]);
+                self::json(['exercise' => $this->saveExercise($user, $in)]);
                 return;
             case 'archive_exercise':
-                $this->db->run('UPDATE exercises SET archived=? WHERE id=? AND user_id=?', [empty($in['archived']) ? 0 : 1, (int) ($in['id'] ?? 0), $uid]);
+                $row = $this->db->one('SELECT * FROM exercises WHERE id=?', [(int) ($in['id'] ?? 0)]);
+                if (!$row || !Catalog::canEdit($row, $user)) {
+                    throw new HttpError(404, 'Only exercises you created can be archived.');
+                }
+                $this->db->run('UPDATE exercises SET archived=? WHERE id=?', [empty($in['archived']) ? 0 : 1, $row['id']]);
                 self::json(['ok' => true]);
                 return;
             case 'generate':
@@ -339,8 +343,9 @@ final class Api
         return $this->gym($uid, $id);
     }
 
-    private function saveExercise(int $uid, array $in): array
+    private function saveExercise(array $user, array $in): array
     {
+        $uid = (int) $user['id'];
         $name = trim((string) ($in['name'] ?? ''));
         if ($name === '') {
             throw new HttpError(422, 'Give the exercise a name.');
@@ -368,7 +373,8 @@ final class Api
         ];
         $id = (int) ($in['id'] ?? 0);
         if ($id) {
-            if (!$this->db->val('SELECT id FROM exercises WHERE id=? AND user_id=?', [$id, $uid])) {
+            $existing = $this->db->one('SELECT * FROM exercises WHERE id=?', [$id]);
+            if (!$existing || !Catalog::canEdit($existing, $user)) {
                 throw new HttpError(404, 'Only exercises you created can be edited.');
             }
             $this->db->update('exercises', $row, 'id=?', [$id]);

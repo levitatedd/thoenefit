@@ -38,6 +38,16 @@ final class Migrator
         }
     }
 
+    /** Versions already recorded as applied. */
+    public static function applied(Db $db): array
+    {
+        try {
+            return array_map('intval', array_column($db->all('SELECT version FROM schema_migrations'), 'version'));
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
     /** Applies pending migrations; returns the versions it applied. */
     public static function ensure(Db $db, ?int $upTo = null): array
     {
@@ -45,18 +55,17 @@ final class Migrator
         if ($upTo !== null) {
             $files = array_filter($files, static fn($v) => $v <= $upTo, ARRAY_FILTER_USE_KEY);
         }
-        $latest = $files ? max(array_keys($files)) : 0;
-        $current = self::current($db);
-        if ($current >= $latest) {
+        // Apply every migration that has not been recorded, not just ones numbered
+        // above the newest. Two branches can each add a migration and be merged
+        // in either order without one being skipped.
+        $pending = array_diff_key($files, array_flip(self::applied($db)));
+        if (!$pending) {
             return [];
         }
         $m = new Migrator($db);
         $db->pdo->exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INT NOT NULL PRIMARY KEY, applied_at VARCHAR(19) NOT NULL)');
         $applied = [];
-        foreach ($files as $version => $file) {
-            if ($version <= $current) {
-                continue;
-            }
+        foreach ($pending as $version => $file) {
             $fn = require $file;
             $fn($db, $m);
             // Another request may have applied it at the same moment.
