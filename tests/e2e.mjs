@@ -75,12 +75,15 @@ check('each exercise explains why', (await page.$$eval('.plan-row .why', (els) =
 check('no sideways scrolling at iPhone width', (await overflow()) <= 0);
 await shot('03-today');
 
+// Recovery estimate lives on the Trends tab (#26), so Today ends with the plan and the logo.
 const order = await page.evaluate(() => {
-  const fold = document.querySelector('details.fold');
+  const rows = document.querySelectorAll('.plan-row');
+  const last = rows[rows.length - 1];
   const logo = document.querySelector('.page img.brand-wide');
-  return logo && fold ? [fold.getBoundingClientRect().bottom, logo.getBoundingClientRect().top, logo.complete && logo.naturalWidth > 0] : null;
+  return logo && last ? [last.getBoundingClientRect().bottom, logo.getBoundingClientRect().top, logo.complete && logo.naturalWidth > 0] : null;
 });
-check('on Today, the wide logo sits below Recovery estimate', !!order && order[1] >= order[0] && order[2] === true, JSON.stringify(order));
+check('on Today, the wide logo sits below the planned workout', !!order && order[1] >= order[0] && order[2] === true, JSON.stringify(order));
+check('Recovery estimate is no longer on Today', !(await page.textContent('.page')).includes('Recovery estimate'));
 const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
@@ -152,7 +155,8 @@ await page.click('button:has-text("Add exercise")');
 await page.fill('.sheet input[type=search]', 'lat puldown');
 await page.waitForSelector('.sheet .pick, .sheet p.muted');
 const picker = await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent));
-check('the exercise picker tolerates typos but only offers what the gym has (no Lat Pulldown machine at a garage gym)', picker.length > 0 && !picker.includes('Lat Pulldown') && picker.some((n) => /Pull-Up|Chin-Up/.test(n)), picker.join(', '));
+// A garage gym has a pull-up bar but no pulldown machine, cable or bands.
+check('the exercise picker tolerates typos but only offers what the gym has (no Lat Pulldown machine at a garage gym)', picker.length > 0 && picker.some((n) => /Pulldown|Pull-Up|Chin-Up/.test(n)) && !picker.some((n) => /^Lat Pulldown$|Band|Cable|Machine/.test(n)), picker.join(', '));
 await page.fill('.sheet input[type=search]', 'pushup');
 check('no stray text in the picker', !/\b(false|undefined|null)\b/.test(await page.textContent('.sheet-body')));
 check('picker: "pushup" puts Push-Up first', (await page.textContent('.sheet .pick .pick-name')) === 'Push-Up');
@@ -274,6 +278,14 @@ await page.selectOption('select[aria-label="Workout type"]', 'push');
 await page.waitForFunction((n) => [...document.querySelectorAll('.plan-row h3')].some((e) => e.textContent === n) && !document.querySelector('.stack.loading'), liftName);
 const target2 = await page.locator('.plan-row', { hasText: liftName }).first().locator('.target').textContent();
 check(`correcting a past set changes the advice: "${target2.trim()}"`, /at 135 lb/.test(target2));
+
+console.log('Trends');
+await page.click('.tab:has-text("Trends")');
+await page.waitForSelector('h2:has-text("Weekly lifting volume")');
+const trendsText = await page.textContent('.page');
+check('the Trends tab shows weekly lifting volume, weekly workout time and Recovery estimate', /Weekly workout time/.test(trendsText) && /Recovery estimate/.test(trendsText) && (await page.locator('.chart').count()) >= 1, trendsText.slice(0, 200));
+check('Trends is highlighted in the tab bar', (await page.getAttribute('.tab:has-text("Trends")', 'aria-current')) === 'page');
+check('no sideways scrolling on Trends', (await overflow()) <= 0);
 
 console.log('Exercises, settings, small screens');
 await page.click('.tab:has-text("Exercises")');
@@ -551,7 +563,7 @@ if (!process.env.TF_URL) {
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;
-  for (const tab of ['today', 'history', 'exercises', 'settings']) {
+  for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
     await page.goto(`${URL}#/${tab}`);
     await page.waitForSelector('.tabs');
     await page.waitForTimeout(250);
