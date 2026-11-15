@@ -2,7 +2,7 @@ name: Test and deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   pull_request:
   workflow_dispatch:
 
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -33,14 +33,14 @@ jobs:
   deploy:
     name: Upload to DreamHost
     needs: test
-    # Pull requests only run the checks. Uploading happens after a merge to main.
-    if: github.event_name != 'pull_request'
+    # Pull requests only run the checks. Manual runs have the same branch restrictions.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
     runs-on: ubuntu-latest
     env:
       SFTP_HOST: ${{ secrets.SFTP_HOST }}
       SFTP_USER: ${{ secrets.SFTP_USER }}
       LFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
-      SFTP_PATH: ${{ secrets.SFTP_PATH }}
+      SFTP_PATH: ${{ github.ref_name == 'staging' && '/home/thoenefit/fit-test.mikethoene.com' || secrets.SFTP_PATH }}
     steps:
       - uses: actions/checkout@v5
 
@@ -48,9 +48,13 @@ jobs:
         id: cfg
         run: |
           if [ -z "$SFTP_HOST" ] || [ -z "$SFTP_USER" ] || [ -z "$LFTP_PASSWORD" ] || [ -z "$SFTP_PATH" ]; then
-            echo "::notice::Deploy skipped. Add the repository secrets SFTP_HOST, SFTP_USER, SFTP_PASSWORD and SFTP_PATH (see README) to turn it on."
+            echo "::notice::Deploy skipped. Add the SFTP repository secrets (see README)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" == staging && "${SFTP_PATH%/}" != "/home/$SFTP_USER/fit-test.mikethoene.com" ]]; then
+            echo "::error::Staging requires the thoenefit SFTP user and its fit-test.mikethoene.com web folder."
+            exit 1
           fi
           case "$SFTP_PATH" in
             /|/home|/home/|"~"|"~/"|.|./)

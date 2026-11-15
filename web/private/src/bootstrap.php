@@ -32,7 +32,8 @@ function web_root(): string
 }
 
 /**
- * Config is read from, in order:
+ * The staging site requires thoenefit-staging-config.php above its web root.
+ * Other sites read config from, in order:
  *   1. the path in the THOENEFIT_CONFIG environment variable
  *   2. thoenefit-config.php in the folder ABOVE the web folder (never served)
  * With no config, the command line and PHP's built-in dev server fall back to
@@ -41,12 +42,15 @@ function web_root(): string
  */
 function load_config(): array
 {
-    $candidates = [];
-    $env = getenv('THOENEFIT_CONFIG');
-    if ($env) {
-        $candidates[] = $env;
+    $root = web_root();
+    $home = dirname($root);
+    $staging = basename($root) === 'fit-test.mikethoene.com';
+    if ($staging) {
+        $candidates = [$home . '/thoenefit-staging-config.php'];
+    } else {
+        $env = getenv('THOENEFIT_CONFIG');
+        $candidates = $env ? [$env, $home . '/thoenefit-config.php'] : [$home . '/thoenefit-config.php'];
     }
-    $candidates[] = dirname(web_root()) . '/thoenefit-config.php';
     foreach ($candidates as $file) {
         if (is_file($file)) {
             $cfg = require $file;
@@ -57,8 +61,8 @@ function load_config(): array
             return $cfg;
         }
     }
-    if (PHP_SAPI === 'cli' || PHP_SAPI === 'cli-server') {
-        $dir = dirname(web_root()) . '/data';
+    if (!$staging && (PHP_SAPI === 'cli' || PHP_SAPI === 'cli-server')) {
+        $dir = $home . '/data';
         if (!is_dir($dir)) {
             mkdir($dir, 0700, true);
         }

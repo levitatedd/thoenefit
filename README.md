@@ -42,7 +42,7 @@ node tests/search.test.mjs   # exercise search: spelling, typos, aliases, rankin
 
 `tests/e2e.mjs` drives the whole app in Chrome at phone sizes. It needs Playwright and is optional; the instructions are at the top of that file.
 
-Every push to `main` runs the first three on GitHub, including a run of the server checks against MySQL.
+Every push to `main` or `staging` runs the first three on GitHub, including a run of the server checks against MySQL.
 
 ## Deploy to DreamHost
 
@@ -91,6 +91,14 @@ php ~/fit.example.com/private/bin/create-user.php mike "Mike"
 The first line of output names the database it is writing to. It should show your `thoenefit-config.php`. If `php -v` shows an older version, DreamHost keeps newer ones at paths like `/usr/local/php83/bin/php`; use that in place of `php`.
 
 Open `https://fit.example.com`, sign in, and follow the setup screen.
+
+### ThoeneFit staging site
+
+Pushes to `staging` deploy to `https://fit-test.mikethoene.com` after the checks pass. The workflow reuses the existing `SFTP_HOST`, `SFTP_USER`, and `SFTP_PASSWORD` repository secrets. In DreamHost, assign the test site to the existing `thoenefit` Shell user with the web folder `/home/thoenefit/fit-test.mikethoene.com`.
+
+Create a separate MySQL database and database user for staging. Fill in a fresh copy of `config.example.php` with the staging database details and save it on DreamHost as `/home/thoenefit/thoenefit-staging-config.php`. Set its permissions with `chmod 600 ~/thoenefit-staging-config.php`. The test site requires this file, and the production site uses `~/thoenefit-config.php`.
+
+To deploy again, push to `staging` or choose `staging` when manually running **Test and deploy** in GitHub Actions. After uploading the staging config, create a test account with `php ~/fit-test.mikethoene.com/private/bin/create-user.php test "Test User"` while signed in over SSH as `thoenefit`.
 
 ### Add it to your phone's Home Screen
 
