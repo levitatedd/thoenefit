@@ -206,7 +206,9 @@ Anyone can share the workout planned on Today, or one already in progress, with 
 
 To enable it, create a Strava API app in [Strava API Settings](https://www.strava.com/settings/api). Set its **Authorization Callback Domain** to the site's hostname. Add the `strava` block from `config.example.php` to the private server config and fill in the client ID and secret. The callback URL is the site's HTTPS address followed by `/api.php?a=strava_callback`. For staging, use `fit-test.mikethoene.com` and edit `~/thoenefit-staging-config.php`. PHP needs OpenSSL and HTTPS stream access (`allow_url_fopen`). Keep the client secret out of Git. If you rotate it, disconnect and reconnect each Strava account.
 
-In **Settings → Account**, connect your Strava account. Open a completed session in **History** and choose **Send to Strava**. Including exercises, sets, reps, and weights is optional. This exports one Weight Training activity with the workout's recorded name, start time, and duration. Fitbod imports have no recorded duration. If Strava does not confirm a send, check your Strava activities. ThoeneFit records the attempt so retries cannot create a duplicate.
+In **Settings → Account**, connect your Strava account. Open a completed session in **History** and choose **Send to Strava**. The export creates one Weight Training activity with the workout's name, start time, and duration. Select **Include exercises, sets, reps, and weights** to send sets into Strava's strength workout details. Exercises without a Strava equivalent go in the description. Fitbod imports have no recorded duration.
+
+Strava can take a few seconds to process a strength upload. Reopen the workout or tap **Check Strava upload** for an update. If Strava never confirms an export, check your Strava activities. ThoeneFit keeps the original send on record to avoid duplicates.
 
 ## How offline logging works
 

@@ -7,13 +7,14 @@ final class Strava
 {
     private const OAUTH = 'https://www.strava.com/oauth/';
     private const ACTIVITIES = 'https://www.strava.com/api/v3/activities';
+    private const UPLOADS = 'https://www.strava.com/api/v3/uploads';
     private array $config;
-    private \Closure $post;
+    private \Closure $http;
 
-    public function __construct(private Db $db, array $config, ?\Closure $post = null)
+    public function __construct(private Db $db, array $config, ?\Closure $http = null)
     {
         $this->config = $config['strava'] ?? [];
-        $this->post = $post ?? self::request(...);
+        $this->http = $http ?? self::request(...);
     }
 
     public function enabled(): bool
@@ -88,7 +89,7 @@ final class Strava
 
     private function tokens(array $grant): array
     {
-        [$status, $data] = ($this->post)(self::OAUTH . 'token', $grant + [
+        [$status, $data] = ($this->http)(self::OAUTH . 'token', $grant + [
             'client_id' => $this->config['client_id'],
             'client_secret' => $this->config['client_secret'],
         ], null);
@@ -153,11 +154,27 @@ final class Strava
 
     public function exportStatus(int $uid, string $id): ?array
     {
-        $row = $this->db->one('SELECT activity_id FROM strava_exports WHERE user_id=? AND workout_id=?', [$uid, $id]);
-        return $row ? ['activity_id' => $row['activity_id']] : null;
+        return self::receipt($this->exportRow($uid, strtolower($id)));
     }
 
-    public function export(int $uid, string $id, bool $summary): array
+    private function exportRow(int $uid, string $id): ?array
+    {
+        return $this->db->one('SELECT activity_id, upload_id, poll_after FROM strava_exports WHERE user_id=? AND workout_id=?', [$uid, $id]);
+    }
+
+    private static function receipt(?array $row): ?array
+    {
+        if ($row === null) {
+            return null;
+        }
+        $receipt = ['activity_id' => $row['activity_id']];
+        if ($row['activity_id'] === null && $row['upload_id'] !== null) {
+            $receipt['processing'] = true;
+        }
+        return $receipt;
+    }
+
+    public function export(int $uid, string $id, bool $summary, int $utcOffset = 0): array
     {
         $workout = (new Workouts($this->db))->get($uid, $id);
         if (!$workout || $workout['status'] !== 'completed') {
@@ -169,7 +186,21 @@ final class Strava
             return $existing;
         }
         $this->requireConfig();
-        $activity = self::activity($workout, $summary);
+        $activity = self::activity($workout);
+        $details = $summary ? StravaStrength::details($workout) : ['sets' => [], 'description' => ''];
+        if ($details['description'] !== '') {
+            $activity['description'] = $details['description'];
+        }
+        $file = null;
+        if ($details['sets']) {
+            $file = json_encode([
+                'version' => '1.0',
+                'start_time' => $workout['started_at'],
+                'utc_offset' => abs($utcOffset) <= 14 * 3600 && $utcOffset % 60 === 0 ? $utcOffset : 0,
+                'elapsed_time' => $activity['elapsed_time'],
+                'sets' => $details['sets'],
+            ], JSON_THROW_ON_ERROR);
+        }
         $token = $this->accessToken($uid);
         try {
             $this->db->insert('strava_exports', ['user_id' => $uid, 'workout_id' => $id]);
@@ -180,15 +211,34 @@ final class Strava
             return $existing;
         }
 
-        [$status, $data] = ($this->post)(self::ACTIVITIES, $activity, $token);
-        $activityId = (string) ($data['id'] ?? '');
-        if ($status === 201 && preg_match('/^[1-9][0-9]{0,23}$/D', $activityId)) {
-            $this->db->update('strava_exports', ['activity_id' => $activityId], 'user_id=? AND workout_id=?', [$uid, $id]);
-            return ['activity_id' => $activityId];
+        if ($file !== null) {
+            $form = array_intersect_key($activity, array_flip(['name', 'description', 'sport_type'])) + [
+                'data_type' => 'json',
+                'external_id' => 'thoenefit-' . $id,
+            ];
+            [$status, $data] = ($this->http)(self::UPLOADS, $form, $token, $file);
+            if ($status === 201) {
+                $activityId = self::stravaId($data['activity_id'] ?? null);
+                if ($activityId !== null) {
+                    return $this->recordActivity($uid, $id, $activityId);
+                }
+                $uploadId = self::stravaId($data['id_str'] ?? $data['id'] ?? null);
+                if ($uploadId !== null) {
+                    $this->db->update('strava_exports', ['upload_id' => $uploadId, 'poll_after' => time() + 2], 'user_id=? AND workout_id=?', [$uid, $id]);
+                    return ['activity_id' => null, 'processing' => true];
+                }
+            }
+        } else {
+            [$status, $data] = ($this->http)(self::ACTIVITIES, $activity, $token);
+            $activityId = self::stravaId($data['id'] ?? null);
+            if ($status === 201 && $activityId !== null) {
+                return $this->recordActivity($uid, $id, $activityId);
+            }
         }
         // Only release the reservation when Strava explicitly rejected the request.
         // A timeout, invalid response or upstream failure can happen after creation.
-        if (in_array($status, [400, 401, 403, 404, 422, 429], true) && is_array($data)) {
+        if (in_array($status, [400, 401, 403, 404, 415, 422, 429], true) && is_array($data)
+            && stripos(json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE), 'duplicate') === false) {
             $this->db->run('DELETE FROM strava_exports WHERE user_id=? AND workout_id=?', [$uid, $id]);
             $message = match ($status) {
                 401, 403 => 'Reconnect to Strava in Settings, then try again.',
@@ -200,7 +250,64 @@ final class Strava
         return ['activity_id' => null];
     }
 
-    private static function activity(array $workout, bool $summary): array
+    public function checkExport(int $uid, string $id): ?array
+    {
+        if (!is_uuid($id)) {
+            throw new HttpError(422, 'Workout id is malformed.');
+        }
+        $id = strtolower($id);
+        $row = $this->exportRow($uid, $id);
+        if (!$row || $row['upload_id'] === null || (int) $row['poll_after'] > time()) {
+            return self::receipt($row);
+        }
+        $this->requireConfig();
+        $token = $this->accessToken($uid);
+        $now = time();
+        $lease = $now + 15; // Hold the check long enough for the HTTP request to return.
+        $uploadId = $row['upload_id'];
+        $claimed = $this->db->run('UPDATE strava_exports SET poll_after=? WHERE user_id=? AND workout_id=? AND upload_id=? AND poll_after<=?',
+            [$lease, $uid, $id, $uploadId, $now])->rowCount();
+        if (!$claimed) {
+            return $this->exportStatus($uid, $id);
+        }
+
+        [$status, $data] = ($this->http)(self::UPLOADS . '/' . $uploadId, null, $token);
+        if ($status === 401 || $status === 403) {
+            throw new HttpError(409, 'Reconnect to Strava in Settings, then check again.');
+        }
+        if ($status !== 200 || !is_array($data)) {
+            return $this->exportStatus($uid, $id);
+        }
+        $where = 'user_id=? AND workout_id=? AND upload_id=? AND poll_after=?';
+        $claim = [$uid, $id, $uploadId, $lease];
+        $activityId = self::stravaId($data['activity_id'] ?? null);
+        $error = is_string($data['error'] ?? null) ? $data['error'] : '';
+        $message = is_string($data['status'] ?? null) ? $data['status'] : '';
+        if ($activityId !== null || stripos($error, 'duplicate') !== false || stripos($message, 'deleted') !== false) {
+            $this->db->update('strava_exports', ['activity_id' => $activityId, 'upload_id' => null], $where, $claim);
+        } elseif ($error !== '') {
+            // Processing failed without creating an activity. Allow a fresh attempt.
+            $this->db->run("DELETE FROM strava_exports WHERE $where", $claim);
+        } else {
+            $this->db->update('strava_exports', ['poll_after' => time() + 2], $where, $claim);
+        }
+        return $this->exportStatus($uid, $id);
+    }
+
+    private static function stravaId($value): ?string
+    {
+        return (is_int($value) || is_string($value)) && preg_match('/^[1-9][0-9]{0,23}$/D', (string) $value)
+            ? (string) $value
+            : null;
+    }
+
+    private function recordActivity(int $uid, string $id, string $activityId): array
+    {
+        $this->db->update('strava_exports', ['activity_id' => $activityId, 'upload_id' => null], 'user_id=? AND workout_id=?', [$uid, $id]);
+        return ['activity_id' => $activityId];
+    }
+
+    private static function activity(array $workout): array
     {
         $started = strtotime($workout['started_at'] ?? '');
         $finished = strtotime($workout['completed_at'] ?? '');
@@ -208,50 +315,40 @@ final class Strava
             throw new HttpError(422, 'This workout has no recorded duration to send to Strava.');
         }
         $label = Generator::DAY_LABELS[$workout['day_type']] ?? 'Workout';
-        $activity = [
+        return [
             'name' => $label . ' at ' . $workout['gym_name'],
             'sport_type' => 'WeightTraining',
             'start_date_local' => $workout['started_at'],
             'elapsed_time' => $finished - $started,
         ];
-        if (!$summary) {
-            return $activity;
-        }
-        $lines = [];
-        foreach ($workout['exercises'] as $exercise) {
-            $sets = [];
-            foreach ($exercise['sets'] as $set) {
-                if (!$set['done'] || $set['reps'] === null) {
-                    continue;
-                }
-                $weight = $set['weight'] > 0 ? " × {$set['weight']} {$workout['unit']}" : '';
-                $sets[] = $set['reps'] . ' reps' . $weight . ($set['warmup'] ? ' (warm-up)' : '');
-            }
-            if ($sets) {
-                $lines[] = $exercise['name'] . ': ' . implode(', ', $sets);
-            }
-        }
-        if ($lines) {
-            $description = implode("\n", $lines);
-            $activity['description'] = mb_strlen($description) > 3000 ? mb_substr($description, 0, 2999) . '…' : $description;
-        }
-        return $activity;
     }
 
-    private static function request(string $url, array $form, ?string $token): array
+    private static function request(string $url, ?array $form, ?string $token, ?string $file = null): array
     {
-        $headers = ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'];
+        $headers = ['Accept: application/json'];
         if ($token !== null) {
             $headers[] = 'Authorization: Bearer ' . $token;
         }
-        $context = stream_context_create(['http' => [
-            'method' => 'POST',
-            'header' => $headers,
-            'content' => http_build_query($form, '', '&', PHP_QUERY_RFC3986),
+        $options = [
+            'method' => $form === null ? 'GET' : 'POST',
             'ignore_errors' => true,
             'follow_location' => 0,
             'timeout' => 8,
-        ]]);
+        ];
+        if ($file !== null) {
+            $boundary = bin2hex(random_bytes(18));
+            $headers[] = 'Content-Type: multipart/form-data; boundary=' . $boundary;
+            $content = '';
+            foreach ($form as $key => $value) {
+                $content .= "--$boundary\r\nContent-Disposition: form-data; name=\"$key\"\r\n\r\n$value\r\n";
+            }
+            $content .= "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"workout.json\"\r\n";
+            $options['content'] = $content . "Content-Type: application/json\r\n\r\n$file\r\n--$boundary--\r\n";
+        } elseif ($form !== null) {
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded';
+            $options['content'] = http_build_query($form, '', '&', PHP_QUERY_RFC3986);
+        }
+        $context = stream_context_create(['http' => $options + ['header' => $headers]]);
         $body = @file_get_contents($url, false, $context);
         preg_match('/^HTTP\/\S+ (\d{3})/', $http_response_header[0] ?? '', $match);
         return [(int) ($match[1] ?? 0), $body === false ? null : json_decode($body, true, 512, JSON_BIGINT_AS_STRING)];

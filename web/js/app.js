@@ -1341,7 +1341,42 @@ function viewHistoryDetail(id) {
 function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
   if (!exported && !connection?.connected) return null;
   const panel = h('div', { class: 'stack' });
+  let checking = false;
+  let statusMessage = '';
+  const checkUpload = async (automatic = false) => {
+    if (checking || !connection?.connected) return;
+    checking = true;
+    statusMessage = '';
+    paint();
+    try {
+      for (let attempt = 0; attempt < (automatic ? 5 : 1); attempt++) {
+        if (automatic) await new Promise((resolve) => setTimeout(resolve, 2200));
+        if (!panel.isConnected) return;
+        const result = await api.post('strava_check_export', { id: workout.id });
+        if (!panel.isConnected) return;
+        exported = result.export;
+        if (!exported) statusMessage = 'Strava couldn’t process this upload. You can try sending it again.';
+        if (exported?.activity_id) toast('Workout sent to Strava.');
+        if (!exported?.processing) break;
+      }
+    } catch (e) {
+      statusMessage = e.offline ? 'Reconnect to check the Strava upload.' : e.message;
+    } finally {
+      checking = false;
+      if (panel.isConnected) paint();
+    }
+  };
   const paint = () => {
+    const status = statusMessage && h('p', { class: 'muted small', role: 'status' }, statusMessage);
+    if (exported?.processing) {
+      fill(panel,
+        status || h('p', { class: 'muted small', role: 'status' }, 'Strava is processing this workout.'),
+        connection?.connected
+          ? h('button', { class: 'btn block', type: 'button', disabled: checking, onclick: () => checkUpload() }, 'Check Strava upload')
+          : h('a', { class: 'btn block', href: '#/settings' }, 'Reconnect Strava in Settings'),
+      );
+      return;
+    }
     if (exported) {
       fill(panel, exported.activity_id
         ? h('a', { class: 'btn block', href: `https://www.strava.com/activities/${exported.activity_id}`, target: '_blank', rel: 'noopener noreferrer' }, 'View on Strava')
@@ -1352,17 +1387,23 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
       fill(panel, h('p', { class: 'muted small' }, 'This workout has no recorded duration to send to Strava.'));
       return;
     }
-    fill(panel, h('button', { class: 'btn block', type: 'button', onclick: () => {
+    fill(panel, status, h('button', { class: 'btn block', type: 'button', onclick: () => {
       if (hasUnsavedChanges()) {
         toast('Save your workout changes first.', 'bad');
         return;
       }
       const summary = h('input', { type: 'checkbox' });
       const send = h('button', { class: 'btn primary block', type: 'button', onclick: () => act(async () => {
-        exported = await api.post('strava_export', { id: workout.id, include_summary: summary.checked });
+        exported = await api.post('strava_export', {
+          id: workout.id,
+          include_summary: summary.checked,
+          utc_offset: -new Date(workout.started_at).getTimezoneOffset() * 60,
+        });
+        statusMessage = '';
         close();
         paint();
         if (exported.activity_id) toast('Workout sent to Strava.');
+        else if (exported.processing) checkUpload(true);
       }, send) }, 'Send workout');
       const close = sheet('Send to Strava', h('div', { class: 'stack' },
         h('p', {}, 'Send this workout as a Weight Training activity. Your Strava activity visibility settings apply.'),
@@ -1372,6 +1413,7 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
     } }, 'Send to Strava'));
   };
   paint();
+  if (exported?.processing) checkUpload(true);
   return panel;
 }
 
