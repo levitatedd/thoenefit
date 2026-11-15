@@ -111,6 +111,7 @@ function applyBoot(data) {
   S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
   S.shares = data.shares || [];
+  S.routines = data.routines || [];
   S.vocab = data.vocab;
   setExercises(data.exercises);
   if (data.csrf) api.csrf = data.csrf;
@@ -556,6 +557,15 @@ async function loadDraft({ regenerate = false } = {}) {
         S.shares = S.shares.filter((x) => x.id !== accepted.id); // it lapsed or was withdrawn
       }
     }
+    // A saved routine picked under Workout (#16).
+    if (!res && S.draftOpts.routine_id) {
+      try {
+        res = await api.post('routine_draft', { id: S.draftOpts.routine_id, gym_id: gym.id });
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        S.draftOpts.routine_id = null; // deleted on another device
+      }
+    }
     if (!res) {
       res = await api.post('generate', body);
       S.draftOpts.day_type = res.workout.day_type;
@@ -629,17 +639,110 @@ function startWorkout() {
     unit: d.unit,
     started_at: new Date().toISOString(),
     completed_at: null,
-    notes: d.shared_by ? `Shared by ${d.shared_by}` : null,
+    notes: d.shared_by ? `Shared by ${d.shared_by}` : d.routine_name ? `Routine: ${d.routine_name}` : null,
+    routine_id: d.routine_id || undefined,
     // share_id: this came from someone's shared plan. share_key: this person shared it with others.
     share_id: d.share_id || undefined,
     share_key: S.shareKey || undefined,
     exercises: d.exercises.map(blockToEntry),
   });
   if (d.share_id) S.shares = (S.shares || []).filter((x) => x.id !== d.share_id);
+  if (d.routine_id) {
+    // Next time Today suggests a workout again, rather than repeating the routine.
+    S.draftOpts.routine_id = null;
+    S.draftOpts.day_type = null;
+  }
   S.shareKey = null;
   S.draft = null;
   primeAudio();
   go('workout');
+}
+
+// ---------------------------------------------------------------- saved routines (#16)
+
+/** Popup to name and save a routine. A name already in use replaces that routine. */
+function routineSheet(suggested, plan) {
+  const taken = (name) => (S.routines || []).find((r) => r.name.toLowerCase() === name.trim().replace(/\s+/g, ' ').toLowerCase());
+  const name = h('input', { type: 'text', name: 'routine_name', maxlength: 80, value: suggested || '', autocomplete: 'off', required: true });
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' });
+  const label = () => (btn.textContent = taken(name.value) ? 'Replace routine' : 'Save routine');
+  name.addEventListener('input', label);
+  label();
+  let close = null;
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    btn.disabled = true;
+    try {
+      const r = await api.post('save_routine', { name: name.value, plan });
+      S.routines = r.routines;
+      close();
+      const saved = r.routines.find((x) => x.id === r.id);
+      toast(r.replaced ? `Updated ${saved.name}.` : `Saved ${saved.name}. Pick it under Workout on Today.`);
+      if (route()[0] === 'today' || route()[0] === 'settings') render();
+    } catch (err) {
+      error.textContent = err.offline ? 'Saving a routine needs a connection.' : err.message;
+      btn.disabled = false;
+    }
+  } },
+    field('Name', name, 'For example: Monday Push. Saved with these exercises, sets and rep ranges; weights are suggested from your history each time.'),
+    h('p', { class: 'muted small' }, `${plan.exercises.length} exercise${plan.exercises.length === 1 ? '' : 's'}, ${plan.exercises.reduce((n, e) => n + e.target_sets, 0)} sets.`),
+    error,
+    btn);
+  close = sheet('Save as routine', form);
+  name.focus();
+  name.select();
+}
+
+/** Settings list of saved routines, with rename and delete. */
+function routinesList() {
+  const list = h('div', { class: 'stack', 'data-list': 'routines' });
+  const paint = () => {
+    const rs = S.routines || [];
+    fill(list,
+      !rs.length && h('p', { class: 'muted' }, 'No routines yet. Use Save as routine under a planned workout on Today, or on a past workout in History.'),
+      rs.map((r) => h('div', { class: 'routine-row', 'data-routine': r.name },
+        h('div', {}, h('span', { class: 'pick-name' }, r.name), h('span', { class: 'pick-meta' }, `${r.exercises.length} exercises, ${r.sets} sets: ${r.exercises.slice(0, 3).join(', ')}${r.exercises.length > 3 ? '…' : ''}`)),
+        h('div', { class: 'plan-actions' },
+          h('button', { class: 'btn small', type: 'button', onclick: () => renameRoutine(r, paint) }, 'Rename'),
+          h('button', { class: 'btn small danger', type: 'button', onclick: async (e) => {
+            const b = e.currentTarget;
+            if (!(await confirmSheet(`Delete ${r.name}?`, 'The routine is removed. Workouts you did with it stay in your history.', 'Delete routine', true))) return;
+            const res = await act(() => api.post('delete_routine', { id: r.id }), b);
+            if (res) {
+              S.routines = res.routines;
+              if (S.draftOpts.routine_id === r.id) {
+                S.draftOpts.routine_id = null;
+                S.draft = null;
+              }
+              toast(`Deleted ${r.name}.`);
+              paint();
+            }
+          } }, 'Delete')))));
+  };
+  paint();
+  return list;
+}
+
+function renameRoutine(r, done) {
+  const name = h('input', { type: 'text', name: 'routine_name', maxlength: 80, value: r.name, autocomplete: 'off', required: true });
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Rename');
+  let close = null;
+  close = sheet('Rename routine', h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    btn.disabled = true;
+    try {
+      S.routines = (await api.post('rename_routine', { id: r.id, name: name.value })).routines;
+      close();
+      done();
+    } catch (err) {
+      error.textContent = err.offline ? 'Renaming needs a connection.' : err.message;
+      btn.disabled = false;
+    }
+  } }, field('Name', name), error, btn));
+  name.focus();
 }
 
 // ---------------------------------------------------------------- sharing a workout
@@ -804,14 +907,28 @@ function viewToday() {
     {
       'aria-label': 'Workout type',
       onchange: (e) => {
-        S.draftOpts.day_type = e.target.value;
+        const v = e.target.value;
+        if (v.startsWith('routine:')) {
+          S.draftOpts.routine_id = Number(v.slice(8));
+        } else {
+          S.draftOpts.routine_id = null;
+          S.draftOpts.day_type = v;
+        }
         S.draft = null;
         loadDraft();
       },
     },
-    ordered.map((d) => h('option', { value: d, selected: d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d))),
+    h('optgroup', { label: 'Suggested' },
+      ordered.map((d) => h('option', { value: d, selected: !S.draftOpts.routine_id && d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d)))),
+    (S.routines || []).length > 0 && h('optgroup', { label: 'Your routines' },
+      S.routines.map((r) => h('option', { value: `routine:${r.id}`, selected: S.draftOpts.routine_id === r.id }, r.name))),
   );
-  const controls = shared
+  const routine = S.draft && S.draft.routine_id ? S.draft : null;
+  const controls = routine && !shared
+    ? h('section', { class: 'stack' },
+        h('div', { class: 'notice routine-note' }, h('strong', {}, `Routine: ${routine.routine_name}. `), 'The same exercises and sets each time. Weights are suggested from your history, with your last numbers under each exercise.'),
+        h('div', { class: 'controls' }, field('Gym', gymSelect), field('Workout', daySelect)))
+    : shared
     ? h('section', { class: 'stack' },
         h('div', { class: 'notice shared-note' }, h('strong', {}, `Shared by ${shared.shared_by}. `), 'Same exercises, order and sets as theirs. The weights below are suggested from your own history.'),
         field('Gym', gymSelect, 'Pick the gym you are at, so machine history lines up.'))
@@ -883,6 +1000,7 @@ function viewToday() {
         { class: 'plan' },
         d.exercises.map((b) => planRow(b, gym)),
       ),
+      d.exercises.length > 0 && h('button', { class: 'btn block', type: 'button', onclick: () => routineSheet(d.routine_name || dayLabel(d.day_type), planOf(d.day_type, d.exercises, (b) => b.target_sets)) }, icon('plus', 18), d.routine_id ? 'Save changes to this routine' : 'Save as routine'),
       brandWide(),
     );
   }
@@ -901,7 +1019,7 @@ function viewToday() {
       { class: 'action-bar' },
       shared
         ? h('button', { class: 'btn', type: 'button', onclick: (e) => respondToShare({ id: shared.share_id, from_name: shared.shared_by }, false, e.currentTarget) }, 'Use my own')
-        : h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
+        : !routine && h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
       !shared && h('button', { class: 'btn square', type: 'button', 'aria-label': 'Share this workout', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: () => shareSheet({
         key: () => (S.shareKey = S.shareKey || uuid()),
         plan: () => planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets),
@@ -934,7 +1052,7 @@ function planRow(b, gym) {
     'li',
     { class: 'plan-row' },
     h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
-    !S.draft.share_id && h(
+    !S.draft.share_id && !S.draft.routine_id && h(
       'div',
       { class: 'plan-actions' },
       h(
@@ -1659,6 +1777,7 @@ function viewHistoryDetail(id) {
           box,
           save,
           workout.status === 'completed' && workoutStrava(workout, strava, stravaExport, () => dirty),
+          h('button', { class: 'btn block', type: 'button', onclick: () => routineSheet(`${dayLabel(workout.day_type)} at ${workout.gym_name}`, planOf(workout.day_type, workout.exercises, (e) => e.sets.filter((s) => !s.warmup).length || e.target_sets)) }, icon('plus', 18), 'Save as routine'),
           h('button', { class: 'btn danger block', type: 'button', onclick: async () => {
             if (!(await confirmSheet('Delete this workout?', 'It is removed from history and from future suggestions. This cannot be undone.', 'Delete workout', true))) return;
             await act(async () => {
@@ -1981,6 +2100,7 @@ function viewSettings() {
   const pwBtn = h('button', { class: 'btn block', type: 'submit' }, 'Change password');
   return page('Settings',
     section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
+    section('Routines', routinesList()),
     section('Gyms',
       h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
       h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),

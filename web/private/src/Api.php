@@ -12,6 +12,7 @@ final class Api
     private Workouts $workouts;
     private Generator $gen;
     private Shares $shares;
+    private Routines $routines;
     private Strava $strava;
 
     public static function handle(): void
@@ -39,6 +40,7 @@ final class Api
         $this->workouts = new Workouts($app->db);
         $this->gen = new Generator($app->db);
         $this->shares = new Shares($app->db);
+        $this->routines = new Routines($app->db);
         $this->strava = new Strava($app->db, $app->config);
     }
 
@@ -126,6 +128,7 @@ final class Api
             ],
             // Other people on this server, by display name only, for sharing a workout.
             'people' => fn() => ['people' => $this->people($user)],
+            'routines' => fn() => ['routines' => $this->routines->all($uid)],
             'shares' => fn() => [
                 'incoming' => $this->shares->incoming($uid),
                 'outgoing' => $this->shares->outgoing($uid, (string) ($_GET['key'] ?? '')),
@@ -281,6 +284,9 @@ final class Api
                     if (!empty($doc['share_id'])) {
                         $this->shares->markStarted($uid, (int) $doc['share_id'], (string) $doc['id']);
                     }
+                    if (!empty($doc['routine_id'])) {
+                        $this->routines->markUsed($uid, (int) $doc['routine_id']);
+                    }
                     if (!empty($doc['share_key'])) {
                         $this->shares->link($uid, (string) $doc['share_key'], (string) $doc['id']);
                     }
@@ -292,6 +298,22 @@ final class Api
                     }
                 }
                 self::json($saved);
+                return;
+            case 'save_routine':
+                $saved = $this->routines->save($uid, (string) ($in['name'] ?? ''), (array) ($in['plan'] ?? []));
+                self::json($saved + ['routines' => $this->routines->all($uid)]);
+                return;
+            case 'rename_routine':
+                $this->routines->rename($uid, (int) ($in['id'] ?? 0), (string) ($in['name'] ?? ''));
+                self::json(['routines' => $this->routines->all($uid)]);
+                return;
+            case 'delete_routine':
+                $this->routines->delete($uid, (int) ($in['id'] ?? 0));
+                self::json(['routines' => $this->routines->all($uid)]);
+                return;
+            case 'routine_draft':
+                $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                self::json(['workout' => $this->routines->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen)]);
                 return;
             case 'share_workout':
                 $this->shares->send(
@@ -399,6 +421,7 @@ final class Api
             'exercises' => Catalog::forUser($this->db, $uid, true),
             'active' => $active,
             'shares' => $this->shares->incoming($uid),
+            'routines' => $this->routines->all($uid),
             'strava' => $this->strava->connection($uid),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
