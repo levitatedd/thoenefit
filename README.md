@@ -42,7 +42,7 @@ node tests/search.test.mjs   # exercise search: spelling, typos, aliases, rankin
 
 `tests/e2e.mjs` drives the whole app in Chrome at phone sizes. It needs Playwright and is optional; the instructions are at the top of that file.
 
-Every push to `main` runs the first three on GitHub, including a run of the server checks against MySQL.
+Every push to `main` or `staging` runs the first three on GitHub, including a run of the server checks against MySQL.
 
 ## Deploy to DreamHost
 
@@ -91,6 +91,21 @@ php ~/fit.example.com/private/bin/create-user.php mike "Mike"
 The first line of output names the database it is writing to. It should show your `thoenefit-config.php`. If `php -v` shows an older version, DreamHost keeps newer ones at paths like `/usr/local/php83/bin/php`; use that in place of `php`.
 
 Open `https://fit.example.com`, sign in, and follow the setup screen.
+
+### ThoeneFit staging site
+
+Pushes to `staging` deploy to `https://fit-test.mikethoene.com` after the checks pass. Use a separate DreamHost Shell user whose site folder is `/home/STAGING_USER/fit-test.mikethoene.com`. Create a separate MySQL database and database user for staging, and put that database's settings in the staging Shell user's `~/thoenefit-config.php` using step 4 above. The config lives in the Shell user's home folder, so the separate user gives each site its own config.
+
+Add these four repository secrets in GitHub Actions:
+
+| Secret | Value |
+| --- | --- |
+| `STAGING_SFTP_HOST` | The DreamHost server hostname |
+| `STAGING_SFTP_USER` | The staging Shell username |
+| `STAGING_SFTP_PASSWORD` | The staging Shell user's password |
+| `STAGING_SFTP_PATH` | `/home/STAGING_USER/fit-test.mikethoene.com` |
+
+After adding the secrets and staging config, push to `staging` or choose `staging` when manually running **Test and deploy** in GitHub Actions. Then create a test account with `php ~/fit-test.mikethoene.com/private/bin/create-user.php test "Test User"` while signed in over SSH as the staging user.
 
 ### Add it to your phone's Home Screen
 
