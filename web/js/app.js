@@ -51,6 +51,7 @@ api.onUnauthorized = () => {
 
 async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (!bootBuild) serverBuild().then((b) => (bootBuild = bootBuild || b));
   root.replaceChildren(h('div', { class: 'splash' }, brandMark(), h('p', { class: 'muted' }, 'Loading')));
   let data = null;
   try {
@@ -83,6 +84,14 @@ async function boot() {
   }
   applyBoot(data);
   render();
+  let updated = null;
+  try {
+    updated = sessionStorage.getItem('tf.updated');
+    sessionStorage.removeItem('tf.updated');
+  } catch (e) {
+    updated = null;
+  }
+  if (updated) toast('ThoeneFit was updated.');
 }
 
 function applyBoot(data) {
@@ -137,8 +146,47 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (sync) sync.flush();
     keepAwake();
+    checkForUpdate();
   }
 });
+window.addEventListener('online', () => checkForUpdate());
+
+// ---------------------------------------------------------------- staying up to date
+// An app on the Home Screen is usually resumed, not reloaded, so it could keep
+// running an old version for days. Each deploy writes its commit id to
+// version.json; when the app comes back to the screen and that id has changed,
+// it reloads itself. Workouts in progress are saved on the phone, so nothing is
+// lost, and it waits if you are in the middle of typing or have a sheet open.
+
+let bootBuild = null;
+
+async function serverBuild() {
+  try {
+    const res = await fetch('version.json', { cache: 'no-store' });
+    return res.ok ? (await res.json()).build || null : null;
+  } catch (e) {
+    return null; // offline: try again next time
+  }
+}
+
+async function checkForUpdate() {
+  if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+  const build = await serverBuild();
+  if (!build) return;
+  if (!bootBuild) {
+    bootBuild = build;
+    return;
+  }
+  if (build === bootBuild) return;
+  const busy = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (busy || document.querySelector('.sheet')) return; // checked again the next time the app is opened
+  try {
+    sessionStorage.setItem('tf.updated', build);
+  } catch (e) {
+    // Private mode: reload without the note.
+  }
+  location.reload();
+}
 window.addEventListener('hashchange', render);
 
 // ---------------------------------------------------------------- shell
@@ -1612,7 +1660,8 @@ function viewSettings() {
       h('h3', {}, 'iPhone'),
       h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Safari.'), h('li', {}, 'Tap the Share button (the square with an arrow pointing up).'), h('li', {}, 'Scroll down and tap Add to Home Screen, then Add.')),
       h('h3', {}, 'Pixel and other Android phones'),
-      h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.'))),
+      h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.')),
+      h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')),
     S.user.role === 'admin' && section('Users',
       h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
       h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
