@@ -48,6 +48,14 @@ if (!process.env.TF_URL) {
   };
 }
 const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+// The install reminder (#89) is tested on its own below; keep it out of the main walk-through.
+await context.addInitScript(() => {
+  try {
+    localStorage.setItem('tf.install', JSON.stringify({ never: true }));
+  } catch (e) {
+    // about:blank has no storage
+  }
+});
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -360,6 +368,83 @@ await page.selectOption('select[aria-label="Workout type"]', 'push');
 await page.waitForFunction((n) => [...document.querySelectorAll('.plan-row h3')].some((e) => e.textContent === n) && !document.querySelector('.stack.loading'), liftName);
 const target2 = await page.locator('.plan-row', { hasText: liftName }).first().locator('.target').textContent();
 check(`correcting a past set changes the advice: "${target2.trim()}"`, /at 135 lb/.test(target2));
+
+console.log('Install reminder');
+{
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
+  const PIXEL = 'Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+  const phoneAs = async (userAgent, init) => {
+    const ctx = await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true, userAgent });
+    if (init) await ctx.addInitScript(init);
+    const pg = await ctx.newPage();
+    await pg.goto(URL);
+    await pg.fill('input[name=username]', USER);
+    await pg.fill('input[name=password]', PASS);
+    await pg.click('button[type=submit]');
+    await pg.waitForSelector('.plan-row');
+    return [ctx, pg];
+  };
+  const [ic, ip] = await phoneAs(IPHONE);
+  check('no install reminder on the first visit', (await ip.locator('.install-card').count()) === 0);
+  await ip.reload();
+  await ip.waitForSelector('.plan-row');
+  check('on a later visit in Safari, Today reminds them they can install it', (await ip.locator('.install-card').count()) === 1);
+  check('no sideways scrolling with the reminder', (await ip.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await ip.screenshot({ path: `${SHOTS}/21-install-card.png` });
+  await ip.click('.install-card button:has-text("Show me how")');
+  await ip.waitForSelector('[data-install-guide]');
+  const iSteps = await ip.textContent('.sheet-body');
+  check('the popup shows the iPhone Safari steps', (await ip.getAttribute('[data-install-guide]', 'data-install-guide')) === 'ios-safari' && /Share button/.test(iSteps) && /Add to Home Screen/.test(iSteps) && !/three-dot/.test(iSteps));
+  if (SHOTS) await ip.screenshot({ path: `${SHOTS}/22-install-steps.png` });
+  await ip.click('.sheet button:has-text("Close")');
+  await ip.click('.install-card button:has-text("Not now")');
+  check('"Not now" hides it', (await ip.locator('.install-card').count()) === 0);
+  await ip.reload();
+  await ip.waitForSelector('.plan-row');
+  check('and it stays hidden after reopening', (await ip.locator('.install-card').count()) === 0);
+  await ip.goto(`${URL}#/settings`);
+  await ip.waitForSelector('text=Add to your Home Screen');
+  const firstGuide = await ip.locator('.section', { hasText: 'Add to your Home Screen' }).locator('h3').first().textContent();
+  check(`Settings lists this browser's steps first (${firstGuide})`, firstGuide === 'iPhone or iPad, Safari' && (await ip.locator('details.fold summary:has-text("Other browsers and phones")').count()) === 1);
+  await ic.close();
+
+  const [ac, ap] = await phoneAs(PIXEL);
+  await ap.reload();
+  await ap.waitForSelector('.plan-row');
+  // Stand in for Chrome's own install prompt, which only real installable sites get.
+  await ap.evaluate(() => {
+    const e = new Event('beforeinstallprompt', { cancelable: true });
+    e.prompt = () => { window.__prompted = true; return Promise.resolve(); };
+    e.userChoice = Promise.resolve({ outcome: 'accepted' });
+    window.dispatchEvent(e);
+  });
+  await ap.goto(`${URL}#/history`);
+  await ap.goto(`${URL}#/today`);
+  await ap.waitForSelector('.install-card');
+  check('on Android Chrome the reminder offers the browser\'s own Install button', (await ap.locator('.install-card button.primary').textContent()) === 'Install');
+  await ap.click('.install-card button:has-text("Install")');
+  await ap.waitForFunction(() => !document.querySelector('.install-card'));
+  check('tapping Install opens the browser\'s install prompt, and accepting hides the reminder', await ap.evaluate(() => window.__prompted === true));
+  await ap.reload();
+  await ap.waitForSelector('.plan-row');
+  check('after installing, the browser tab no longer reminds', (await ap.locator('.install-card').count()) === 0);
+  await ac.close();
+
+  const [sc, sp] = await phoneAs(IPHONE, () => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
+  await sp.reload();
+  await sp.waitForSelector('.plan-row');
+  check('people already using the installed app never see it', (await sp.locator('.install-card').count()) === 0);
+  await sc.close();
+
+  const [dc, dp] = await phoneAs(IPHONE);
+  await dp.reload();
+  await dp.waitForSelector('.install-card');
+  await dp.click('.install-card button:has-text("Don\'t show this again")');
+  await dp.reload();
+  await dp.waitForSelector('.plan-row');
+  check('"Don\'t show this again" turns it off on that device', (await dp.locator('.install-card').count()) === 0 && (await dp.evaluate(() => JSON.parse(localStorage.getItem('tf.install')).never)) === true);
+  await dc.close();
+}
 
 console.log('Trends');
 await page.click('.tab:has-text("Trends")');
