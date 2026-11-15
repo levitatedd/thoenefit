@@ -1,6 +1,6 @@
 # ThoeneFit
 
-My phone-first workout planner and log. Pick a gym and ThoeneFit builds a session around its equipment and your training history. Log sets between lifts, then look back at what you did and how your weights progressed.
+Phone-first workout planner and log. Pick a gym and ThoeneFit builds a session around its equipment and your training history. Log sets between lifts, then look back at what you did and how your weights progressed.
 
 **Use the app** · [Plan and log](#how-suggestions-work) · [Train together](#training-together) · [Send to Strava](#send-a-workout-to-strava) · [Import from Fitbod](#import-from-fitbod) · [Manage accounts](#more-accounts-and-password-resets)
 
