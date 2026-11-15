@@ -94,18 +94,11 @@ Open `https://fit.example.com`, sign in, and follow the setup screen.
 
 ### ThoeneFit staging site
 
-Pushes to `staging` deploy to `https://fit-test.mikethoene.com` after the checks pass. Use a separate DreamHost Shell user whose site folder is `/home/STAGING_USER/fit-test.mikethoene.com`. Create a separate MySQL database and database user for staging, and put that database's settings in the staging Shell user's `~/thoenefit-config.php` using step 4 above. The config lives in the Shell user's home folder, so the separate user gives each site its own config.
+Pushes to `staging` deploy to `https://fit-test.mikethoene.com` after the checks pass. The workflow reuses the existing `SFTP_HOST`, `SFTP_USER`, and `SFTP_PASSWORD` repository secrets. In DreamHost, assign the test site to the existing `thoenefit` Shell user with the web folder `/home/thoenefit/fit-test.mikethoene.com`.
 
-Add these four repository secrets in GitHub Actions:
+Create a separate MySQL database and database user for staging. Fill in a fresh copy of `config.example.php` with the staging database details and save it on DreamHost as `/home/thoenefit/thoenefit-staging-config.php`. Set its permissions with `chmod 600 ~/thoenefit-staging-config.php`. The test site requires this file, and the production site uses `~/thoenefit-config.php`.
 
-| Secret | Value |
-| --- | --- |
-| `STAGING_SFTP_HOST` | The DreamHost server hostname |
-| `STAGING_SFTP_USER` | The staging Shell username |
-| `STAGING_SFTP_PASSWORD` | The staging Shell user's password |
-| `STAGING_SFTP_PATH` | `/home/STAGING_USER/fit-test.mikethoene.com` |
-
-After adding the secrets and staging config, push to `staging` or choose `staging` when manually running **Test and deploy** in GitHub Actions. Then create a test account with `php ~/fit-test.mikethoene.com/private/bin/create-user.php test "Test User"` while signed in over SSH as the staging user.
+To deploy again, push to `staging` or choose `staging` when manually running **Test and deploy** in GitHub Actions. After uploading the staging config, create a test account with `php ~/fit-test.mikethoene.com/private/bin/create-user.php test "Test User"` while signed in over SSH as `thoenefit`.
 
 ### Add it to your phone's Home Screen
 
