@@ -338,6 +338,33 @@ check('exercise page shows form cues and a trend', (await page.locator('.cues').
   const firstTitle = await chart.locator('.chart-readout strong').textContent();
   await page.keyboard.press('End');
   check('the arrow, Home and End keys move between points', (await chart.locator('.chart-readout strong').textContent()) !== firstTitle || (await page.locator('.chart').first().locator('.dot').count()) === 1);
+  // #75: the details box keeps one height, so the chart stays put while you scrub
+  // between a short session and one whose sets run to several lines.
+  const tops = await page.evaluate(async () => {
+    const { lineChart } = await import('./js/ui.js');
+    const long = Array.from({ length: 12 }, (_, i) => (i % 5 ? '150×6' : '135×8')).join(', ') + ' lb';
+    const pts = [
+      { label: 'A', value: 150, title: 'Thu, Sep 15, 2022', href: '#/history/1', lines: [`Sets: ${long}`, 'My gym'] },
+      { label: 'B', value: 155, title: 'Tue, Aug 9, 2022', href: '#/history/2', lines: ['Sets: 155 lb × 8', 'My gym'] },
+      { label: 'C', value: 160, title: 'Wed, Aug 10, 2022', href: '#/history/3', lines: [`Sets: ${long}, ${long}`, 'A gym with a rather long name'] },
+    ];
+    const fig = lineChart(pts, { unit: 'lb' });
+    fig.id = 'steady-test';
+    document.querySelector('.page').prepend(fig);
+    const svg = fig.querySelector('svg');
+    const at = () => Math.round(svg.getBoundingClientRect().top + window.scrollY);
+    const out = [at()];
+    svg.focus();
+    for (const key of ['Home', 'ArrowRight', 'ArrowRight', 'Home']) {
+      svg.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      out.push(at());
+    }
+    const clipped = [...fig.querySelectorAll('.chart-readout-text > span[title]')].every((s) => s.title.length > 0);
+    fig.remove();
+    return { out, clipped };
+  });
+  check(`the chart stays still between short and long sessions (${tops.out.join(', ')})`, new Set(tops.out).size === 1, tops.out.join(', '));
+  check('cut-off detail lines keep their full text on hover', tops.clipped);
   await chart.locator('.chart-readout a:has-text("Open workout")').click();
   await page.waitForSelector('.lift');
   check('Open workout goes to that session, with a way back to the exercise', /^#\/history\//.test(await page.evaluate(() => location.hash)) && (await page.textContent('.back')).trim() === liftName);
