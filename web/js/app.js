@@ -87,7 +87,9 @@ async function boot() {
 
 function applyBoot(data) {
   S.user = data.user;
+  S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
+  S.shares = data.shares || [];
   S.vocab = data.vocab;
   setExercises(data.exercises);
   if (data.csrf) api.csrf = data.csrf;
@@ -154,9 +156,11 @@ function render() {
   clearInterval(ticker);
   ticker = null;
   if (!S.user) {
-    root.replaceChildren(viewLogin());
+    root.replaceChildren(S.authView === 'request' ? viewRequest() : viewLogin());
+    window.scrollTo(0, 0);
     return;
   }
+  S.authView = null;
   if (!S.user.onboarded) {
     root.replaceChildren(viewOnboarding());
     return;
@@ -275,7 +279,11 @@ function viewLogin() {
     error,
     btn,
   );
-  return h('main', { class: 'page narrow' }, brandWide('lead'), form);
+  const request = h('button', { class: 'btn ghost block', type: 'button', onclick: () => {
+    S.authView = 'request';
+    render();
+  } }, 'Request an account');
+  return h('main', { class: 'page narrow' }, brandWide('lead'), form, request);
 }
 
 // ---------------------------------------------------------------- onboarding and profile
@@ -385,10 +393,25 @@ async function loadDraft({ regenerate = false } = {}) {
   S.draftError = null;
   if (route()[0] === 'today') render();
   try {
-    const res = await api.post('generate', body);
+    // A shared workout this person accepted takes the place of their own plan until they start or drop it.
+    const accepted = (S.shares || []).find((x) => x.status === 'accepted');
+    let res = null;
+    if (accepted) {
+      try {
+        res = await api.post('shared_draft', { id: accepted.id, gym_id: gym.id });
+        setExercises(res.exercises);
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        S.shares = S.shares.filter((x) => x.id !== accepted.id); // it lapsed or was withdrawn
+      }
+    }
+    if (!res) {
+      res = await api.post('generate', body);
+      S.draftOpts.day_type = res.workout.day_type;
+      S.draftOpts.minutes = res.workout.minutes;
+    }
     S.draft = res.workout;
-    S.draftOpts.day_type = res.workout.day_type;
-    S.draftOpts.minutes = res.workout.minutes;
+    pushSharedPlan();
   } catch (e) {
     S.draftError = e.offline ? 'You are offline. Connect to build a new workout.' : e.message;
   }
@@ -425,17 +448,108 @@ function startWorkout() {
     unit: d.unit,
     started_at: new Date().toISOString(),
     completed_at: null,
-    notes: null,
+    notes: d.shared_by ? `Shared by ${d.shared_by}` : null,
+    // share_id: this came from someone's shared plan. share_key: this person shared it with others.
+    share_id: d.share_id || undefined,
+    share_key: S.shareKey || undefined,
     exercises: d.exercises.map(blockToEntry),
   });
+  if (d.share_id) S.shares = (S.shares || []).filter((x) => x.id !== d.share_id);
+  S.shareKey = null;
   S.draft = null;
   primeAudio();
   go('workout');
 }
 
+// ---------------------------------------------------------------- sharing a workout
+
+/** What gets shared: exercises in order with planned sets, rep range and rest. Never weights. */
+function planOf(dayType, exercises, setsOf) {
+  return { day_type: dayType, exercises: exercises.map((e) => ({ exercise_id: e.exercise_id, target_sets: setsOf(e), rep_min: e.rep_min, rep_max: e.rep_max, rest_seconds: e.rest_seconds })) };
+}
+
+/** If the planned workout was shared and has since changed, the people who have not answered yet get the new version. */
+function pushSharedPlan() {
+  if (!S.shareKey || !S.draft || S.draft.share_id) return;
+  api.post('share_workout', { share_key: S.shareKey, to: [], plan: planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets) }).catch(() => {});
+}
+
+let sharesCheckedAt = 0;
+async function refreshShares(force = false) {
+  if (!S.user || (!force && Date.now() - sharesCheckedAt < 15000) || navigator.onLine === false) return;
+  sharesCheckedAt = Date.now();
+  try {
+    const before = JSON.stringify(S.shares || []);
+    S.shares = (await api.get('shares')).incoming;
+    if (JSON.stringify(S.shares) !== before && route()[0] === 'today') render();
+  } catch (e) {
+    // Offline or signed out: the cards simply stay as they were.
+  }
+}
+
+/** Sheet for sending a plan to other people and seeing what each has done with it. */
+async function shareSheet({ key, plan, workoutId }) {
+  const list = h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'Loading'));
+  sheet('Share this workout', h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'They get the same exercises, order and planned sets. Weights are suggested from their own history, and each of you logs your own workout.'),
+    list));
+  const label = { pending: 'Sent, waiting for them', accepted: 'Accepted', started: 'Training now', declined: 'Declined', expired: 'Not answered' };
+  const paint = (people, outgoing) => {
+    const state = Object.fromEntries(outgoing.map((o) => [o.to, o.status]));
+    fill(list,
+      !people.length && h('p', { class: 'muted' }, 'Nobody else has an account on this server yet.'),
+      people.map((p) => {
+        const st = state[p.id];
+        const again = st === 'declined' || st === 'expired' || st === 'started';
+        return h('div', { class: 'share-row', 'data-person': p.name },
+          h('div', {}, h('span', { class: 'pick-name' }, p.name), st && h('span', { class: `pick-meta share-status ${st}` }, label[st] || st)),
+          (!st || again) && h('button', { class: 'btn small primary', type: 'button', onclick: async (e) => {
+            const r = await act(() => api.post('share_workout', { share_key: key(), to: [p.id], plan: plan(), workout_id: workoutId }), e.currentTarget);
+            if (r) {
+              paint(people, r.outgoing);
+              toast(`Shared with ${p.name}.`);
+            }
+          } }, again ? 'Send again' : 'Send'));
+      }));
+  };
+  try {
+    const [people, shares] = await Promise.all([api.get('people'), api.get('shares', `&key=${encodeURIComponent(key())}`)]);
+    paint(people.people, shares.outgoing);
+  } catch (e) {
+    fill(list, h('p', { class: 'muted' }, e.offline ? 'Sharing needs a connection.' : e.message));
+  }
+}
+
+/** Cards on Today for workouts other people have shared with this person and are waiting on. */
+function shareCards() {
+  return (S.shares || []).filter((x) => x.status === 'pending').map((x) => h('section', { class: 'card share-card', 'data-share': x.id },
+    h('h2', {}, `${x.from_name} shared a workout with you`),
+    h('p', { class: 'muted' }, `${dayLabel(x.day_type)}, ${x.exercises.length} exercises, ${x.sets} sets: ${x.exercises.slice(0, 4).join(', ')}${x.exercises.length > 4 ? ` and ${x.exercises.length - 4} more` : ''}.`),
+    h('p', { class: 'muted small' }, 'You get the same exercises and sets. Weights are suggested from your own history.'),
+    h('div', { class: 'plan-actions' },
+      h('button', { class: 'btn small primary', type: 'button', onclick: (e) => respondToShare(x, true, e.currentTarget) }, 'Accept'),
+      h('button', { class: 'btn small', type: 'button', onclick: (e) => respondToShare(x, false, e.currentTarget) }, 'Decline'))));
+}
+
+async function respondToShare(share, accept, btn) {
+  const r = await act(() => api.post('share_respond', { id: share.id, accept }), btn);
+  if (!r) {
+    refreshShares(true);
+    return;
+  }
+  S.shares = r.incoming;
+  if (accept) {
+    S.draft = null; // Today now builds from the shared plan
+    S.draftError = null;
+    toast(sync.active ? `Accepted. ${share.from_name}'s workout will be on Today once your current one is finished.` : `Accepted ${share.from_name}'s workout.`);
+  }
+  render();
+}
+
 function viewToday() {
   const gym = activeGym();
   const active = sync.active;
+  refreshShares();
   const head = h('header', { class: 'page-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
@@ -447,6 +561,7 @@ function viewToday() {
       { class: 'page' },
       head,
       waiting,
+      shareCards(),
       h(
         'section',
         { class: 'card resume' },
@@ -477,7 +592,11 @@ function viewToday() {
     return h('main', { class: 'page' }, head, h('section', { class: 'card' }, h('h2', {}, 'Add a gym first'), h('p', { class: 'muted' }, 'A workout is built from the equipment at a gym profile.'), h('a', { class: 'btn primary block', href: '#/settings/gym/new' }, 'Add a gym')));
   }
 
+  // An accepted share replaces whatever plan was on screen; dropping it brings the usual plan back.
+  const acceptedShare = (S.shares || []).find((x) => x.status === 'accepted');
+  if (S.draft && !S.draftLoading && (S.draft.share_id || 0) !== (acceptedShare ? acceptedShare.id : 0)) S.draft = null;
   if (!S.draft && !S.draftLoading && !S.draftError) loadDraft();
+  const shared = S.draft && S.draft.share_id ? S.draft : null;
 
   const gymSelect = h(
     'select',
@@ -511,7 +630,11 @@ function viewToday() {
     },
     ordered.map((d) => h('option', { value: d, selected: d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d))),
   );
-  const controls = h(
+  const controls = shared
+    ? h('section', { class: 'stack' },
+        h('div', { class: 'notice shared-note' }, h('strong', {}, `Shared by ${shared.shared_by}. `), 'Same exercises, order and sets as theirs. The weights below are suggested from your own history.'),
+        field('Gym', gymSelect, 'Pick the gym you are at, so machine history lines up.'))
+    : h(
     'section',
     { class: 'controls' },
     field('Gym', gymSelect),
@@ -559,12 +682,19 @@ function viewToday() {
     { class: 'page has-bar' },
     head,
     waiting,
+    shareCards(),
     controls,
     body,
     h(
       'div',
       { class: 'action-bar' },
-      h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
+      shared
+        ? h('button', { class: 'btn', type: 'button', onclick: (e) => respondToShare({ id: shared.share_id, from_name: shared.shared_by }, false, e.currentTarget) }, 'Use my own')
+        : h('button', { class: 'btn', type: 'button', disabled: !S.draft || S.draftLoading, onclick: () => loadDraft({ regenerate: true }) }, 'Regenerate'),
+      !shared && h('button', { class: 'btn square', type: 'button', 'aria-label': 'Share this workout', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: () => shareSheet({
+        key: () => (S.shareKey = S.shareKey || uuid()),
+        plan: () => planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets),
+      }) }, icon('share')),
       h('button', { class: 'btn primary grow', type: 'button', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: startWorkout }, 'Start workout'),
     ),
   );
@@ -590,7 +720,7 @@ function planRow(b, gym) {
     'li',
     { class: 'plan-row' },
     h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
-    h(
+    !S.draft.share_id && h(
       'div',
       { class: 'plan-actions' },
       h(
@@ -609,6 +739,7 @@ function planRow(b, gym) {
       ),
       h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
         Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in. ${block.reason}` });
+        pushSharedPlan();
         render();
       }) }, icon('swap', 18), 'Swap'),
     ),
@@ -781,6 +912,7 @@ function startTicker() {
     paintRest();
     const el = document.getElementById('elapsed');
     if (el && sync.active) el.textContent = fmtClock((Date.now() - new Date(sync.active.started_at).getTime()) / 1000);
+    if (route()[0] === 'today' && document.visibilityState === 'visible') refreshShares(); // throttled inside
   }, 500);
 }
 
@@ -820,6 +952,14 @@ function viewWorkout() {
     head,
     cards,
     h('button', { class: 'btn block', type: 'button', onclick: () => addExerciseSheet(doc) }, icon('plus', 18), 'Add exercise'),
+    h('button', { class: 'btn block', type: 'button', onclick: () => shareSheet({
+      key: () => {
+        if (!doc.share_key) sync.edit(doc.id, (d) => (d.share_key = uuid()));
+        return sync.active.share_key;
+      },
+      plan: () => planOf(sync.active.day_type, sync.active.exercises, (e) => e.sets.filter((s) => !s.warmup).length || e.target_sets),
+      workoutId: doc.id,
+    }) }, icon('share', 18), 'Share this workout'),
     h('button', { class: 'btn primary block finish', type: 'button', onclick: () => finishSheet(doc) }, 'Finish workout'),
   );
 }
@@ -1173,7 +1313,7 @@ function viewHistoryDetail(id) {
           paint();
         }, save);
         return [
-          h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`)),
+          h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
           box,
           save,
           h('button', { class: 'btn danger block', type: 'button', onclick: async () => {
@@ -1267,7 +1407,8 @@ function viewExercise(id) {
     h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
     section('History', trend),
-    ex.custom && h('div', { class: 'stack' },
+    ex.shared && h('p', { class: 'muted small' }, S.user.role === 'admin' ? 'This is in the default library for everyone. As the admin you can still edit or archive it; archiving hides it from suggestions for all accounts.' : 'Added to the default library by the admin.'),
+    (ex.custom || (ex.shared && S.user.role === 'admin')) && h('div', { class: 'stack' },
       h('a', { class: 'btn block', href: `#/exercises/edit/${ex.id}` }, 'Edit exercise'),
       h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
         await api.post('archive_exercise', { id: ex.id, archived: !ex.archived });
@@ -1345,7 +1486,7 @@ function viewSettings() {
       h('ol', { class: 'steps' }, h('li', {}, 'Open this page in Chrome.'), h('li', {}, 'Tap the three-dot menu at the top right.'), h('li', {}, 'Tap Add to Home screen (or Install app), then Install.'))),
     S.user.role === 'admin' && section('Users',
       h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
-      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users')),
+      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       h('form', { class: 'stack', onsubmit: async (e) => {
@@ -1470,10 +1611,74 @@ function viewImport() {
 
 function viewUsers() {
   if (S.user.role !== 'admin') return page('Manage users', backLink('settings', 'Settings'), h('p', { class: 'muted' }, 'Only the admin can manage accounts.'));
-  const list = h('ul', { class: 'log' });
-  const paint = (users) => fill(list, users.map((u) => h('li', { class: 'log-row' },
-    h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
-    h('span', { class: 'log-meta' }, `${u.username}, added ${fmtDate(u.created_at, { month: 'short', day: 'numeric', year: 'numeric' })}`))));
+  const when = (iso) => fmtDate(iso, { month: 'short', day: 'numeric', year: 'numeric' });
+  const accounts = h('ul', { class: 'log' });
+  const requests = h('div', { class: 'stack', 'data-list': 'requests' });
+  const inviteState = h('p', { class: 'muted', 'data-invite': '' });
+  const turnOff = h('button', { class: 'btn danger block', type: 'button' }, 'Stop taking requests');
+
+  // One painter for everything the server sends back, so every action leaves the page in step.
+  const paint = (data) => {
+    S.pendingRequests = data.requests.length;
+    fill(accounts, data.users.map((u) => h('li', { class: 'log-row' },
+      h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
+      h('span', { class: 'log-meta' }, `${u.username}, added ${when(u.created_at)}`))));
+    fill(requests,
+      !data.requests.length && h('p', { class: 'muted' }, data.invite.set ? 'No requests waiting.' : 'No requests waiting. Set an invite token below to let people ask for an account.'),
+      data.requests.map((r) => h('div', { class: 'card request' },
+        h('div', {}, h('h3', {}, r.display_name), h('p', { class: 'muted small' }, `Wants the username ${r.username}. Asked ${when(r.created_at)}.`)),
+        h('div', { class: 'plan-actions' },
+          h('button', { class: 'btn small primary', type: 'button', onclick: (e) => decide('approve_request', r, `${r.username} can sign in now.`, e.currentTarget) }, 'Approve'),
+          h('button', { class: 'btn small', type: 'button', onclick: async (e) => {
+            const btn = e.currentTarget;
+            if (await confirmSheet(`Decline ${r.username}?`, 'The request is deleted. They can ask again if they still have the invite token.', 'Decline request', true)) decide('decline_request', r, `Declined ${r.username}.`, btn);
+          } }, 'Decline')))));
+    inviteState.textContent = data.invite.set
+      ? `Requests are open. The token was last set ${when(data.invite.updated_at)}. It is stored scrambled, so it cannot be shown again; set a new one if you have lost it.`
+      : 'Requests are closed. Set a token to open them.';
+    turnOff.hidden = !data.invite.set;
+  };
+  const decide = (action, r, done, btn) => act(async () => {
+    paint(await api.post(action, { id: r.id }));
+    toast(done);
+  }, btn);
+
+  // Invite token
+  const token = h('input', { type: 'text', name: 'invite_token', minlength: 8, maxlength: 100, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const tokenError = h('p', { class: 'form-error', role: 'alert' });
+  const tokenBtn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save invite token');
+  const saveToken = async (value, done, btn) => {
+    tokenError.textContent = '';
+    btn.disabled = true;
+    try {
+      paint(await api.post('set_invite_token', { token: value }));
+      token.value = '';
+      toast(done);
+    } catch (err) {
+      tokenError.textContent = err.offline ? 'No connection to the server.' : err.message;
+    }
+    btn.disabled = false;
+  };
+  turnOff.onclick = async () => {
+    if (await confirmSheet('Stop taking requests?', 'The invite token stops working. Requests already waiting stay in the list.', 'Stop taking requests', true)) saveToken('', 'Account requests are closed.', turnOff);
+  };
+  const tokenForm = h('form', { class: 'stack', onsubmit: (e) => {
+    e.preventDefault();
+    saveToken(token.value, 'Invite token saved. Share it with the people you want to invite.', tokenBtn);
+  } },
+    field('New invite token', token, 'At least 8 characters. Everyone you invite uses the same one, and it is not anyone\'s sign-in password.'),
+    h('button', { class: 'btn block', type: 'button', onclick: () => {
+      const bytes = crypto.getRandomValues(new Uint8Array(12));
+      const letters = 'abcdefghjkmnpqrstuvwxyz23456789';
+      token.value = [...bytes].map((b, n) => (n && n % 4 === 0 ? '-' : '') + letters[b % letters.length]).join('');
+      token.focus();
+      token.select();
+    } }, 'Make one up for me'),
+    tokenError,
+    tokenBtn,
+    turnOff);
+
+  // Create an account directly
   const error = h('p', { class: 'form-error', role: 'alert' });
   const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'off', placeholder: 'For example: Sam' });
   const username = h('input', { type: 'text', name: 'new_username', maxlength: 64, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
@@ -1484,8 +1689,7 @@ function viewUsers() {
     error.textContent = '';
     btn.disabled = true;
     try {
-      const r = await api.post('create_user', { username: username.value, display_name: name.value, password: password.value });
-      paint(r.users);
+      paint(await api.post('create_user', { username: username.value, display_name: name.value, password: password.value }));
       toast(`Account created for ${username.value.trim().toLowerCase()}.`);
       form.reset();
     } catch (err) {
@@ -1498,14 +1702,61 @@ function viewUsers() {
     field('Starting password', password, 'At least 10 characters. Shown here so you can pass it on; they can change it under Settings once signed in.'),
     error,
     btn);
+
   const loaded = asyncSection(() => api.get('users'), (data) => {
-    paint(data.users);
-    return list;
+    paint(data);
+    return [
+      section('Requests waiting', requests),
+      section('Accounts', accounts),
+      section('Invite token', h('p', { class: 'muted' }, 'With the token, someone can ask for an account from the sign-in screen, choosing their own username and password. Nobody gets in until you approve them here.'), inviteState, tokenForm),
+      section('Add a person yourself', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form),
+    ];
   });
-  return h('main', { class: 'page' }, backLink('settings', 'Settings'),
-    h('h1', {}, 'Manage users'),
-    section('Accounts', loaded),
-    section('Add a person', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form));
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Manage users'), loaded);
+}
+
+/** Sign-in screen's "Request an account": needs the admin's invite token, creates nothing usable until approved. */
+function viewRequest() {
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const token = h('input', { type: 'text', name: 'invite_token', required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'name' });
+  const username = h('input', { type: 'text', name: 'username', maxlength: 64, required: true, autocomplete: 'username', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const password = h('input', { type: 'password', name: 'password', minlength: 10, required: true, autocomplete: 'new-password' });
+  const again = h('input', { type: 'password', name: 'password_again', minlength: 10, required: true, autocomplete: 'new-password' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Send request');
+  const backToSignIn = () => {
+    S.authView = null;
+    render();
+  };
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    if (password.value !== again.value) {
+      error.textContent = 'The two passwords do not match.';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await api.post('request_account', { token: token.value, username: username.value, display_name: name.value, password: password.value });
+      fill(box,
+        h('h1', {}, 'Request sent'),
+        h('p', {}, `The admin has to approve it before you can sign in. When they have, sign in as ${username.value.trim().toLowerCase()} with the password you just chose.`),
+        h('button', { class: 'btn primary block', type: 'button', onclick: backToSignIn }, 'Back to sign in'));
+    } catch (err) {
+      error.textContent = err.offline ? 'No connection to the server.' : err.message;
+      btn.disabled = false;
+    }
+  } },
+    field('Invite token', token, 'From the person who runs this ThoeneFit. It is only used to send this request.'),
+    field('Your name', name, 'Shown in the app. Optional.'),
+    field('Username', username, '2-64 letters, numbers, dots, dashes or underscores.'),
+    field('Password', password, 'At least 10 characters. This is your own sign-in password, not the invite token.'),
+    field('Password again', again),
+    error,
+    btn,
+    h('button', { class: 'btn ghost block', type: 'button', onclick: backToSignIn }, 'Back to sign in'));
+  const box = h('div', { class: 'stack' }, h('h1', {}, 'Request an account'), form);
+  return h('main', { class: 'page narrow request-page' }, brandWide('lead'), box);
 }
 
 function viewGymForm(id) {

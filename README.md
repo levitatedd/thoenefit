@@ -8,6 +8,7 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - Fast set logging with a rest timer, autosave, and offline queueing
 - Double progression, tracked per exercise and per equipment variant
 - History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
+- Share a planned workout so two or more people can train together, each with their own suggested weights
 - Several accounts, no public sign-up; the first account is the admin and adds the others
 
 ## Screenshots
@@ -111,11 +112,23 @@ Each account has its own gyms, workouts, and custom exercises. People can change
 
 **The admin.** The first account ever created is the admin. On a database that already had accounts when roles were added, the earliest-created account became the admin. The admin sees Settings, then Manage users, and can create accounts there with a starting password to pass on. Accounts made that way, or with `create-user.php` once an account exists, are regular users. There is still no public sign-up: every account-management request is checked on the server and refused unless it comes from the signed-in admin.
 
+**Account requests.** In Manage users the admin can set an invite token. Someone who has it can choose "Request an account" on the sign-in screen and pick their own username and password. The request then waits in Manage users until the admin approves or declines it; nobody can sign in before approval, and approved people are regular users. The token is shared by everyone invited, is separate from any sign-in password, and is stored hashed, so it cannot be read back: set a new one if it is lost, or clear it to stop taking requests.
+
 To see who the admin is, open Manage users, or run this over SSH with your database details:
 
 ```sh
 mysql -h mysql.example.com -u DBUSER -p DBNAME -e "SELECT username, role, created_at FROM users ORDER BY created_at"
 ```
+
+### Sharing your own exercises with everyone
+
+Exercises an account adds (or that a Fitbod import creates) belong to that account and show as "Yours". To put one account's exercises into the default library for everyone:
+
+```sh
+php ~/fit.example.com/private/bin/promote-exercises.php mike
+```
+
+The exercises keep their ids, so that account's workout history, trends and suggested weights for them are unchanged. Other accounts can then see, pick and be suggested them, each with their own history. An exercise whose name the default library already has is left as the account's own and listed in the output. The admin can still edit or archive exercises moved this way; other accounts cannot.
 
 ### Updates and database changes
 
@@ -178,6 +191,16 @@ Nothing is random or learned. The same profile, gym, and history always give the
 - **Weight.** Double progression: if every working set last time was at the working weight and reached the top of the rep range, the suggestion goes up by the gym's smallest increment for that equipment and reps restart at the bottom of the range. Otherwise the weight stays and the aim is more reps. Warm-up sets are ignored. You can type over any suggestion.
 - **Equipment variants.** Barbell, dumbbell, kettlebell, and bodyweight history follows you between gyms. Machine and cable history is kept separately per gym, because the same number means different things on different machines.
 - **Recovery.** An estimate from logged sets only: after a session, a muscle is treated as needing 24 hours plus 6 hours per set (half for secondary muscles), up to 96 hours. Under 50%, an exercise for that muscle gets one set fewer. It cannot see sleep, soreness, or anything done outside the app.
+
+## Training together
+
+Anyone can share the workout planned on Today, or one already in progress, with other people on the same server (the people button next to Start workout, or "Share this workout" on the workout screen). The other person sees it on their Today screen and can accept or decline.
+
+- Accepting gives them the same exercises, in the same order, with the same planned sets, rep ranges and rest. Suggested weights are worked out from their own history, so one person may see 185 lb where the other sees 45 lb.
+- The structure is taken as it stands when they accept. If the sender changed the plan, or has started and swapped an exercise since sharing, the accepted copy follows that. After accepting, the two workouts are independent; later changes are not synced.
+- Each person logs their own weights, reps and completion and gets their own entry in History.
+- If the plan includes an exercise the sender created, a copy is added to the other person's exercise library so both keep their own history for it.
+- A share that is not answered, or is accepted but not started, lapses after 24 hours.
 
 ## How offline logging works
 

@@ -325,7 +325,11 @@ final class Generator
     }
 
     /** Sets, reps, rest, suggested weight and last performance for one exercise. */
-    public function block(array $user, array $gym, array $ex, bool $reduceSets = false): array
+    /**
+     * @param array|null $plan when the sets, rep range and rest come from a shared
+     *                         workout instead of this person's goal and experience
+     */
+    public function block(array $user, array $gym, array $ex, bool $reduceSets = false, ?array $plan = null): array
     {
         $goal = self::GOALS[$user['goal']] ?? self::GOALS['muscle'];
         $exp = self::EXPERIENCE[$user['experience']] ?? self::EXPERIENCE['intermediate'];
@@ -335,6 +339,12 @@ final class Generator
         $sets = $compound ? $exp[0] : $exp[1];
         if ($reduceSets) {
             $sets = max(2, $sets - 1);
+        }
+        if ($plan) {
+            $sets = (int) $plan['target_sets'];
+            $repMin = (int) $plan['rep_min'];
+            $repMax = (int) $plan['rep_max'];
+            $rest = (int) $plan['rest_seconds'];
         }
         $unit = $user['unit'];
         $variant = Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']);

@@ -37,7 +37,8 @@ export class Api {
   }
 
   async call(action, body, query = '') {
-    const write = body !== undefined && action !== 'login';
+    // Signing in and asking for an account happen before there is a session, so they carry no security token.
+    const write = body !== undefined && action !== 'login' && action !== 'request_account';
     if (write && !this.csrf) await this.refreshToken();
     try {
       return await this.request(action, body, query);

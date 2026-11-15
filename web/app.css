@@ -27,6 +27,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -520,7 +524,7 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   min-height: 44px;
-  margin: -10px 0;
+  margin: -10px 0 -4px;
   color: var(--chalk);
   text-decoration: underline;
   text-decoration-color: var(--line);
@@ -805,6 +809,35 @@ input.num::placeholder {
   margin-top: 8px;
 }
 
+.share-card {
+  border: 2px solid var(--green);
+}
+
+.shared-note {
+  border-left-color: var(--green);
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-status.accepted,
+.share-status.started {
+  color: var(--green);
+}
+
 .resume {
   border: 2px solid var(--blue);
 }
@@ -931,6 +964,20 @@ input[type="file"] {
   border-top: 1px solid var(--line);
   font: 700 19px/1.2 var(--display);
   color: var(--muted);
+}
+
+.badge.alert {
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+.request h3 {
+  font: 700 19px/1.2 var(--display);
+}
+
+/* The request form is taller than sign-in, so it starts nearer the top. */
+.page.narrow.request-page {
+  padding-top: 8vh;
 }
 
 .badge {

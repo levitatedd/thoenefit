@@ -35,7 +35,7 @@ final class Auth
         return strtolower(trim($u));
     }
 
-    public function createUser(string $username, string $password, string $displayName = ''): int
+    public function createUser(string $username, string $password, string $displayName = '', string $status = 'active'): int
     {
         $username = self::normUsername($username);
         if (!preg_match('/^[a-z0-9._-]{2,64}$/', $username)) {
@@ -54,8 +54,83 @@ final class Auth
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'display_name' => $displayName !== '' ? mb_substr($displayName, 0, 100) : $username,
             'role' => $first ? 'admin' : 'user',
+            'status' => $first ? 'active' : $status,
             'created_at' => now_utc(),
         ]);
+    }
+
+    // ---- account requests -------------------------------------------------
+
+    private const INVITE_KEY = 'invite_token_hash';
+    private const MAX_PENDING = 25;
+    private const MAX_TOKEN_TRIES = 5;
+
+    /** Whether account requests are open, and when the invite token was last set. The token itself is never readable. */
+    public function inviteStatus(): array
+    {
+        $row = $this->db->one('SELECT updated_at FROM app_settings WHERE name=?', [self::INVITE_KEY]);
+        return ['set' => $row !== null, 'updated_at' => $row ? to_iso($row['updated_at']) : null];
+    }
+
+    /** Sets or changes the shared invite token. An empty token closes account requests. Only its hash is stored. */
+    public function setInviteToken(string $token): void
+    {
+        $token = trim($token);
+        $this->db->run('DELETE FROM app_settings WHERE name=?', [self::INVITE_KEY]);
+        if ($token === '') {
+            return;
+        }
+        if (strlen($token) < 8 || strlen($token) > 100) {
+            throw new HttpError(422, 'The invite token needs 8 to 100 characters.');
+        }
+        $this->db->insert('app_settings', ['name' => self::INVITE_KEY, 'value' => password_hash($token, PASSWORD_DEFAULT), 'updated_at' => now_utc()]);
+    }
+
+    /**
+     * Someone with the invite token asks for an account. The row is created
+     * as 'pending' with their own password and cannot sign in until approved.
+     */
+    public function requestAccount(string $token, string $username, string $password, string $displayName = ''): int
+    {
+        $ident = 'inv:' . ($_SERVER['REMOTE_ADDR'] ?? 'cli');
+        $since = now_utc(time() - self::WINDOW_MINUTES * 60);
+        if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', [$ident, $since]) >= self::MAX_TOKEN_TRIES) {
+            throw new HttpError(429, 'Too many tries with the wrong invite token. Wait 15 minutes and try again.');
+        }
+        $hash = $this->db->val('SELECT value FROM app_settings WHERE name=?', [self::INVITE_KEY]);
+        if (!$hash) {
+            throw new HttpError(403, 'Account requests are not open right now.');
+        }
+        if (!password_verify(trim($token), (string) $hash)) {
+            $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', [$ident, now_utc()]);
+            throw new HttpError(403, 'That invite token is not right.');
+        }
+        if ((int) $this->db->val("SELECT COUNT(*) FROM users WHERE status='pending'") >= self::MAX_PENDING) {
+            throw new HttpError(429, 'There are already a lot of requests waiting. Try again after the admin has gone through them.');
+        }
+        return $this->createUser($username, $password, $displayName, 'pending');
+    }
+
+    /** Requests waiting for the admin, oldest first. */
+    public function pendingRequests(): array
+    {
+        return $this->listUsers('pending');
+    }
+
+    public function approveRequest(int $id): void
+    {
+        $st = $this->db->run("UPDATE users SET status='active', role='user' WHERE id=? AND status='pending'", [$id]);
+        if ($st->rowCount() === 0) {
+            throw new HttpError(404, 'That request is no longer waiting.');
+        }
+    }
+
+    public function declineRequest(int $id): void
+    {
+        $st = $this->db->run("DELETE FROM users WHERE id=? AND status='pending'", [$id]);
+        if ($st->rowCount() === 0) {
+            throw new HttpError(404, 'That request is no longer waiting.');
+        }
     }
 
     public static function isAdmin(array $user): bool
@@ -72,10 +147,10 @@ final class Auth
     }
 
     /** Accounts for the Manage Users page. Never includes password hashes. */
-    public function listUsers(): array
+    public function listUsers(string $status = 'active'): array
     {
         $out = [];
-        foreach ($this->db->all('SELECT id, username, display_name, role, created_at FROM users ORDER BY created_at, id') as $u) {
+        foreach ($this->db->all('SELECT id, username, display_name, role, created_at FROM users WHERE status=? ORDER BY created_at, id', [$status]) as $u) {
             $out[] = [
                 'id' => (int) $u['id'],
                 'username' => $u['username'],
@@ -117,6 +192,10 @@ final class Auth
             }
             throw new HttpError(401, 'Wrong username or password.');
         }
+        if (($user['status'] ?? 'active') !== 'active') {
+            // Only said once the password is right, so it does not reveal who has asked for an account.
+            throw new HttpError(403, 'Your account request is waiting for the admin to approve it.');
+        }
         $this->db->run('DELETE FROM login_attempts WHERE ident=? OR attempted_at<?', [$idents[0], now_utc(time() - 86400)]);
         if (password_needs_rehash($user['password_hash'], PASSWORD_DEFAULT)) {
             $this->db->run('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $user['id']]);
@@ -151,7 +230,7 @@ final class Auth
             return null;
         }
         $user = $this->db->one('SELECT * FROM users WHERE id=?', [$s['user_id']]);
-        if (!$user) {
+        if (!$user || ($user['status'] ?? 'active') !== 'active') {
             return null;
         }
         // Slide the expiry at most once a day so regular use never signs you out.

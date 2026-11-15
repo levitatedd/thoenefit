@@ -11,6 +11,7 @@ final class Api
     private Auth $auth;
     private Workouts $workouts;
     private Generator $gen;
+    private Shares $shares;
 
     public static function handle(): void
     {
@@ -36,6 +37,7 @@ final class Api
         $this->auth = new Auth($app->db, $app->config);
         $this->workouts = new Workouts($app->db);
         $this->gen = new Generator($app->db);
+        $this->shares = new Shares($app->db);
     }
 
     private static function json($data, int $status = 200): void
@@ -66,6 +68,13 @@ final class Api
             return;
         }
 
+        if ($action === 'request_account' && $method === 'POST') {
+            // Open to people who are not signed in, but only with the admin's invite token.
+            $this->auth->requestAccount((string) ($in['token'] ?? ''), (string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
+            self::json(['ok' => true]);
+            return;
+        }
+
         $user = $this->auth->user();
         if ($action === 'bootstrap' && $method === 'GET') {
             self::json($user ? $this->bootstrap($user) : ['user' => null, 'version' => APP_VERSION]);
@@ -87,9 +96,15 @@ final class Api
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
+            // Other people on this server, by display name only, for sharing a workout.
+            'people' => fn() => ['people' => $this->people($uid)],
+            'shares' => fn() => [
+                'incoming' => $this->shares->incoming($uid),
+                'outgoing' => $this->shares->outgoing($uid, (string) ($_GET['key'] ?? '')),
+            ],
             'users' => function () use ($user) {
                 Auth::requireAdmin($user);
-                return ['users' => $this->auth->listUsers()];
+                return $this->accounts();
             },
         ];
         if ($method === 'GET' && $action === 'export') {
@@ -117,7 +132,22 @@ final class Api
             case 'create_user':
                 Auth::requireAdmin($user);
                 $this->auth->createUser((string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
-                self::json(['users' => $this->auth->listUsers()]);
+                self::json($this->accounts());
+                return;
+            case 'set_invite_token':
+                Auth::requireAdmin($user);
+                $this->auth->setInviteToken((string) ($in['token'] ?? ''));
+                self::json($this->accounts());
+                return;
+            case 'approve_request':
+                Auth::requireAdmin($user);
+                $this->auth->approveRequest((int) ($in['id'] ?? 0));
+                self::json($this->accounts());
+                return;
+            case 'decline_request':
+                Auth::requireAdmin($user);
+                $this->auth->declineRequest((int) ($in['id'] ?? 0));
+                self::json($this->accounts());
                 return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
@@ -141,10 +171,14 @@ final class Api
                 self::json(['gyms' => $gyms, 'user' => self::userShape($this->db->one('SELECT * FROM users WHERE id=?', [$uid]))]);
                 return;
             case 'save_exercise':
-                self::json(['exercise' => $this->saveExercise($uid, $in)]);
+                self::json(['exercise' => $this->saveExercise($user, $in)]);
                 return;
             case 'archive_exercise':
-                $this->db->run('UPDATE exercises SET archived=? WHERE id=? AND user_id=?', [empty($in['archived']) ? 0 : 1, (int) ($in['id'] ?? 0), $uid]);
+                $row = $this->db->one('SELECT * FROM exercises WHERE id=?', [(int) ($in['id'] ?? 0)]);
+                if (!$row || !Catalog::canEdit($row, $user)) {
+                    throw new HttpError(404, 'Only exercises you created can be archived.');
+                }
+                $this->db->run('UPDATE exercises SET archived=? WHERE id=?', [empty($in['archived']) ? 0 : 1, $row['id']]);
                 self::json(['ok' => true]);
                 return;
             case 'generate':
@@ -188,7 +222,46 @@ final class Api
                 self::json(['removed' => (new FitbodImport($this->db))->purge($uid)]);
                 return;
             case 'save_workout':
-                self::json($this->workouts->save($uid, (array) ($in['workout'] ?? [])));
+                $doc = (array) ($in['workout'] ?? []);
+                $saved = $this->workouts->save($uid, $doc);
+                if (!empty($saved['ok'])) {
+                    // A workout started from a shared plan closes that share; one started
+                    // from a plan this person shared lets later accepts follow it.
+                    if (!empty($doc['share_id'])) {
+                        $this->shares->markStarted($uid, (int) $doc['share_id'], (string) $doc['id']);
+                    }
+                    if (!empty($doc['share_key'])) {
+                        $this->shares->link($uid, (string) $doc['share_key'], (string) $doc['id']);
+                    }
+                }
+                self::json($saved);
+                return;
+            case 'share_workout':
+                $this->shares->send(
+                    $uid,
+                    (string) ($in['share_key'] ?? ''),
+                    (array) ($in['to'] ?? []),
+                    array_column($this->people($uid), 'id'),
+                    (array) ($in['plan'] ?? []),
+                    isset($in['workout_id']) ? (string) $in['workout_id'] : null
+                );
+                self::json(['outgoing' => $this->shares->outgoing($uid, (string) ($in['share_key'] ?? ''))]);
+                return;
+            case 'share_respond':
+                if (!empty($in['accept'])) {
+                    $this->shares->accept($uid, (int) ($in['id'] ?? 0));
+                } else {
+                    $this->shares->decline($uid, (int) ($in['id'] ?? 0));
+                }
+                self::json(['incoming' => $this->shares->incoming($uid)]);
+                return;
+            case 'shared_draft':
+                $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                self::json([
+                    'workout' => $this->shares->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen),
+                    // Accepting can add the sender's own exercises to this person's library.
+                    'exercises' => Catalog::forUser($this->db, $uid, true),
+                ]);
                 return;
             case 'delete_workout':
                 $this->workouts->delete($uid, (string) ($in['id'] ?? ''));
@@ -215,6 +288,18 @@ final class Api
         ];
     }
 
+    /** Everyone else with a working account: id and display name only. */
+    private function people(int $uid): array
+    {
+        $out = [];
+        foreach ($this->auth->listUsers() as $u) {
+            if ($u['id'] !== $uid) {
+                $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
+            }
+        }
+        return $out;
+    }
+
     private function gyms(int $uid): array
     {
         return array_map([Generator::class, 'gymShape'], $this->db->all('SELECT * FROM gyms WHERE user_id=? ORDER BY id', [$uid]));
@@ -227,6 +312,16 @@ final class Api
             throw new HttpError(404, 'Gym profile not found. Add one in Settings.');
         }
         return Generator::gymShape($row);
+    }
+
+    /** Everything the Manage Users page shows. Admin only; callers check that first. */
+    private function accounts(): array
+    {
+        return [
+            'users' => $this->auth->listUsers(),
+            'requests' => $this->auth->pendingRequests(),
+            'invite' => $this->auth->inviteStatus(),
+        ];
     }
 
     private function bootstrap(array $user): array
@@ -243,9 +338,11 @@ final class Api
             'version' => APP_VERSION,
             'csrf' => $this->auth->session['csrf'],
             'user' => self::userShape($user),
+            'pending_requests' => Auth::isAdmin($user) ? count($this->auth->pendingRequests()) : 0,
             'gyms' => $this->gyms($uid),
             'exercises' => Catalog::forUser($this->db, $uid, true),
             'active' => $active,
+            'shares' => $this->shares->incoming($uid),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
                 'presets' => Catalog::presets(),
@@ -339,8 +436,9 @@ final class Api
         return $this->gym($uid, $id);
     }
 
-    private function saveExercise(int $uid, array $in): array
+    private function saveExercise(array $user, array $in): array
     {
+        $uid = (int) $user['id'];
         $name = trim((string) ($in['name'] ?? ''));
         if ($name === '') {
             throw new HttpError(422, 'Give the exercise a name.');
@@ -368,7 +466,8 @@ final class Api
         ];
         $id = (int) ($in['id'] ?? 0);
         if ($id) {
-            if (!$this->db->val('SELECT id FROM exercises WHERE id=? AND user_id=?', [$id, $uid])) {
+            $existing = $this->db->one('SELECT * FROM exercises WHERE id=?', [$id]);
+            if (!$existing || !Catalog::canEdit($existing, $user)) {
                 throw new HttpError(404, 'Only exercises you created can be edited.');
             }
             $this->db->update('exercises', $row, 'id=?', [$id]);
