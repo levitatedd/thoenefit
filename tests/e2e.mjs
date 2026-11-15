@@ -315,7 +315,7 @@ page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
 check('the finished workout carries the Strava request to the server',
   finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
-check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true}');
+check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
@@ -909,6 +909,72 @@ if (!process.env.TF_URL) {
   check('it can sign back in with the new password, not the old one', (await laptop.locator('.tabs').count()) === 1);
   await phoneCtx.close();
   await laptopCtx.close();
+}
+
+if (!process.env.TF_URL) {
+  console.log('Cardio warm-up');
+  // #18: tick a stationary bike at the gym, ask for a warm-up, and log it.
+  await page.goto(`${URL}#/settings`);
+  await page.click('.log-row:has(.badge:has-text("Selected"))');
+  await page.click('label.check:has-text("Stationary bike")');
+  await page.click('button:has-text("Save gym")');
+  await page.waitForSelector('.toast.show');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const warmBox = page.locator('label.check:has-text("Include a warm-up") input');
+  check('with a cardio machine at the gym, Today offers Include a warm-up, unticked at first', (await warmBox.count()) === 1 && !(await warmBox.isChecked()));
+  await warmBox.click();
+  await page.waitForFunction(() => document.querySelector('.plan-row h3')?.textContent === 'Stationary Bike' && !document.querySelector('.stack.loading'));
+  check('ticking it starts the plan with a 10 minute bike warm-up', (await page.textContent('.plan-row .target')) === '10 min warm-up' && /^Warm-up and \d+ exercises/.test(await page.textContent('.summary')));
+  await shot('13-warm-up-plan');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const bikeCard = page.locator('.lift').first();
+  check('the warm-up is logged as minutes, distance and level, not weight and reps', (await bikeCard.locator('h2').textContent()) === 'Stationary Bike' && /Min\s*mi\s*Level/.test(await bikeCard.locator('.set-head').innerText()) && (await bikeCard.locator('.set input').first().inputValue()) === '10');
+  await bikeCard.locator('.set input').nth(0).fill('12');
+  await bikeCard.locator('.set input').nth(1).fill('1.8');
+  await bikeCard.locator('.set input').nth(2).fill('9');
+  await bikeCard.locator('.plate').click();
+  check('completing it starts no rest timer', (await bikeCard.locator('.plate').getAttribute('aria-pressed')) === 'true' && await page.locator('#rest').isHidden());
+  await shot('14-warm-up-logged');
+  await page.waitForFunction(() => document.querySelector('#sync')?.textContent === 'Saved');
+  const active = (await page.evaluate(async () => (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json())).active;
+  const bikeSet = active.exercises[0].sets[0];
+  check('the server has the time, distance in metres and level', bikeSet.duration_s === 720 && Math.abs(bikeSet.distance_m - 2896.8) < 0.2 && bikeSet.level === 9 && bikeSet.reps === null, JSON.stringify(bikeSet));
+  await page.reload();
+  await page.waitForSelector('.lift');
+  check('after a reload, the warm-up still shows what was logged', (await page.locator('.lift').first().locator('.set input').nth(1).inputValue()) === '1.8');
+
+  console.log('Estimated calories');
+  // #38: no body weight, no effort question. Add one in Settings, finish, and see the estimate.
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  check('without a body weight, finishing does not ask how hard it was', (await page.locator('.sheet :text("How hard was it?")').count()) === 0);
+  await page.click('.sheet button:has-text("Close")');
+  await page.goto(`${URL}#/settings`);
+  const bw = page.locator('input[aria-label^="Body weight"]');
+  await bw.fill('180');
+  await bw.press('Tab');
+  await waitForToast(page, /Body weight saved/);
+  check('body weight is saved from Settings', (await bw.inputValue()) === '180');
+  await page.goto(`${URL}#/workout`);
+  await page.waitForSelector('.lift');
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet :text("How hard was it?")');
+  check('finishing now asks how hard it was, starting at Moderate', (await page.locator('.sheet .choice[aria-pressed="true"]').textContent()).trim() === 'Moderate');
+  await page.click('.sheet .choice:has-text("Hard")');
+  await shot('15-finish-effort');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForSelector('.plan-row, .page-head');
+  await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  await page.click('.log-row');
+  await page.waitForSelector('.calories');
+  // This test workout lasted seconds, so there is no estimate, and History says why.
+  check('History explains when a workout is too short for an estimate', /under a minute/.test(await page.textContent('.calories')), await page.textContent('.calories'));
+  check('a panel with nothing to show leaves no stray text behind', !/(^|\s)null(\s|$)/.test(await page.textContent('.page')));
+  await shot('16-history-calories');
 }
 
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {

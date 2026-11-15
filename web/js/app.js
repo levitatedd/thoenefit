@@ -1,7 +1,7 @@
 import { Api, WorkoutSync, uuid } from './store.js';
 import { searchExercises } from './search.js';
 import { APP_VERSION } from './version.js';
-import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
+import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 
 const api = new Api('api.php');
 const root = document.getElementById('app');
@@ -14,7 +14,7 @@ const S = {
   vocab: null,
   offlineBoot: false,
   draft: null, // generated workout not started yet
-  draftOpts: { day_type: null, minutes: null, bodyweight_only: false },
+  draftOpts: { day_type: null, minutes: null, bodyweight_only: false, warm_up: null },
   draftError: null,
   draftLoading: false,
   rest: null, // {endsAt, total}
@@ -453,7 +453,7 @@ function activeGym() {
 async function loadDraft({ regenerate = false } = {}) {
   const gym = activeGym();
   if (!gym) return;
-  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only };
+  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
@@ -519,8 +519,38 @@ function blockToEntry(b) {
     suggested_weight: b.suggested_weight,
     reason: b.reason,
     previous: b.previous || null,
-    sets: Array.from({ length: b.target_sets }, () => ({ id: uuid(), weight: b.suggested_weight, reps: b.suggested_reps, warmup: false, done: false, done_at: null })),
+    target_seconds: b.target_seconds ?? null,
+    sets: isCardio(b)
+      ? [cardioSet(b.target_seconds, b.previous)]
+      : Array.from({ length: b.target_sets }, () => ({ id: uuid(), weight: b.suggested_weight, reps: b.suggested_reps, warmup: false, done: false, done_at: null })),
   };
+}
+
+/** A cardio set (#18), filled in with the target time and the level used last time. */
+function cardioSet(seconds, previous) {
+  const lastLevel = previous && previous.sets.length ? previous.sets[previous.sets.length - 1].level : null;
+  return { id: uuid(), weight: null, reps: null, warmup: false, done: false, done_at: null, duration_s: seconds || 600, distance_m: null, level: lastLevel ?? null };
+}
+
+/** Minutes, distance and level inputs for a cardio set. onChange gets the field that changed. */
+function cardioInputs(s, unit, onChange) {
+  const input = (label, value, inputmode, field, toValue) => h('input', {
+    class: 'num',
+    type: 'text',
+    inputmode,
+    enterkeyhint: 'done',
+    'aria-label': label,
+    placeholder: field === 'duration_s' ? 'min' : field === 'distance_m' ? distUnit(unit) : 'lvl',
+    value,
+    onfocus: (ev) => ev.target.select(),
+    oninput: (ev) => onChange(field, toValue(parseNum(ev.target.value))),
+  });
+  const show = (v, places) => (v == null ? '' : String(Number(v.toFixed(places))));
+  return [
+    input('Minutes', show(s.duration_s == null ? null : s.duration_s / 60, 1), 'decimal', 'duration_s', (v) => (v == null ? null : Math.round(v * 60))),
+    input(`Distance in ${distUnit(unit) === 'mi' ? 'miles' : 'kilometres'} (optional)`, show(metresTo(s.distance_m, unit), 2), 'decimal', 'distance_m', (v) => (v == null ? null : Math.round(toMetres(v, unit) * 10) / 10)),
+    input('Level (optional)', show(s.level, 1), 'decimal', 'level', (v) => v),
+  ];
 }
 
 function startWorkout() {
@@ -846,6 +876,22 @@ function viewToday() {
       }),
       'Bodyweight only',
     ),
+    // A cardio warm-up (#18), only offered when the gym has a cardio machine. The choice is remembered.
+    S.draft && S.draft.warm_up_available && h('label', { class: 'check' },
+      h('input', {
+        type: 'checkbox',
+        checked: S.draftOpts.warm_up ?? !!S.user.warm_up,
+        disabled: S.draftLoading,
+        onchange: (e) => {
+          clearTimeout(S.minutesTimer);
+          S.draftOpts.warm_up = e.target.checked;
+          S.user.warm_up = e.target.checked;
+          S.draft = null;
+          loadDraft();
+        },
+      }),
+      'Include a warm-up',
+    ),
     field(
       'Time',
       stepper(S.draftOpts.minutes || S.user.minutes, {
@@ -872,7 +918,7 @@ function viewToday() {
     body = h(
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
-      h('p', { class: 'summary' }, `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${d.exercises.length} exercises, about ${d.est_minutes} minutes`),
+      h('p', { class: 'summary' }, `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${d.warm_up ? 'Warm-up and ' : ''}${d.exercises.length - (d.warm_up ? 1 : 0)} exercises, about ${d.est_minutes} minutes`),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
@@ -911,7 +957,10 @@ function dayLabel(d) {
   return (S.vocab.day_labels && S.vocab.day_labels[d]) || 'Custom';
 }
 
+const isCardio = (b) => b.kind === 'cardio';
+
 function targetLine(b, unit) {
+  if (isCardio(b)) return `${Math.round((b.target_seconds || 600) / 60)} min warm-up`;
   const w = b.suggested_weight != null ? ` at ${fmtW(b.suggested_weight)} ${unit}${b.kind === 'dumbbell' ? ' each' : ''}` : '';
   return `${b.target_sets} sets of ${b.rep_min}-${b.rep_max}${w}`;
 }
@@ -1173,11 +1222,40 @@ function viewWorkout() {
 
 function exerciseCard(doc, e, idx, nextSet, edit) {
   const ex = S.exById.get(e.exercise_id);
+  const cardio = isCardio(e);
   const needsWeight = !['bodyweight', 'band'].includes(e.kind);
   const perSide = e.kind === 'dumbbell' ? `${doc.unit} each` : doc.unit;
   let workingNo = 0;
 
-  const rows = e.sets.map((s) => {
+  const cardioRow = (s, n) => {
+    const [minutes, distance, level] = cardioInputs(s, doc.unit, (field, v) => edit((d) => (find(d, e.id, s.id)[field] = v), false));
+    const done = h('button', {
+      type: 'button',
+      class: 'plate',
+      'aria-pressed': String(s.done),
+      'aria-label': s.done ? 'Completed. Tap to undo' : 'Complete',
+      onclick: () => {
+        if (s.done) {
+          edit((d) => Object.assign(find(d, e.id, s.id), { done: false, done_at: null }));
+          return;
+        }
+        const cur = find(doc, e.id, s.id);
+        if (!cur.duration_s || cur.duration_s <= 0) {
+          minutes.focus();
+          toast('Enter the minutes you did.');
+          return;
+        }
+        document.activeElement && document.activeElement.blur();
+        // No rest timer after cardio: the next exercise can start straight away.
+        edit((d) => Object.assign(find(d, e.id, s.id), { done: true, done_at: new Date().toISOString() }));
+      },
+    }, icon('check', 30));
+    return h('li', { class: `set cardio ${s.done ? 'done' : ''} ${s.id === nextSet ? 'next' : ''}` },
+      h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(n)), minutes, distance, level, done);
+  };
+
+  const rows = e.sets.map((s, si) => {
+    if (cardio) return cardioRow(s, si + 1);
     if (!s.warmup) workingNo += 1;
     const weight = h('input', {
       class: 'num',
@@ -1316,19 +1394,23 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('button', { type: 'button', class: 'btn square ghost', 'aria-label': `Options for ${e.name}`, onclick: menu }, icon('more')),
     ),
     e.reason && h('details', { class: 'why-fold' }, h('summary', {}, 'Why this'), h('p', { class: 'why' }, e.reason)),
-    h('div', { class: 'set-head', 'aria-hidden': 'true' }, h('span', {}, 'Set'), h('span', {}, perSide), h('span', {}), h('span', {}, 'Reps'), h('span', {}, 'Done')),
+    cardio
+      ? h('div', { class: 'set-head cardio', 'aria-hidden': 'true' }, h('span', {}, ''), h('span', {}, 'Min'), h('span', {}, distUnit(doc.unit)), h('span', {}, 'Level'), h('span', {}, 'Done'))
+      : h('div', { class: 'set-head', 'aria-hidden': 'true' }, h('span', {}, 'Set'), h('span', {}, perSide), h('span', {}), h('span', {}, 'Reps'), h('span', {}, 'Done')),
     h('ol', { class: 'sets' }, rows),
     h('div', { class: 'set-actions' },
       h('button', { type: 'button', class: 'btn small', onclick: () => edit((d) => {
         const t = d.exercises.find((x) => x.id === e.id);
         const last = t.sets[t.sets.length - 1];
-        t.sets.push({ id: uuid(), weight: last ? last.weight : e.suggested_weight, reps: last ? last.reps : null, warmup: false, done: false, done_at: null });
-      }) }, icon('plus', 18), 'Add set'),
+        t.sets.push(cardio
+          ? { ...cardioSet(last ? last.duration_s : e.target_seconds, null), level: last ? last.level : null }
+          : { id: uuid(), weight: last ? last.weight : e.suggested_weight, reps: last ? last.reps : null, warmup: false, done: false, done_at: null });
+      }) }, icon('plus', 18), cardio ? 'Add interval' : 'Add set'),
       h('button', { type: 'button', class: 'btn small', disabled: e.sets.length === 0, onclick: async () => {
         const last = e.sets[e.sets.length - 1];
-        if (last.done && !(await confirmSheet('Remove a completed set?', `The last set (${fmtW(last.weight)} × ${last.reps}) is deleted.`, 'Remove set', true))) return;
+        if (last.done && !(await confirmSheet('Remove a completed set?', `The last set (${cardio ? fmtCardio(last, doc.unit) : `${fmtW(last.weight)} × ${last.reps}`}) is deleted.`, 'Remove set', true))) return;
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
-      } }, icon('minus', 18), 'Remove set'),
+      } }, icon('minus', 18), cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
     ),
   );
@@ -1389,9 +1471,9 @@ function addExerciseSheet(doc) {
 // "Send to Strava" on the Finish sheet (#87): the choice is remembered on this device.
 function stravaOnFinish() {
   try {
-    return { send: false, summary: false, ...JSON.parse(localStorage.getItem('tf.stravaOnFinish') || '{}') };
+    return { send: false, summary: false, calories: false, ...JSON.parse(localStorage.getItem('tf.stravaOnFinish') || '{}') };
   } catch (e) {
-    return { send: false, summary: false };
+    return { send: false, summary: false, calories: false };
   }
 }
 
@@ -1408,19 +1490,29 @@ function finishSheet(doc) {
     const send = h('input', { type: 'checkbox', checked: pref.send });
     const summary = h('input', { type: 'checkbox', checked: pref.summary });
     const details = h('label', { class: 'check strava-details', hidden: !pref.send }, summary, 'Include exercises, sets, reps, and weights');
-    send.onchange = () => (details.hidden = !send.checked);
-    strava = { send, summary, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details) };
+    // Estimated calories (#38), offered once a body weight is set.
+    const calories = h('input', { type: 'checkbox', checked: pref.calories });
+    const caloriesRow = S.user.body_weight != null && h('label', { class: 'check strava-details', hidden: !pref.send }, calories, 'Include estimated calories');
+    send.onchange = () => {
+      details.hidden = !send.checked;
+      if (caloriesRow) caloriesRow.hidden = !send.checked;
+    };
+    strava = { send, summary, calories: caloriesRow ? calories : null, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details, caloriesRow) };
   }
+  // How hard it felt (#38), for the calorie estimate. Asked once a body weight is set.
+  let effort = S.user.effort || 'moderate';
+  const effortField = done && S.user.body_weight != null && field('How hard was it?', choices(EFFORTS, effort, (v) => (effort = v), { columns: 3 }), 'Used to estimate the calories you burned.');
   const body = done
     ? h('div', { class: 'stack' },
         h('p', {}, `${done} set${done === 1 ? '' : 's'} logged over ${fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)}.`),
         open > 0 && h('p', { class: 'muted' }, `${open} set${open === 1 ? ' was' : 's were'} not marked done and will be left out.`),
+        effortField,
         strava?.el,
         h('button', { class: 'btn primary block', type: 'button', onclick: () => {
           const toStrava = !!strava?.send.checked;
           if (strava) {
             try {
-              localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: toStrava, summary: strava.summary.checked }));
+              localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: toStrava, summary: strava.summary.checked, calories: !!strava.calories?.checked }));
             } catch (e) {
               // Private mode: the choice just isn't remembered.
             }
@@ -1431,7 +1523,11 @@ function finishSheet(doc) {
             d.exercises = d.exercises.filter((e) => e.sets.length);
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
-            if (toStrava) d.strava_send = { include_summary: strava.summary.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
+            if (effortField) {
+              d.effort = effort;
+              S.user.effort = effort;
+            }
+            if (toStrava) d.strava_send = { include_summary: strava.summary.checked, include_calories: !!strava.calories?.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
           }, 0);
           stopRest();
           S.draft = null;
@@ -1455,7 +1551,8 @@ function finishSheet(doc) {
 function asyncSection(load, build) {
   const box = h('div', { class: 'stack' }, h('p', { class: 'muted pad' }, 'Loading'));
   load().then(
-    (data) => box.replaceChildren(...[build(data)].flat()),
+    // Skip empty parts (a panel that has nothing to show returns null or false), so they don't render as text.
+    (data) => box.replaceChildren(...[build(data)].flat().filter((kid) => kid != null && kid !== false)),
     (e) => box.replaceChildren(h('p', { class: 'muted pad' }, e.offline ? 'This needs a connection.' : e.message)),
   );
   return box;
@@ -1528,7 +1625,7 @@ function viewHistoryDetail(id) {
   return h('main', { class: 'page' }, backOr('history', 'History'),
     asyncSection(
       () => api.get('workout', `&id=${encodeURIComponent(id)}`),
-      ({ workout, strava, strava_export: stravaExport }) => {
+      ({ workout, calories, strava, strava_export: stravaExport }) => {
         let dirty = false;
         const save = h('button', { class: 'btn primary block', type: 'button', disabled: true }, 'Save changes');
         const touch = () => {
@@ -1541,7 +1638,14 @@ function viewHistoryDetail(id) {
             let n = 0;
             return h('section', { class: 'card lift' },
               h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name)), h('a', { class: 'trend-link', href: `#/exercises/${e.exercise_id}`, onclick: () => (S.backTo = { to: `exercises/${e.exercise_id}`, path: `history/${id}`, label: 'Workout History', y: window.scrollY }) }, 'Trend')),
+              isCardio(e) && h('div', { class: 'set-head cardio history', 'aria-hidden': 'true' }, h('span', {}, ''), h('span', {}, 'Min'), h('span', {}, distUnit(workout.unit)), h('span', {}, 'Level'), h('span', {}, '')),
               h('ol', { class: 'sets' }, e.sets.map((s, si) => {
+                if (isCardio(e)) {
+                  return h('li', { class: 'set cardio done' },
+                    h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(si + 1)),
+                    ...cardioInputs(s, workout.unit, (field, v) => { s[field] = v; touch(); }),
+                    h('button', { type: 'button', class: 'btn square ghost', 'aria-label': 'Delete', onclick: () => { e.sets.splice(si, 1); touch(); paint(); } }, icon('trash', 20)));
+                }
                 if (!s.warmup) n += 1;
                 return h('li', { class: `set done ${s.warmup ? 'warm' : ''}` },
                   h('button', { type: 'button', class: 'set-tag', 'aria-label': s.warmup ? 'Warm-up set. Tap to make it a working set' : 'Working set. Tap to mark as warm-up', onclick: () => { s.warmup = !s.warmup; touch(); paint(); } }, s.warmup ? 'W' : String(n)),
@@ -1553,7 +1657,9 @@ function viewHistoryDetail(id) {
               })),
               h('div', { class: 'set-actions' }, h('button', { type: 'button', class: 'btn small', onclick: () => {
                 const last = e.sets[e.sets.length - 1];
-                e.sets.push({ id: uuid(), weight: last ? last.weight : 0, reps: last ? last.reps : null, warmup: false, done: true, done_at: workout.completed_at });
+                e.sets.push(isCardio(e)
+                  ? { ...cardioSet(last ? last.duration_s : 600, null), level: last ? last.level : null, done: true, done_at: workout.completed_at }
+                  : { id: uuid(), weight: last ? last.weight : 0, reps: last ? last.reps : null, warmup: false, done: true, done_at: workout.completed_at });
                 touch();
                 paint();
               } }, icon('plus', 18), 'Add set')),
@@ -1561,10 +1667,18 @@ function viewHistoryDetail(id) {
           }));
         };
         paint();
+        // Estimated calories (#38). Changing how hard it felt is saved with the other edits.
+        const caloriesLine = h('p', { class: 'calories' });
+        const showCalories = () => fill(caloriesLine, calories != null
+          ? [h('strong', {}, `About ${calories.toLocaleString()} calories`), h('span', { class: 'muted' }, ' (estimated)')]
+          : h('span', { class: 'muted small' }, S.user.body_weight == null ? 'Add your body weight in Settings to see estimated calories.' : 'No estimated calories: this workout is under a minute or has no recorded duration.'));
+        showCalories();
+        const effortBox = S.user.body_weight != null && workout.status === 'completed' && field('How hard was it?',
+          choices(EFFORTS, workout.effort || 'moderate', (v) => { workout.effort = v; touch(); }, { columns: 3 }));
         save.onclick = () => act(async () => {
-          const bad = workout.exercises.some((e) => e.sets.some((s) => s.reps == null || s.reps <= 0));
+          const bad = workout.exercises.some((e) => e.sets.some((s) => (isCardio(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
           if (bad) {
-            toast('Every set needs its reps filled in.', 'bad');
+            toast('Every set needs its reps (or minutes, for cardio) filled in.', 'bad');
             return;
           }
           workout.rev += 1;
@@ -1579,9 +1693,11 @@ function viewHistoryDetail(id) {
           S.draft = null; // suggestions depend on history
           toast('Changes saved. Future suggestions use the corrected numbers.');
           paint();
+          api.get('workout', `&id=${encodeURIComponent(id)}`).then((r) => { calories = r.calories; showCalories(); }, () => {});
         }, save);
         return [
           h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
+          h('section', { class: 'card stack' }, caloriesLine, effortBox),
           box,
           save,
           workout.status === 'completed' && workoutStrava(workout, strava, stravaExport, () => dirty),
@@ -1655,10 +1771,12 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
         return;
       }
       const summary = h('input', { type: 'checkbox' });
+      const calories = h('input', { type: 'checkbox', checked: stravaOnFinish().calories });
       const send = h('button', { class: 'btn primary block', type: 'button', onclick: () => act(async () => {
         exported = await api.post('strava_export', {
           id: workout.id,
           include_summary: summary.checked,
+          include_calories: S.user.body_weight != null && calories.checked,
           utc_offset: -new Date(workout.started_at).getTimezoneOffset() * 60,
         });
         statusMessage = '';
@@ -1670,6 +1788,7 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
       const close = sheet('Send to Strava', h('div', { class: 'stack' },
         h('p', {}, 'Send this workout as a Weight Training activity. Your Strava activity visibility settings apply.'),
         h('label', { class: 'check' }, summary, 'Include exercises, sets, reps, and weights'),
+        S.user.body_weight != null && h('label', { class: 'check' }, calories, 'Include estimated calories'),
         send,
       ));
     } }, 'Send to Strava'));
@@ -1766,13 +1885,39 @@ function viewExercise(id) {
         // Opening a workout from the chart comes back to this exercise.
         const onOpen = (p) => (S.backTo = { to: `history/${p.s.workout_id}`, path: `exercises/${id}`, label: ex.name, y: window.scrollY });
         const where = (s) => (variants.length > 1 ? [] : [s.gym_name]);
+        const sessionList = () => [
+          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
+          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+        ];
+        if (isCardio(ex)) {
+          // Cardio (#18): minutes, and distance when it was recorded.
+          const total = (s, f) => s.sets.reduce((n, x) => n + (x[f] || 0), 0);
+          const cpts = mine.map((s) => ({
+            label: fmtDate(s.date, oneYear ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }),
+            t: new Date(s.date).getTime(),
+            title: fmtDate(s.date, fullDate),
+            href: `#/history/${s.workout_id}`,
+            minutes: Math.round(total(s, 'duration_s') / 6) / 10,
+            distance: total(s, 'distance_m') ? Math.round(metresTo(total(s, 'distance_m'), unit) * 100) / 100 : null,
+            lines: [fmtSets(s.sets, s.unit), ...where(s)],
+            s,
+          }));
+          const withDistance = cpts.filter((p) => p.distance != null);
+          fill(box,
+            h('h3', {}, 'Minutes'),
+            lineChart(cpts.map((p) => ({ ...p, value: p.minutes })), { unit: 'min', onOpen, hint: 'Tap a point to see that session.' }),
+            withDistance.length > 0 && h('h3', {}, 'Distance'),
+            withDistance.length > 0 && lineChart(withDistance.map((p) => ({ ...p, value: p.distance })), { unit: distUnit(unit), onOpen, hint: 'Tap a point to see that session.' }),
+            ...sessionList(),
+          );
+          return;
+        }
         fill(box,
           h('h3', {}, 'Top weight'),
           lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' }),
           h('h3', {}, 'Best reps at top weight'),
           lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' }),
-          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
-          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+          ...sessionList(),
         );
       };
       show();
@@ -1841,18 +1986,44 @@ function viewExerciseForm(id) {
 
 // ---------------------------------------------------------------- settings
 
+/** Optional body weight (#38), only used to estimate calories. Saves when you leave the field. */
+function bodyWeightField() {
+  const input = h('input', {
+    class: 'num',
+    type: 'text',
+    inputmode: 'decimal',
+    'aria-label': `Body weight in ${S.user.unit}`,
+    placeholder: S.user.unit,
+    value: S.user.body_weight == null ? '' : fmtW(S.user.body_weight),
+    onchange: (e) => act(async () => {
+      const v = parseNum(e.target.value);
+      try {
+        const r = await api.post('save_profile', { body_weight: v == null ? null : v });
+        S.user = r.user;
+        toast(v == null ? 'Body weight removed.' : 'Body weight saved.');
+      } catch (err) {
+        e.target.value = S.user.body_weight == null ? '' : fmtW(S.user.body_weight);
+        throw err;
+      }
+    }),
+  });
+  return field(`Body weight (${S.user.unit})`, input, 'Optional. Only used to estimate the calories a workout burned.');
+}
+
+const EFFORTS = [['light', 'Light'], ['moderate', 'Moderate'], ['hard', 'Hard']];
+
 function viewSettings() {
   const saveProfile = (key, value) => act(async () => {
     const r = await api.post('save_profile', { [key]: value });
     S.user = r.user;
     S.draft = null;
-    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false };
+    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
   });
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });
   const pwBtn = h('button', { class: 'btn block', type: 'submit' }, 'Change password');
   return page('Settings',
-    section('Training', trainingFields(S.user, saveProfile), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
+    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Routines', routinesList()),
     section('Gyms',
       h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
@@ -2201,7 +2372,7 @@ function viewGymForm(id) {
   const gym = existing ? { ...existing, equipment: [...existing.equipment], increments: { ...existing.increments } } : { name: '', equipment: [], increments: {} };
   const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true, placeholder: 'For example: Home' });
   const defaults = S.vocab.increments[unit];
-  const incs = Object.entries(S.vocab.kinds).filter(([k]) => k !== 'band').map(([k, label]) =>
+  const incs = Object.entries(S.vocab.kinds).filter(([k]) => k !== 'band' && k !== 'cardio').map(([k, label]) =>
     field(`${label}${k === 'dumbbell' ? ' (each)' : k === 'bodyweight' ? ' (added weight)' : ''}`, h('input', { class: 'num', type: 'text', inputmode: 'decimal', value: fmtW(gym.increments[k] ?? defaults[k]), oninput: (e) => {
       const n = parseNum(e.target.value);
       if (n == null) delete gym.increments[k];

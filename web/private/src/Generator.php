@@ -331,6 +331,9 @@ final class Generator
      */
     public function block(array $user, array $gym, array $ex, bool $reduceSets = false, ?array $plan = null, bool $bodyweightOnly = false): array
     {
+        if (Catalog::isTimed($ex['kind'])) {
+            return $this->cardioBlock((int) $user['id'], $gym, $ex);
+        }
         $goal = self::GOALS[$user['goal']] ?? self::GOALS['muscle'];
         $exp = self::EXPERIENCE[$user['experience']] ?? self::EXPERIENCE['intermediate'];
         $compound = $ex['compound'];
@@ -381,6 +384,93 @@ final class Generator
         ];
     }
 
+    /** Default length of a warm-up with no history to go on. */
+    public const WARM_UP_SECONDS = 600;
+
+    /** The sets from the most recent finished session of a cardio exercise, at any gym. */
+    public function lastCardio(int $uid, int $exerciseId): ?array
+    {
+        $cands = $this->db->all(
+            "SELECT we.id, w.started_at, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+             WHERE we.user_id=? AND we.exercise_id=? AND w.status='completed'
+             ORDER BY w.started_at DESC LIMIT 5",
+            [$uid, $exerciseId]
+        );
+        foreach ($cands as $c) {
+            $sets = $this->db->all('SELECT duration_s, distance_m, level FROM workout_sets WHERE workout_exercise_id=? AND done=1 AND duration_s>0 ORDER BY pos', [$c['id']]);
+            if ($sets) {
+                return [
+                    'date' => to_iso($c['started_at']),
+                    'unit' => $c['unit'],
+                    'sets' => array_map(static fn($s) => [
+                        'duration_s' => (int) $s['duration_s'],
+                        'distance_m' => $s['distance_m'] === null ? null : (float) $s['distance_m'],
+                        'level' => $s['level'] === null ? null : (float) $s['level'],
+                    ], $sets),
+                ];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A cardio exercise as one timed set. The target is the time you did last
+     * time, to the minute, or WARM_UP_SECONDS the first time.
+     */
+    public function cardioBlock(int $uid, array $gym, array $ex): array
+    {
+        $last = $this->lastCardio($uid, $ex['id']);
+        $seconds = $last ? array_sum(array_column($last['sets'], 'duration_s')) : 0;
+        $target = $seconds > 0 ? max(60, (int) round($seconds / 60) * 60) : self::WARM_UP_SECONDS;
+        $min = intdiv($target, 60);
+        return [
+            'exercise_id' => $ex['id'],
+            'name' => $ex['name'],
+            'kind' => $ex['kind'],
+            'pattern' => $ex['pattern'],
+            'variant_key' => Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']),
+            'target_sets' => 1,
+            'rep_min' => 1,
+            'rep_max' => 1,
+            'rest_seconds' => 0,
+            'target_seconds' => $target,
+            'suggested_weight' => null,
+            'suggested_reps' => null,
+            'action' => 'warm_up',
+            'reason' => $last ? "$min minutes, the same as last time." : "$min minutes at an easy pace to get warm before lifting.",
+            'previous' => $last,
+            'minutes' => $min + 1,
+        ];
+    }
+
+    /**
+     * The warm-up for a generated workout: a cardio machine the gym has,
+     * preferring the one used most recently for a warm-up. Null when the gym
+     * has none.
+     */
+    private function warmUp(array $user, array $gym, array $by, int $lockedId, array $avoid): ?array
+    {
+        $cands = $by['cardio'] ?? [];
+        if (!$cands) {
+            return null;
+        }
+        $byId = array_column($cands, null, 'id');
+        if ($lockedId && isset($byId[$lockedId])) {
+            return $this->cardioBlock((int) $user['id'], $gym, $byId[$lockedId]) + ['locked' => true];
+        }
+        $last = [];
+        foreach ($this->db->all(
+            "SELECT we.exercise_id, MAX(w.started_at) AS at FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id JOIN exercises e ON e.id=we.exercise_id
+             WHERE we.user_id=? AND w.status='completed' AND e.pattern='cardio' GROUP BY we.exercise_id",
+            [$user['id']]
+        ) as $r) {
+            $last[(int) $r['exercise_id']] = $r['at'];
+        }
+        usort($cands, static fn($a, $b) => [isset($avoid[$a['id']]) ? 1 : 0, isset($last[$a['id']]) ? 0 : 1, $last[$b['id']] ?? '', $a['priority'], $a['name']]
+            <=> [isset($avoid[$b['id']]) ? 1 : 0, isset($last[$b['id']]) ? 0 : 1, $last[$a['id']] ?? '', $b['priority'], $b['name']]);
+        return $this->cardioBlock((int) $user['id'], $gym, $cands[0]) + ['locked' => false];
+    }
+
     /** Exercises the gym's equipment allows, grouped by movement pattern, best pick first. */
     private function available(int $uid, array $gym, bool $bodyweightOnly): array
     {
@@ -395,7 +485,8 @@ final class Generator
 
     /**
      * @param array $opts day_type, minutes, locked (slot key => exercise id),
-     *                    avoid (exercise ids to steer away from), bodyweight_only, now (unix time)
+     *                    avoid (exercise ids to steer away from), bodyweight_only,
+     *                    warm_up (start with a cardio warm-up), now (unix time)
      */
     public function generate(array $user, array $gym, array $opts = []): array
     {
@@ -442,6 +533,17 @@ final class Generator
         $blocks = [];
         $skipped = [];
         $total = 0.0;
+        $warm = null;
+        if (($opts['warm_up'] ?? false) === true && !$bodyweightOnly) {
+            // Regenerate is for different lifts, so it does not rotate the warm-up machine.
+            $warm = $this->warmUp($user, $gym, $by, isset($locked['warmup']) ? (int) $locked['warmup'] : 0, []);
+            if ($warm) {
+                $warm['slot'] = 'warmup';
+                $blocks[] = $warm;
+                $chosen[$warm['exercise_id']] = true;
+                $total += $warm['minutes'];
+            }
+        }
         foreach (array_merge($required, $optional) as $slot) {
             [$key, $patterns, $muscle, $isRequired] = $slot;
             $pick = null;
@@ -486,7 +588,7 @@ final class Generator
             }
             $tired = $stats[$muscle]['recovery'] < 50;
             $block = $this->block($user, $gym, $pick, $tired, bodyweightOnly: $bodyweightOnly);
-            if (count($blocks) >= 3 && $total + $block['minutes'] > $minutes) {
+            if (count($blocks) - ($warm ? 1 : 0) >= 3 && $total + $block['minutes'] > $minutes) {
                 if ($how === 'locked') {
                     // Locked exercises always stay, even if they run the session long.
                 } else {
@@ -525,6 +627,8 @@ final class Generator
             'gym_id' => $gym['id'],
             'gym_name' => $gym['name'],
             'bodyweight_only' => $bodyweightOnly,
+            'warm_up' => $warm !== null,
+            'warm_up_available' => !$bodyweightOnly && !empty($by['cardio']),
             'unit' => $user['unit'],
             'minutes' => $minutes,
             'est_minutes' => (int) round($total),

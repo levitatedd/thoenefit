@@ -189,14 +189,14 @@ final class Strava
         }
         $offset = $request['utc_offset'] ?? 0;
         try {
-            return $this->export($uid, $id, ($request['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0);
+            return $this->export($uid, $id, ($request['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0, ($request['include_calories'] ?? false) === true);
         } catch (\Throwable $e) {
             error_log('ThoeneFit: sending workout ' . $id . ' to Strava on finish failed: ' . $e->getMessage());
             return null;
         }
     }
 
-    public function export(int $uid, string $id, bool $summary, int $utcOffset = 0): array
+    public function export(int $uid, string $id, bool $summary, int $utcOffset = 0, bool $calories = false): array
     {
         $workout = (new Workouts($this->db))->get($uid, $id);
         if (!$workout || $workout['status'] !== 'completed') {
@@ -210,6 +210,17 @@ final class Strava
         $this->requireConfig();
         $activity = self::activity($workout);
         $details = $summary ? StravaStrength::details($workout) : ['sets' => [], 'description' => ''];
+        // Estimated calories (#38). Strava does not work out calories for weight
+        // training itself. Its strength file has a total_calories field, but that
+        // file needs at least one set; without one, the estimate goes in the description.
+        $kcal = null;
+        if ($calories) {
+            $kg = $this->db->val('SELECT body_weight_kg FROM users WHERE id=?', [$uid]);
+            $kcal = Calories::estimate($workout, $kg === null ? null : (float) $kg);
+        }
+        if ($kcal !== null && !$details['sets']) {
+            $details['description'] = trim($details['description'] . "\nEstimated calories: $kcal");
+        }
         if ($details['description'] !== '') {
             $activity['description'] = $details['description'];
         }
@@ -220,6 +231,7 @@ final class Strava
                 'start_time' => $activity['start_date_local'],
                 'utc_offset' => abs($utcOffset) <= 14 * 3600 && $utcOffset % 60 === 0 ? $utcOffset : 0,
                 'elapsed_time' => $activity['elapsed_time'],
+            ] + ($kcal !== null ? ['total_calories' => $kcal] : []) + [
                 'sets' => $details['sets'],
             ], JSON_THROW_ON_ERROR);
         }
