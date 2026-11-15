@@ -1268,26 +1268,57 @@ function addExerciseSheet(doc) {
   paint();
 }
 
+// "Send to Strava" on the Finish sheet (#87): the choice is remembered on this device.
+function stravaOnFinish() {
+  try {
+    return { send: false, summary: false, ...JSON.parse(localStorage.getItem('tf.stravaOnFinish') || '{}') };
+  } catch (e) {
+    return { send: false, summary: false };
+  }
+}
+
 function finishSheet(doc) {
   const done = doc.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0);
   const open = doc.exercises.reduce((n, e) => n + e.sets.filter((s) => !s.done).length, 0);
   let close = null;
+  // Shown only when this account is connected to Strava. The workout carries the
+  // request through the offline sync, and the server sends it once the finished
+  // workout reaches it, so finishing with no signal still works.
+  let strava = null;
+  if (done && S.strava?.connected) {
+    const pref = stravaOnFinish();
+    const send = h('input', { type: 'checkbox', checked: pref.send });
+    const summary = h('input', { type: 'checkbox', checked: pref.summary });
+    const details = h('label', { class: 'check strava-details', hidden: !pref.send }, summary, 'Include exercises, sets, reps, and weights');
+    send.onchange = () => (details.hidden = !send.checked);
+    strava = { send, summary, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details) };
+  }
   const body = done
     ? h('div', { class: 'stack' },
         h('p', {}, `${done} set${done === 1 ? '' : 's'} logged over ${fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)}.`),
         open > 0 && h('p', { class: 'muted' }, `${open} set${open === 1 ? ' was' : 's were'} not marked done and will be left out.`),
+        strava?.el,
         h('button', { class: 'btn primary block', type: 'button', onclick: () => {
+          const toStrava = !!strava?.send.checked;
+          if (strava) {
+            try {
+              localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: toStrava, summary: strava.summary.checked }));
+            } catch (e) {
+              // Private mode: the choice just isn't remembered.
+            }
+          }
           close();
           sync.edit(doc.id, (d) => {
             for (const e of d.exercises) e.sets = e.sets.filter((s) => s.done);
             d.exercises = d.exercises.filter((e) => e.sets.length);
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
+            if (toStrava) d.strava_send = { include_summary: strava.summary.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
           }, 0);
           stopRest();
           S.draft = null;
           S.draftOpts.day_type = null;
-          toast('Workout saved.');
+          toast(toStrava ? 'Workout saved. It goes to Strava once it syncs.' : 'Workout saved.');
           go('today');
         } }, 'Finish and save'))
     : h('div', { class: 'stack' },

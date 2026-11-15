@@ -268,8 +268,47 @@ const serverSets = boot.active.exercises.flatMap((e) => e.sets);
 check('the server has each set exactly once', new Set(serverSets.map((s) => s.id)).size === serverSets.length && serverSets.filter((s) => s.done).length === setRows + l2rows + 1, `${serverSets.length} sets`);
 
 console.log('Finish, history, next recommendation');
+// #87: "Send to Strava" on the Finish sheet. Without a Strava connection it isn't offered.
 await page.click('button:has-text("Finish workout")');
+await page.waitForSelector('.sheet button:has-text("Finish and save")');
+check('without a Strava connection the Finish sheet has no Strava option', (await page.locator('.sheet label:has-text("Send to Strava")').count()) === 0);
+await page.click('.sheet button:has-text("Close")');
+// The test server has no Strava keys, so act as a connected account.
+const connected = async (route) => {
+  const response = await route.fetch();
+  const json = await response.json();
+  if (json.strava) json.strava = { enabled: true, connected: true };
+  await route.fulfill({ response, json });
+};
+await context.route('**/api.php?a=bootstrap*', connected);
+await page.reload();
+await page.waitForSelector('.lift');
+let finishSave = null;
+const watchSave = (req) => {
+  if (!req.url().includes('a=save_workout')) return;
+  const w = req.postDataJSON()?.workout;
+  if (w?.status === 'completed') finishSave = w;
+};
+page.on('request', watchSave);
+await page.click('button:has-text("Finish workout")');
+await page.waitForSelector('.sheet label:has-text("Send to Strava")');
+const stravaBox = page.locator('.sheet label:has-text("Send to Strava") input');
+const detailsRow = page.locator('.sheet label:has-text("Include exercises")');
+check('connected to Strava, Finish offers Send to Strava, unticked the first time, details hidden until ticked',
+  !(await stravaBox.isChecked()) && !(await detailsRow.isVisible()));
+await page.click('.sheet label:has-text("Send to Strava")');
+check('ticking Send to Strava shows the option to include exercises, sets, reps and weights', await detailsRow.isVisible());
+await detailsRow.click();
+await shot('07b-finish-send-to-strava');
 await page.click('.sheet button:has-text("Finish and save")');
+await page.waitForSelector('.toast.show');
+check('the message says it goes to Strava once it syncs', /goes to Strava once it syncs/.test(await page.textContent('.toast')));
+for (let i = 0; i < 40 && !finishSave; i++) await page.waitForTimeout(250);
+page.off('request', watchSave);
+await context.unroute('**/api.php?a=bootstrap*', connected);
+check('the finished workout carries the Strava request to the server',
+  finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
+check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
