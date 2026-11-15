@@ -131,6 +131,25 @@ for ($i = 0; $i < 8; $i++) {
 }
 check('repeated failures lock sign-in for a while', throws(fn() => $auth->login('sam', 'another long password'), 429));
 
+echo "Changing a password\n";
+// Sam's failed sign-ins above also count against this machine's address; clear those so Mike can sign in.
+$db->run("DELETE FROM login_attempts WHERE ident='ip:cli'");
+$mikeSessions = fn() => (int) $db->val('SELECT COUNT(*) FROM auth_sessions WHERE user_id=?', [$uid]);
+$auth->login('mike', 'correct horse battery');   // a second device
+$auth->login('mike', 'correct horse battery');   // a third
+$db->insert('auth_sessions', ['token_hash' => str_repeat('a', 64), 'user_id' => $uid2, 'csrf' => 'samcsrf', 'created_at' => \TF\now_utc(), 'last_seen' => \TF\now_utc(), 'expires_at' => \TF\now_utc(time() + 86400)]);
+$before = $mikeSessions();
+$oldCsrf = $auth->session['csrf'];
+check('a too-short new password is refused and signs nobody out', throws(fn() => $auth->changePassword($uid, 'short'), 422) && $mikeSessions() === $before && $before === 3);
+$auth->changePassword($uid, 'a brand new password');
+$left = $db->all('SELECT token_hash, csrf FROM auth_sessions WHERE user_id=?', [$uid]);
+check('changing the password signs out every other session for that account', count($left) === 1);
+check('the device that changed it keeps a fresh session and security token', $left[0]['token_hash'] === $auth->session['token_hash'] && $left[0]['csrf'] === $auth->session['csrf'] && $auth->session['csrf'] !== $oldCsrf);
+check("other people's sessions are untouched", (int) $db->val('SELECT COUNT(*) FROM auth_sessions WHERE user_id=?', [$uid2]) === 1);
+check('the old password no longer works and the new one does', throws(fn() => $auth->login('mike', 'correct horse battery'), 401) && (int) $auth->login('mike', 'a brand new password')['id'] === $uid);
+$auth->setPassword($uid, 'correct horse battery');
+$db->run('DELETE FROM auth_sessions WHERE user_id=?', [$uid2]);
+
 echo "Account requests\n";
 $reqDb = $freshDb('requests');
 Migrator::ensure($reqDb);

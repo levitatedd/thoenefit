@@ -1685,10 +1685,12 @@ function viewSettings() {
       h('form', { class: 'stack', onsubmit: async (e) => {
         e.preventDefault();
         await act(async () => {
-          await api.post('change_password', { current: current.value, next: next.value });
+          const result = await api.post('change_password', { current: current.value, next: next.value });
+          // The server signed out every other device and gave this one a new session and token.
+          if (result.csrf) api.csrf = result.csrf;
           current.value = '';
           next.value = '';
-          toast('Password changed.');
+          toast('Password changed. Other devices are signed out.');
         }, pwBtn);
       } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn),
       h('button', { class: 'btn block', type: 'button', onclick: async (e) => {

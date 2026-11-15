@@ -226,21 +226,38 @@ final class Auth
         if (password_needs_rehash($user['password_hash'], PASSWORD_DEFAULT)) {
             $this->db->run('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $user['id']]);
         }
+        $this->startSession((int) $user['id']);
+        return $user;
+    }
+
+    /**
+     * Sets a new password and signs the account out everywhere else. The
+     * device making the change gets a fresh session and security token, so
+     * it carries on without signing in again.
+     */
+    public function changePassword(int $userId, string $password): void
+    {
+        $this->setPassword($userId, $password);
+        $this->logoutEverywhere($userId);
+        $this->startSession($userId);
+    }
+
+    private function startSession(int $userId): void
+    {
         $token = bin2hex(random_bytes(32));
         $csrf = bin2hex(random_bytes(16));
         $expires = time() + $this->days * 86400;
         $this->db->run('DELETE FROM auth_sessions WHERE expires_at<?', [now_utc()]);
         $this->db->insert('auth_sessions', [
             'token_hash' => hash('sha256', $token),
-            'user_id' => (int) $user['id'],
+            'user_id' => $userId,
             'csrf' => $csrf,
             'created_at' => now_utc(),
             'last_seen' => now_utc(),
             'expires_at' => now_utc($expires),
         ]);
         $this->setCookie($token, $expires);
-        $this->session = ['csrf' => $csrf, 'user_id' => (int) $user['id']];
-        return $user;
+        $this->session = ['csrf' => $csrf, 'user_id' => $userId, 'token_hash' => hash('sha256', $token)];
     }
 
     /** Returns the signed-in user row, or null. */
