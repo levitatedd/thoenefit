@@ -262,6 +262,18 @@ final class Api
         ];
     }
 
+    /** Everyone else with a working account: id and display name only. */
+    private function people(int $uid): array
+    {
+        $out = [];
+        foreach ($this->auth->listUsers() as $u) {
+            if ($u['id'] !== $uid) {
+                $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
+            }
+        }
+        return $out;
+    }
+
     private function gyms(int $uid): array
     {
         return array_map([Generator::class, 'gymShape'], $this->db->all('SELECT * FROM gyms WHERE user_id=? ORDER BY id', [$uid]));
@@ -274,18 +286,6 @@ final class Api
             throw new HttpError(404, 'Gym profile not found. Add one in Settings.');
         }
         return Generator::gymShape($row);
-    }
-
-    /** Everyone else with a working account: id and display name only. */
-    private function people(int $uid): array
-    {
-        $out = [];
-        foreach ($this->auth->listUsers() as $u) {
-            if ($u['id'] !== $uid) {
-                $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
-            }
-        }
-        return $out;
     }
 
     private function bootstrap(array $user): array
