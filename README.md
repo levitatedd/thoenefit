@@ -12,11 +12,17 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 
 ## Screenshots
 
-Captured with sample workout data.
+The planner, set logging, and saved workout screenshots use demo data.
 
 | Workout planner | Set logging | Workout history |
 | --- | --- | --- |
 | ![Generated full-body workout](docs/screenshots/today.jpg) | ![Logging sets with the rest timer running](docs/screenshots/logging.jpg) | ![Saved workout with editable sets](docs/screenshots/history.jpg) |
+
+### Exercise history on mobile
+
+The Leg Extension history screen shows how top weight has changed across logged workouts.
+
+<img src="docs/screenshots/exercise-history.jpg" alt="ThoeneFit Leg Extension history showing a top-weight trend chart" width="320">
 
 ## Run it on your computer
 
