@@ -78,6 +78,10 @@ echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
 check('migrations apply on an empty database', $applied === array_keys(Migrator::files()));
 check('running them again changes nothing', Migrator::ensure($db) === []);
+// Two branches can each add a migration at once. The runner keys migrations by number,
+// so two files with one number would hide each other and one would never run.
+$migrationNumbers = array_map(static fn($f) => (int) basename($f), glob(dirname(__DIR__) . '/web/private/migrations/*.php'));
+check('no two migration files share a number', count($migrationNumbers) === count(array_unique($migrationNumbers)) && count($migrationNumbers) === count(Migrator::files()), implode(',', $migrationNumbers));
 $db->run('DELETE FROM schema_migrations WHERE version=2');
 check('a migration that was skipped (merged out of order) is still applied', Migrator::ensure($db) === [2] && Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
@@ -849,6 +853,38 @@ check('sending it again by hand afterwards works', $strava->export($uid, $reject
 
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
+
+echo "Saved routines\n";
+$rt = new TF\Routines($db);
+$rtPlan = ['day_type' => 'push', 'exercises' => [
+    ['exercise_id' => $bench, 'target_sets' => 4, 'rep_min' => 5, 'rep_max' => 8, 'rest_seconds' => 150],
+    ['exercise_id' => $bySlug['cable-fly'], 'target_sets' => 3, 'rep_min' => 10, 'rep_max' => 15, 'rest_seconds' => 60],
+    ['exercise_id' => 987654, 'target_sets' => 3, 'rep_min' => 8, 'rep_max' => 12, 'rest_seconds' => 90],
+]];
+check('a routine needs a name and at least one usable exercise', throws(fn() => $rt->save($uid, '  ', $rtPlan), 422) && throws(fn() => $rt->save($uid, 'Empty', ['exercises' => [['exercise_id' => 987654]]]), 422));
+$first = $rt->save($uid, ' Monday   Push ', $rtPlan);
+$mine = $rt->all($uid);
+check('saving keeps the name tidy and drops exercises that do not exist', !$first['replaced'] && count($mine) === 1 && $mine[0]['name'] === 'Monday Push' && $mine[0]['exercises'] === ['Barbell Bench Press', 'Cable Fly'] && $mine[0]['sets'] === 7);
+$again = $rt->save($uid, 'monday push', ['day_type' => 'push', 'exercises' => [$rtPlan['exercises'][0]]]);
+check('saving under a name already used replaces that routine instead of adding another', $again['replaced'] && $again['id'] === $first['id'] && count($rt->all($uid)) === 1 && $rt->all($uid)[0]['sets'] === 4);
+$rt->save($uid, 'Monday Push', $rtPlan);
+check('routines are private to each account', $rt->all($uid2) === [] && throws(fn() => $rt->delete($uid2, $first['id']), 404) && throws(fn() => $rt->draft($samRow ?? $db->one('SELECT * FROM users WHERE id=?', [$uid2]), $big, $first['id'], $gen), 404));
+$rtDraft = $rt->draft($user, $big, $first['id'], $gen);
+$rx = $rtDraft['exercises'];
+check('starting a routine gives its exercises, order, sets and rep ranges', $rtDraft['routine_name'] === 'Monday Push' && array_column($rx, 'name') === ['Barbell Bench Press', 'Cable Fly'] && array_column($rx, 'target_sets') === [4, 3] && array_column($rx, 'rep_min') === [5, 10] && array_column($rx, 'rest_seconds') === [150, 60]);
+check('with the last logged weight and reps for reference, and a weight suggested from history', $rx[0]['previous'] !== null && count($rx[0]['previous']['sets']) > 0 && $rx[0]['suggested_weight'] !== null && strpos($rx[0]['reason'], 'From your routine Monday Push') === 0);
+$rtHome = $rt->draft($user, $home, $first['id'], $gen);
+check('an exercise the gym may not have equipment for is kept, with a note', count($rtHome['exercises']) === 2 && strpos($rtHome['exercises'][1]['reason'], 'may not have the equipment') !== false);
+$second = $rt->save($uid, 'Leg Day', ['day_type' => 'legs', 'exercises' => [['exercise_id' => $bySlug['back-squat'], 'target_sets' => 5, 'rep_min' => 3, 'rep_max' => 5, 'rest_seconds' => 180]]]);
+check('renaming works, but not to a name another routine already has', throws(fn() => $rt->rename($uid, $second['id'], 'MONDAY PUSH'), 409) && (function () use ($rt, $uid, $second) { $rt->rename($uid, $second['id'], 'Squat Day'); return in_array('Squat Day', array_column($rt->all($uid), 'name'), true); })());
+$db->run('UPDATE routines SET updated_at=? WHERE id=?', [TF\now_utc(time() - 3600), $second['id']]); // saved an hour ago
+$db->run('UPDATE routines SET updated_at=? WHERE id=?', [TF\now_utc(time() - 7200), $first['id']]);
+check('otherwise the most recently saved is listed first', $rt->all($uid)[0]['name'] === 'Squat Day');
+$rt->markUsed($uid, $first['id']);
+check('the routine used most recently is listed first', $rt->all($uid)[0]['name'] === 'Monday Push');
+$rt->delete($uid, $second['id']);
+check('a routine can be deleted', array_column($rt->all($uid), 'name') === ['Monday Push'] && throws(fn() => $rt->draft($user, $big, $second['id'], $gen), 404));
+$rt->delete($uid, $first['id']);
 
 echo "Idle time in workout durations\n";
 $span = fn(...$a) => TF\Workouts::activeSpan(...$a);

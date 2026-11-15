@@ -742,6 +742,72 @@ if (!process.env.TF_URL) {
 await page.click('a:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 
+console.log('Saved routines');
+{
+  // Save a past workout (it includes the lift with history) as a routine.
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  await page.locator('.log-row', { hasText: liftName }).first().click();
+  await page.waitForSelector('.lift');
+  const pastNames = await page.$$eval('.lift h2', (els) => els.map((e) => e.textContent));
+  await page.click('button:has-text("Save as routine")');
+  await page.waitForSelector('input[name=routine_name]');
+  check('saving a past workout as a routine suggests a name', (await page.inputValue('input[name=routine_name]')).length > 0 && (await page.textContent('.sheet button[type=submit]')) === 'Save routine');
+  await page.fill('input[name=routine_name]', 'Monday Push');
+  await page.click('.sheet button[type=submit]');
+  await waitForToast(page, /Saved Monday Push/);
+  check('the routine is saved', true);
+
+  // Start a fresh session from it on Today.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const options = await page.$$eval('select[aria-label="Workout type"] optgroup[label="Your routines"] option', (els) => els.map((e) => e.textContent));
+  check('Today lists the routine under Workout', options.includes('Monday Push'), options.join(', '));
+  await page.selectOption('select[aria-label="Workout type"]', { label: 'Monday Push' });
+  await page.waitForSelector('.routine-note');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const routineRows = await page.$$eval('.plan-row', (rows) => rows.map((r) => ({ name: r.querySelector('h3').textContent, last: r.querySelector('.last').textContent, target: r.querySelector('.target').textContent })));
+  check('picking it loads the same exercises in the same order', routineRows.map((r) => r.name).join() === pastNames.join(), routineRows.map((r) => r.name).join() + ' <> ' + pastNames.join());
+  const liftRow = routineRows.find((r) => r.name === liftName);
+  check(`each exercise shows the last logged weight and reps (${liftRow && liftRow.last})`, !!liftRow && /^Last: \d+ lb × /.test(liftRow.last) && / at \d+ lb/.test(liftRow.target));
+  check('a routine plan has no Regenerate, Lock or Swap', (await page.locator('button:has-text("Regenerate")').count()) === 0 && (await page.locator('.plan-row button').count()) === 0);
+  check('no sideways scrolling with a routine on Today', (await overflow()) <= 0);
+  await shot('23-routine-on-today');
+  await page.click('button:has-text("Save changes to this routine")');
+  await page.waitForSelector('input[name=routine_name]');
+  check('saving again under the same name offers to replace it', (await page.inputValue('input[name=routine_name]')) === 'Monday Push' && (await page.textContent('.sheet button[type=submit]')) === 'Replace routine');
+  await page.click('.sheet button:has-text("Close")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  check('starting it gives a fresh session with those exercises', (await page.$$eval('.lift h2', (els) => els.map((e) => e.textContent))).join() === pastNames.join() && (await page.locator('.set.done').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+  check('afterwards Today goes back to a suggested workout', (await page.locator('.routine-note').count()) === 0);
+
+  // Rename and delete in Settings.
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('[data-list=routines] .routine-row');
+  await page.locator('.routine-row', { hasText: 'Monday Push' }).locator('button:has-text("Rename")').click();
+  await page.fill('.sheet input[name=routine_name]', 'Push A');
+  await page.click('.sheet button:has-text("Rename")');
+  await page.waitForSelector('.routine-row[data-routine="Push A"]');
+  check('a routine can be renamed in Settings', (await page.locator('.routine-row').count()) === 1);
+  await page.locator('[data-list=routines]').scrollIntoViewIfNeeded();
+  await shot('24-settings-routines');
+  await page.locator('.routine-row', { hasText: 'Push A' }).locator('button:has-text("Delete")').click();
+  await page.click('.sheet button:has-text("Delete routine")');
+  await page.waitForFunction(() => !document.querySelector('.routine-row'));
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  check('and deleted, after which Today no longer lists it', (await page.locator('select[aria-label="Workout type"] optgroup[label="Your routines"]').count()) === 0);
+  // Leave things as the next block expects: on Settings, with no toast showing.
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Add to your Home Screen');
+  await page.waitForFunction(() => !document.querySelector('.toast.show'), null, { timeout: 8000 });
+}
+
 console.log('Staying up to date');
 if (!process.env.TF_URL) {
   const { readFileSync, writeFileSync } = await import('node:fs');

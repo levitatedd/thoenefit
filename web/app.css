@@ -810,6 +810,26 @@ input.num::placeholder {
   margin-top: 8px;
 }
 
+.routine-note {
+  border-left-color: var(--mint);
+}
+
+.routine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.routine-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .share-card {
   border: 2px solid var(--green);
 }
