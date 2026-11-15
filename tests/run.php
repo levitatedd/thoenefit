@@ -74,8 +74,10 @@ if (getenv('TF_TEST_DB') === 'mysql') {
 
 echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
-check('migrations apply on an empty database', $applied === [1, 2, 3]);
+check('migrations apply on an empty database', $applied === array_keys(Migrator::files()));
 check('running them again changes nothing', Migrator::ensure($db) === []);
+$db->run('DELETE FROM schema_migrations WHERE version=2');
+check('a migration that was skipped (merged out of order) is still applied', Migrator::ensure($db) === [2] && Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
 check('catalog seeded (' . $n . ' exercises)', $n === count(Catalog::exercises()) && $n >= 80);
 Catalog::sync($db);
@@ -126,6 +128,54 @@ for ($i = 0; $i < 8; $i++) {
     }
 }
 check('repeated failures lock sign-in for a while', throws(fn() => $auth->login('sam', 'another long password'), 429));
+
+echo "Account requests\n";
+$reqDb = $freshDb('requests');
+Migrator::ensure($reqDb);
+$ra = new Auth($reqDb, []);
+$boss = $ra->createUser('boss', 'boss-password-123');
+check('requests are closed until the admin sets a token', $ra->inviteStatus()['set'] === false && throws(fn() => $ra->requestAccount('anything-at-all', 'eve', 'eve-password-123'), 403));
+check('a token that is too short is refused', throws(fn() => $ra->setInviteToken('short'), 422));
+$ra->setInviteToken('gym-crew-2026');
+$stored = $reqDb->val("SELECT value FROM app_settings WHERE name='invite_token_hash'");
+check('the invite token is stored hashed, never as typed', $ra->inviteStatus()['set'] === true && strpos($stored, 'gym-crew') === false && password_verify('gym-crew-2026', $stored));
+check('a wrong token is refused before anything is created', throws(fn() => $ra->requestAccount('not-the-token', 'eve', 'eve-password-123'), 403) && (int) $reqDb->val('SELECT COUNT(*) FROM users') === 1);
+$rid = $ra->requestAccount(' gym-crew-2026 ', 'Dana', 'dana-own-password', 'Dana R');
+$row = $reqDb->one('SELECT * FROM users WHERE id=?', [$rid]);
+check('the right token creates a pending request as a regular user', $row['status'] === 'pending' && $row['role'] === 'user' && $row['username'] === 'dana');
+check('the applicant\'s password is their own, separate from the invite token', password_verify('dana-own-password', $row['password_hash']) && !password_verify('gym-crew-2026', $row['password_hash']));
+check('the invite token does not work as a sign-in password', throws(fn() => $ra->login('dana', 'gym-crew-2026'), 401));
+check('a pending applicant cannot sign in yet', throws(fn() => $ra->login('dana', 'dana-own-password'), 403) && (int) $reqDb->val('SELECT COUNT(*) FROM auth_sessions') === 0);
+check('a wrong password for a pending account says nothing about the request', throws(fn() => $ra->login('dana', 'wrong-password-zz'), 401));
+check('pending requests are listed apart from accounts', count($ra->pendingRequests()) === 1 && $ra->pendingRequests()[0]['username'] === 'dana' && count($ra->listUsers()) === 1 && !isset($ra->pendingRequests()[0]['password_hash']));
+check('a requested username cannot be taken twice', throws(fn() => $ra->requestAccount('gym-crew-2026', 'dana', 'another-password-1'), 409) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'boss', 'another-password-1'), 409));
+check('the usual username and password rules apply to requests', throws(fn() => $ra->requestAccount('gym-crew-2026', 'x', 'long-enough-password'), 422) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'okname', 'short'), 422));
+$ra->approveRequest($rid);
+$in = $ra->login('dana', 'dana-own-password');
+check('after approval the applicant signs in with the password they chose, as a regular user', (int) $in['id'] === $rid && $in['role'] === 'user' && $in['status'] === 'active' && count($ra->listUsers()) === 2 && count($ra->pendingRequests()) === 0);
+check('approving twice, or approving an existing account, does nothing', throws(fn() => $ra->approveRequest($rid), 404) && throws(fn() => $ra->approveRequest($boss), 404));
+$rid2 = $ra->requestAccount('gym-crew-2026', 'mallory', 'mallory-password-1');
+check('declining cannot remove a real account', throws(fn() => $ra->declineRequest($rid), 404) && throws(fn() => $ra->declineRequest($boss), 404) && (int) $reqDb->val('SELECT COUNT(*) FROM users') === 3);
+$ra->declineRequest($rid2);
+check('a declined request is deleted and cannot sign in', (int) $reqDb->val("SELECT COUNT(*) FROM users WHERE username='mallory'") === 0 && throws(fn() => $ra->login('mallory', 'mallory-password-1'), 401));
+$ra->setInviteToken('brand-new-token');
+check('changing the token stops the old one working', throws(fn() => $ra->requestAccount('gym-crew-2026', 'late', 'late-password-123'), 403));
+$rid3 = $ra->requestAccount('brand-new-token', 'late', 'late-password-123');
+$ra->setInviteToken('');
+check('clearing the token closes requests but keeps the ones already waiting', $ra->inviteStatus()['set'] === false && throws(fn() => $ra->requestAccount('brand-new-token', 'later', 'later-password-12'), 403) && count($ra->pendingRequests()) === 1);
+$ra->setInviteToken('third-token-here');
+$reqDb->run("DELETE FROM login_attempts WHERE ident LIKE 'inv:%'");
+for ($i = 0; $i < 5; $i++) {
+    try {
+        $ra->requestAccount('guess-' . $i . '-wrong', 'guesser', 'guesser-password');
+    } catch (HttpError $e) {
+    }
+}
+check('repeated wrong tokens are locked out for a while, even with the right one', throws(fn() => $ra->requestAccount('third-token-here', 'guesser', 'guesser-password'), 429));
+unset($ra, $reqDb);
+@unlink("$file-requests");
+@unlink("$file-requests-wal");
+@unlink("$file-requests-shm");
 
 echo "Generator\n";
 $mkGym = function (int $uid, string $name, array $equipment) use ($db): array {
@@ -346,7 +396,7 @@ check('an older database has no roles yet', !(new Migrator($old))->hasColumn('us
 foreach ([['later', '2026-03-01 10:00:00'], ['earliest', '2025-01-05 08:00:00'], ['middle', '2025-06-01 09:00:00']] as [$name, $when]) {
     $old->insert('users', ['username' => $name, 'password_hash' => 'x', 'display_name' => $name, 'created_at' => $when]);
 }
-check('the migration applies', Migrator::ensure($old) === [3]);
+check('the migrations apply', Migrator::ensure($old) === array_values(array_filter(array_keys(Migrator::files()), static fn($v) => $v > 2)));
 $roles = [];
 foreach ($old->all('SELECT username, role FROM users') as $r) {
     $roles[$r['username']] = $r['role'];
@@ -354,6 +404,7 @@ foreach ($old->all('SELECT username, role FROM users') as $r) {
 check('the earliest-created account becomes the admin, the rest stay regular users', $roles === ['later' => 'user', 'earliest' => 'admin', 'middle' => 'user'], json_encode($roles));
 $authOld = new Auth($old, []);
 $newId = $authOld->createUser('newcomer', 'a long enough password');
+check('accounts that existed before requests were added stay active and can sign in', (int) $old->val("SELECT COUNT(*) FROM users WHERE status<>'active'") === 0 && (int) $old->val('SELECT COUNT(*) FROM users') === 4);
 check('accounts added afterwards are regular users', $old->val('SELECT role FROM users WHERE id=?', [$newId]) === 'user' && (int) $old->val("SELECT COUNT(*) FROM users WHERE role='admin'") === 1);
 $fn = require dirname(__DIR__) . '/web/private/migrations/003_user_roles.php';
 $fn($old, new Migrator($old));

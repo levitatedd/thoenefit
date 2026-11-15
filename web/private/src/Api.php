@@ -66,6 +66,13 @@ final class Api
             return;
         }
 
+        if ($action === 'request_account' && $method === 'POST') {
+            // Open to people who are not signed in, but only with the admin's invite token.
+            $this->auth->requestAccount((string) ($in['token'] ?? ''), (string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
+            self::json(['ok' => true]);
+            return;
+        }
+
         $user = $this->auth->user();
         if ($action === 'bootstrap' && $method === 'GET') {
             self::json($user ? $this->bootstrap($user) : ['user' => null, 'version' => APP_VERSION]);
@@ -89,7 +96,7 @@ final class Api
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
             'users' => function () use ($user) {
                 Auth::requireAdmin($user);
-                return ['users' => $this->auth->listUsers()];
+                return $this->accounts();
             },
         ];
         if ($method === 'GET' && $action === 'export') {
@@ -117,7 +124,22 @@ final class Api
             case 'create_user':
                 Auth::requireAdmin($user);
                 $this->auth->createUser((string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
-                self::json(['users' => $this->auth->listUsers()]);
+                self::json($this->accounts());
+                return;
+            case 'set_invite_token':
+                Auth::requireAdmin($user);
+                $this->auth->setInviteToken((string) ($in['token'] ?? ''));
+                self::json($this->accounts());
+                return;
+            case 'approve_request':
+                Auth::requireAdmin($user);
+                $this->auth->approveRequest((int) ($in['id'] ?? 0));
+                self::json($this->accounts());
+                return;
+            case 'decline_request':
+                Auth::requireAdmin($user);
+                $this->auth->declineRequest((int) ($in['id'] ?? 0));
+                self::json($this->accounts());
                 return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
@@ -229,6 +251,16 @@ final class Api
         return Generator::gymShape($row);
     }
 
+    /** Everything the Manage Users page shows. Admin only; callers check that first. */
+    private function accounts(): array
+    {
+        return [
+            'users' => $this->auth->listUsers(),
+            'requests' => $this->auth->pendingRequests(),
+            'invite' => $this->auth->inviteStatus(),
+        ];
+    }
+
     private function bootstrap(array $user): array
     {
         $uid = (int) $user['id'];
@@ -243,6 +275,7 @@ final class Api
             'version' => APP_VERSION,
             'csrf' => $this->auth->session['csrf'],
             'user' => self::userShape($user),
+            'pending_requests' => Auth::isAdmin($user) ? count($this->auth->pendingRequests()) : 0,
             'gyms' => $this->gyms($uid),
             'exercises' => Catalog::forUser($this->db, $uid, true),
             'active' => $active,
