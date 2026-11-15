@@ -288,6 +288,48 @@ final class Workouts
         return $out;
     }
 
+    /** Eight Monday-start weeks in the user's timezone, grouped by workout start. */
+    public function weeklyTrends(int $uid, string $unit, string $timezone, ?int $now = null): array
+    {
+        try {
+            $zone = new \DateTimeZone($timezone);
+        } catch (\Exception $e) {
+            $zone = new \DateTimeZone('UTC');
+        }
+        $now ??= time();
+        $date = (new \DateTimeImmutable('@' . $now))->setTimezone($zone);
+        $first = $date->modify('monday this week')->setTime(0, 0)->modify('-7 weeks');
+        $weeks = [];
+        for ($i = 0; $i < 8; $i++) {
+            $start = $first->modify("+$i weeks")->format('Y-m-d');
+            $weeks[$start] = ['start' => $start, 'workouts' => 0, 'volume' => 0.0, 'seconds' => null];
+        }
+        $workouts = $this->db->all(
+            "SELECT w.id, w.started_at, w.completed_at, w.unit, SUM(s.weight * s.reps) AS volume
+             FROM workouts w
+             LEFT JOIN workout_sets s ON s.workout_id=w.id AND s.done=1 AND s.warmup=0
+             WHERE w.user_id=? AND w.status='completed' AND w.started_at BETWEEN ? AND ?
+             GROUP BY w.id, w.started_at, w.completed_at, w.unit",
+            [$uid, now_utc($first->getTimestamp()), now_utc($now)]
+        );
+        foreach ($workouts as $w) {
+            $start = (new \DateTimeImmutable(to_iso($w['started_at'])))->setTimezone($zone);
+            $key = $start->modify('monday this week')->format('Y-m-d');
+            $volume = (float) $w['volume'];
+            if ($w['unit'] !== $unit) {
+                $volume = $w['unit'] === 'kg' ? $volume * 2.20462262 : $volume / 2.20462262;
+            }
+            $weeks[$key]['workouts']++;
+            $weeks[$key]['volume'] += $volume;
+            $end = $w['completed_at'] ? strtotime(to_iso($w['completed_at'])) : false;
+            $elapsed = $end !== false ? $end - $start->getTimestamp() : 0;
+            if ($elapsed > 0) {
+                $weeks[$key]['seconds'] = ($weeks[$key]['seconds'] ?? 0) + $elapsed;
+            }
+        }
+        return array_values($weeks);
+    }
+
     /** Every completed session of one exercise, oldest first, for the trend chart. */
     public function exerciseHistory(int $uid, int $exerciseId): array
     {
