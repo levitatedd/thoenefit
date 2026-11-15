@@ -12,6 +12,7 @@ final class Api
     private Workouts $workouts;
     private Generator $gen;
     private Shares $shares;
+    private Strava $strava;
 
     public static function handle(): void
     {
@@ -38,6 +39,7 @@ final class Api
         $this->workouts = new Workouts($app->db);
         $this->gen = new Generator($app->db);
         $this->shares = new Shares($app->db);
+        $this->strava = new Strava($app->db, $app->config);
     }
 
     private static function json($data, int $status = 200): void
@@ -76,6 +78,21 @@ final class Api
         }
 
         $user = $this->auth->user();
+        if ($action === 'strava_callback' && $method === 'GET') {
+            $result = 'strava-error';
+            if ($user) {
+                try {
+                    $this->strava->connect((int) $user['id'], $this->auth->session['token_hash'], $_GET);
+                    $result = 'strava-connected';
+                } catch (HttpError $e) {
+                    if ($e->status === 403) {
+                        $result = 'strava-denied';
+                    }
+                }
+            }
+            header('Location: ./#/settings/' . $result, true, 303);
+            return;
+        }
         if ($action === 'bootstrap' && $method === 'GET') {
             self::json($user ? $this->bootstrap($user) : ['user' => null, 'version' => APP_VERSION]);
             return;
@@ -92,7 +109,11 @@ final class Api
                 if (!$w) {
                     throw new HttpError(404, 'Workout not found.');
                 }
-                return ['workout' => $w];
+                return [
+                    'workout' => $w,
+                    'strava' => $this->strava->connection($uid),
+                    'strava_export' => $this->strava->exportStatus($uid, $w['id']),
+                ];
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
@@ -125,6 +146,15 @@ final class Api
         }
         $this->auth->checkCsrf();
         switch ($action) {
+            case 'strava_authorize':
+                self::json(['url' => $this->strava->authorize($this->auth->session['token_hash'])]);
+                return;
+            case 'strava_disconnect':
+                self::json(['strava' => $this->strava->disconnect($uid)]);
+                return;
+            case 'strava_export':
+                self::json($this->strava->export($uid, (string) ($in['id'] ?? ''), ($in['include_summary'] ?? false) === true));
+                return;
             case 'logout':
                 $this->auth->logout();
                 self::json(['ok' => true]);
@@ -343,6 +373,7 @@ final class Api
             'exercises' => Catalog::forUser($this->db, $uid, true),
             'active' => $active,
             'shares' => $this->shares->incoming($uid),
+            'strava' => $this->strava->connection($uid),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
                 'presets' => Catalog::presets(),

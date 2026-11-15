@@ -22,4 +22,11 @@ return [
 
     // How long a sign-in lasts without use, in days.
     'session_days' => 60,
+
+    // Optional. Set your web host as the Authorization Callback Domain in Strava.
+    'strava' => [
+        'client_id' => '',
+        'client_secret' => '',
+        'callback_url' => 'https://fit.example.com/api.php?a=strava_callback',
+    ],
 ];
