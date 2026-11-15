@@ -74,8 +74,10 @@ if (getenv('TF_TEST_DB') === 'mysql') {
 
 echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
-check('migrations apply on an empty database', $applied === [1, 2, 3, 4]);
+check('migrations apply on an empty database', $applied === array_keys(Migrator::files()));
 check('running them again changes nothing', Migrator::ensure($db) === []);
+$db->run('DELETE FROM schema_migrations WHERE version=2');
+check('a migration that was skipped (merged out of order) is still applied', Migrator::ensure($db) === [2] && Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
 check('catalog seeded (' . $n . ' exercises)', $n === count(Catalog::exercises()) && $n >= 80);
 Catalog::sync($db);
@@ -394,7 +396,7 @@ check('an older database has no roles yet', !(new Migrator($old))->hasColumn('us
 foreach ([['later', '2026-03-01 10:00:00'], ['earliest', '2025-01-05 08:00:00'], ['middle', '2025-06-01 09:00:00']] as [$name, $when]) {
     $old->insert('users', ['username' => $name, 'password_hash' => 'x', 'display_name' => $name, 'created_at' => $when]);
 }
-check('the migrations apply', Migrator::ensure($old) === [3, 4]);
+check('the migrations apply', Migrator::ensure($old) === array_values(array_filter(array_keys(Migrator::files()), static fn($v) => $v > 2)));
 $roles = [];
 foreach ($old->all('SELECT username, role FROM users') as $r) {
     $roles[$r['username']] = $r['role'];
