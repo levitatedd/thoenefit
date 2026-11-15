@@ -38,6 +38,15 @@ const overflow = () => page.evaluate(() => document.documentElement.scrollWidth 
 
 console.log('Sign in and onboarding');
 await page.goto(URL);
+const loaded = (sel) => page.$eval(sel, (img) => img.complete && img.naturalWidth > 0).catch(() => false);
+await page.waitForSelector('img.brand-wide');
+check('the sign-in screen shows the wide ThoeneFit logo', (await loaded('img.brand-wide')) && (await page.getAttribute('img.brand-wide', 'alt')) === 'ThoeneFit');
+const fav = await page.evaluate(async () => {
+  const links = [...document.querySelectorAll('link[rel=icon]')].map((l) => l.getAttribute('href'));
+  const ok = await Promise.all(links.map(async (h) => (await fetch(h)).ok));
+  return { links, ok };
+});
+check('the browser tab icon is the barbell logo', fav.links.includes('favicon.ico') && fav.links.includes('icons/favicon-32.png') && fav.ok.every(Boolean), JSON.stringify(fav));
 await page.fill('input[name=username]', USER);
 await page.fill('input[name=password]', 'wrong-password-here');
 await page.click('button[type=submit]');
@@ -64,6 +73,12 @@ check('each exercise explains why', (await page.$$eval('.plan-row .why', (els) =
 check('no sideways scrolling at iPhone width', (await overflow()) <= 0);
 await shot('03-today');
 
+const order = await page.evaluate(() => {
+  const fold = document.querySelector('details.fold');
+  const logo = document.querySelector('.page img.brand-wide');
+  return logo && fold ? [fold.getBoundingClientRect().bottom, logo.getBoundingClientRect().top, logo.complete && logo.naturalWidth > 0] : null;
+});
+check('on Today, the wide logo sits below Recovery estimate', !!order && order[1] >= order[0] && order[2] === true, JSON.stringify(order));
 const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
