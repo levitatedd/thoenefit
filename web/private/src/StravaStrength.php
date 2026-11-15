@@ -97,6 +97,20 @@ final class StravaStrength
         'dead-bug' => 'DEADBUG',
     ];
 
+    /** "10 min, 1.7 mi, level 8" for a cardio set. */
+    public static function cardioText(array $set, bool $kilometres): string
+    {
+        $num = static fn(float $v, int $places) => rtrim(rtrim(number_format($v, $places, '.', ''), '0'), '.');
+        $parts = [$num($set['duration_s'] / 60, 1) . ' min'];
+        if (($set['distance_m'] ?? 0) > 0) {
+            $parts[] = $kilometres ? $num($set['distance_m'] / 1000, 2) . ' km' : $num($set['distance_m'] / 1609.344, 2) . ' mi';
+        }
+        if (($set['level'] ?? null) !== null) {
+            $parts[] = 'level ' . $num((float) $set['level'], 1);
+        }
+        return implode(', ', $parts);
+    }
+
     public static function details(array $workout): array
     {
         $sets = [];
@@ -106,6 +120,11 @@ final class StravaStrength
             $type = self::EXERCISES[$exercise['slug']] ?? null;
             $unmapped = [];
             foreach ($exercise['sets'] as $set) {
+                if ($set['done'] && ($set['duration_s'] ?? 0) > 0 && ($set['reps'] ?? null) === null) {
+                    // A cardio warm-up (#18): Strava has no strength set for it, so it goes in the description.
+                    $unmapped[] = self::cardioText($set, $kilograms);
+                    continue;
+                }
                 if (!$set['done'] || $set['reps'] === null || $set['reps'] <= 0) {
                     continue;
                 }
