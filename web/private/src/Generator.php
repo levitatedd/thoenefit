@@ -479,7 +479,7 @@ final class Generator
                 }
             }
             if (!$pick) {
-                if ($isRequired) {
+                if ($isRequired && !$bodyweightOnly) {
                     $skipped[] = 'No ' . strtolower(Catalog::PATTERNS[$patterns[0]]) . " option $equipmentContext.";
                 }
                 continue;

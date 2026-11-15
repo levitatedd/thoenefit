@@ -268,6 +268,9 @@ check('bodyweight-only workouts ignore gym equipment and incompatible locked exe
         $ex = $exById[$b['exercise_id']];
         return $ex['kind'] !== 'bodyweight' || $ex['equipment'] !== [] || $b['suggested_weight'] !== null;
     }));
+$noGearPull = $gen->generate($user, $big, ['day_type' => 'pull', 'bodyweight_only' => true]);
+check('bodyweight-only workouts omit warnings about slots that need equipment',
+    $noGearPull['exercises'] && $noGearPull['skipped'] === []);
 $noGearSwaps = $gen->alternatives($uid, $big, $bySlug['dumbbell-bench-press'], [], true);
 check('bodyweight-only swap results also require no equipment',
     $noGearSwaps && !array_filter($noGearSwaps, fn($a) => !Catalog::supports($exById[$a['exercise_id']], [], true)));
