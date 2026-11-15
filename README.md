@@ -2,15 +2,15 @@
 
 A self-hosted workout planner and logger. Open it at the gym, get a session built from the equipment at that gym and what you have trained recently, and log sets between lifts. It runs on ordinary PHP hosting (built for DreamHost shared hosting) and installs to a phone's Home Screen.
 
-- Gym profiles with their own equipment and weight increments
-- Full body, upper/lower, and push/pull/legs splits; pounds or kilograms
-- Rule-based workout generation with a reason for every pick and weight
-- Fast set logging with a rest timer, autosave, and offline queueing
-- Double progression, tracked per exercise and per equipment variant
-- History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
-- Share a planned workout so two or more people can train together, each with their own suggested weights
-- Send completed workouts to Strava, with optional sets, reps, and weights that populate Strava’s workout log and muscle map
-- Private accounts with invite-token requests and admin approval
+- [Gym profiles](#how-suggestions-work) with their own equipment and weight increments
+- [Full body, upper/lower, and push/pull/legs splits](#how-suggestions-work); pounds or kilograms
+- [Rule-based workout generation](#how-suggestions-work) with a reason for every pick and weight
+- [Fast set logging](#how-offline-logging-works) with a rest timer, autosave, and offline queueing
+- [Double progression](#how-suggestions-work), tracked per exercise and per equipment variant
+- History you can edit, [per-exercise trends](#screenshots), [custom exercises](#sharing-your-own-exercises-with-everyone), [CSV export](#backups-and-restore), [Fitbod import](#import-from-fitbod)
+- [Share a planned workout](#training-together) so two or more people can train together, each with their own suggested weights
+- [Send completed workouts to Strava](#send-a-workout-to-strava), with optional sets, reps, and weights that populate Strava’s workout log and muscle map
+- [Private accounts with invite-token requests and admin approval](#more-accounts-and-password-resets)
 
 ## Screenshots
 
