@@ -10,6 +10,14 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 - History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
 - Several accounts, no public sign-up; the first account is the admin and adds the others
 
+## Screenshots
+
+Captured with sample workout data.
+
+| Workout planner | Set logging | Workout history |
+| --- | --- | --- |
+| ![Generated full-body workout](docs/screenshots/today.jpg) | ![Logging sets with the rest timer running](docs/screenshots/logging.jpg) | ![Saved workout with editable sets](docs/screenshots/history.jpg) |
+
 ## Run it on your computer
 
 You need PHP 8.0 or newer with the SQLite extension (included in most PHP installs). No database setup is needed locally: with no config file, the app keeps its data in `data/thoenefit.sqlite`.
