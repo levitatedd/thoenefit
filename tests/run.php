@@ -961,8 +961,8 @@ $wk->exportCsv($cUid, $fh);
 rewind($fh);
 $csvOut = stream_get_contents($fh);
 check('CSV export has time, distance and level', str_contains($csvOut, ',seconds,distance_m,level') && str_contains($csvOut, ',745,2414,8'));
-$strava = TF\StravaStrength::details($saved);
-check('Strava gets the warm-up in the description and the lifts as sets', str_contains($strava['description'], 'Elliptical: 12.4 min, 1.5 mi, level 8') && count($strava['sets']) === 1);
+$stravaDetails = TF\StravaStrength::details($saved);
+check('Strava gets the warm-up in the description and the lifts as sets', str_contains($stravaDetails['description'], 'Elliptical: 12.4 min, 1.5 mi, level 8') && count($stravaDetails['sets']) === 1);
 $fitbodCsv = "Date,Exercise,Reps,Weight(kg),Duration(s),Distance(m),Incline,Resistance,isWarmup,Note,multiplier\n"
     . "2025-11-06 19:23:18 +0000,Cycling - Stationary, 0,0.0,300.0,2607.1,0.0,12.0,false,, 1.0\n"
     . "2025-11-06 19:23:18 +0000,Barbell Bench Press, 8,60.0,0.0,0.0,0.0,0.0,false,, 1.0\n"
@@ -974,6 +974,66 @@ $fImp = new FitbodImport($db);
 $fRes = $fImp->run($cUid, $cGym, 'lb', $fp, $fImp->plan($cUid, $fp));
 $fw = $wk->get($cUid, current(array_filter($wk->history($cUid, 5), static fn($w) => $w['started_at'] === '2025-11-06T19:23:18Z'))['id']);
 check('an imported bike warm-up keeps its time, distance and level, in the same workout as the lifts', $fRes['workouts'] === 2 && $fw['exercises'][0]['name'] === 'Stationary Bike' && $fw['exercises'][0]['sets'][0]['duration_s'] === 300 && $fw['exercises'][0]['sets'][0]['distance_m'] === 2607.1 && $fw['exercises'][0]['sets'][0]['level'] === 12.0 && $fw['exercises'][1]['name'] === 'Barbell Bench Press' && $fw['exercises'][0]['target_seconds'] === 300, json_encode($fw['exercises'][0] ?? null));
+
+echo "Estimated calories\n";
+$kUid = $auth->createUser('calorie-user', 'calorie-user-123');
+$kGym = $mkGym($kUid, 'Calorie gym', ['barbell', 'bench', 'rack', 'stationary_bike']);
+$hour = function (?string $effort, bool $warm = false, string $start = '2026-11-09T10:00:00Z', string $end = '2026-11-09T11:00:00Z') use ($doc, $kGym, $bench, $bySlug): array {
+    $w = $doc($kGym, 'push', [[$bench, 6, 10, [[135, 8], [135, 8]]]], $start);
+    $w['completed_at'] = $end;
+    $w['exercises'][0]['sets'][0]['done_at'] = '2026-11-09T10:15:00Z';
+    $w['exercises'][0]['sets'][1]['done_at'] = '2026-11-09T10:50:00Z';
+    $w['effort'] = $effort;
+    if ($warm) {
+        array_unshift($w['exercises'], ['id' => uuid(), 'exercise_id' => $bySlug['stationary-bike'], 'rep_min' => 1, 'rep_max' => 1, 'target_sets' => 1, 'target_seconds' => 600,
+            'sets' => [['id' => uuid(), 'weight' => null, 'reps' => null, 'duration_s' => 600, 'distance_m' => 4000.0, 'level' => 8, 'done' => true, 'done_at' => '2026-11-09T10:10:00Z']]]);
+    }
+    return $w;
+};
+$kSave = function (array $w) use ($wk, $kUid): array {
+    $wk->save($kUid, $w);
+    return $wk->get($kUid, $w['id']);
+};
+$moderate = $kSave($hour('moderate'));
+check('no body weight, no estimate', TF\Calories::estimate($moderate, null) === null);
+check('an hour of lifting at 80 kg: light 280, moderate 400, hard 480 (MET × kg × hours)',
+    TF\Calories::estimate($kSave($hour('light')), 80.0) === 280 && TF\Calories::estimate($moderate, 80.0) === 400 && TF\Calories::estimate($kSave($hour('hard')), 80.0) === 480);
+check('the effort is saved with the workout, and a missing or unknown one counts as moderate',
+    $moderate['effort'] === 'moderate' && ($unknown = $kSave($hour('extreme')))['effort'] === null && TF\Calories::estimate($unknown, 80.0) === 400);
+$withBike = $kSave($hour('moderate', true));
+check('a 10-minute bike warm-up counts at the bike\'s value and the other 50 minutes as lifting (64 + 333 = 397)', TF\Calories::estimate($withBike, 80.0) === 397);
+check('a workout left open overnight uses the same trimmed time as Trends and Strava',
+    TF\Calories::estimate($kSave($hour('moderate', false, '2026-11-09T10:00:00Z', '2026-11-10T04:00:00Z')), 80.0) === (int) round(5.0 * 80 * (55 / 60)));
+check('an imported workout without a duration has no estimate', TF\Calories::estimate($kSave($hour('moderate', false, '2026-11-09T10:00:00Z', '2026-11-09T10:00:00Z')), 80.0) === null);
+$db->run('UPDATE users SET body_weight_kg=80 WHERE id=?', [$uid]);
+if (!$strava->connection($uid)['connected']) {
+    $strava->connect($uid, $session, ['state' => $getState(), 'code' => 'calorie-code', 'scope' => 'activity:write']);
+}
+$calDoc = $hour('moderate', true);
+$calDoc['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc);
+$requests = [];
+$reply = [201, ['id' => '1', 'id_str' => '1', 'activity_id' => 55501]];
+$strava->export($uid, $calDoc['id'], true, 0, true);
+$stravaFile = json_decode((string) ($requests[0][3] ?? $requests[1][3] ?? 'null'), true);
+check('with exercises included, Strava gets the estimate as total_calories in the strength file', ($stravaFile['total_calories'] ?? null) === 397 && count($stravaFile['sets']) === 2, json_encode($stravaFile));
+$calDoc2 = $hour('moderate', true);
+$calDoc2['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc2);
+$requests = [];
+$reply = [201, ['id' => '55502']];
+$strava->export($uid, $calDoc2['id'], false, 0, true);
+$basic = end($requests);
+check('without exercises (no strength file), the estimate goes in the description', $basic[3] === null && ($basic[1]['description'] ?? '') === 'Estimated calories: 397');
+$calDoc3 = $hour('moderate');
+$calDoc3['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc3);
+$requests = [];
+$reply = [201, ['id' => '1', 'id_str' => '1', 'activity_id' => 55503]];
+$strava->export($uid, $calDoc3['id'], true, 0, false);
+$plainFile = json_decode((string) end($requests)[3], true);
+check('calories are only sent when asked for', !isset($plainFile['total_calories']));
+$db->run('UPDATE users SET body_weight_kg=NULL WHERE id=?', [$uid]);
 
 echo "Upgrading a database that already has accounts\n";
 $old = $freshDb('upgrade');

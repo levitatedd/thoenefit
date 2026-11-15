@@ -137,6 +137,8 @@ final class Workouts
             'started_at' => $started,
             'completed_at' => $completed,
             'notes' => isset($d['notes']) ? mb_substr((string) $d['notes'], 0, 2000) : null,
+            // How hard it felt, chosen when finishing (#38). Used for the calorie estimate.
+            'effort' => isset(Calories::EFFORTS[$d['effort'] ?? '']) ? $d['effort'] : null,
             'rev' => $rev,
             'updated_at' => now_utc(),
         ];
@@ -230,6 +232,7 @@ final class Workouts
             'started_at' => to_iso($w['started_at']),
             'completed_at' => to_iso($w['completed_at']),
             'notes' => $w['notes'],
+            'effort' => $w['effort'] ?? null,
             'rev' => (int) $w['rev'],
             'exercises' => [],
         ];

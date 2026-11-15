@@ -104,13 +104,15 @@ final class Api
 
         $get = [
             'history' => fn() => ['workouts' => $this->workouts->history($uid, (int) ($_GET['limit'] ?? 30), (int) ($_GET['offset'] ?? 0))],
-            'workout' => function () use ($uid) {
+            'workout' => function () use ($uid, $user) {
                 $w = $this->workouts->get($uid, (string) ($_GET['id'] ?? ''));
                 if (!$w) {
                     throw new HttpError(404, 'Workout not found.');
                 }
                 return [
                     'workout' => $w,
+                    // Estimated calories (#38): null until the account has a body weight.
+                    'calories' => Calories::estimate($w, $user['body_weight_kg'] === null ? null : (float) $user['body_weight_kg']),
                     'strava' => $this->strava->connection($uid),
                     'strava_export' => $this->strava->exportStatus($uid, $w['id']),
                 ];
@@ -160,7 +162,7 @@ final class Api
             case 'strava_export':
                 $offset = $in['utc_offset'] ?? 0;
                 self::json($this->strava->export($uid, (string) ($in['id'] ?? ''),
-                    ($in['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0));
+                    ($in['include_summary'] ?? false) === true, is_int($offset) ? $offset : 0, ($in['include_calories'] ?? false) === true));
                 return;
             case 'strava_check_export':
                 self::json(['export' => $this->strava->checkExport($uid, (string) ($in['id'] ?? ''))]);
@@ -269,6 +271,10 @@ final class Api
             case 'save_workout':
                 $doc = (array) ($in['workout'] ?? []);
                 $saved = $this->workouts->save($uid, $doc);
+                if (!empty($saved['completed_now']) && isset(Calories::EFFORTS[$doc['effort'] ?? '']) && $doc['effort'] !== $user['effort']) {
+                    // Offer the same effort next time (#38).
+                    $this->db->run('UPDATE users SET effort=? WHERE id=?', [$doc['effort'], $uid]);
+                }
                 if (!empty($saved['ok'])) {
                     // A workout started from a shared plan closes that share; one started
                     // from a plan this person shared lets later accepts follow it.
@@ -337,6 +343,10 @@ final class Api
             'active_gym_id' => $u['active_gym_id'] === null ? null : (int) $u['active_gym_id'],
             'onboarded' => (int) $u['onboarded'] === 1,
             'warm_up' => (int) ($u['warm_up'] ?? 0) === 1,
+            // In the account's unit, to one decimal (#38).
+            'body_weight' => ($u['body_weight_kg'] ?? null) === null ? null
+                : round($u['unit'] === 'kg' ? (float) $u['body_weight_kg'] : (float) $u['body_weight_kg'] * 2.20462262, 1),
+            'effort' => Calories::effort($u['effort'] ?? null),
         ];
     }
 
@@ -429,6 +439,20 @@ final class Api
         }
         if (isset($in['minutes'])) {
             $set['minutes'] = max(15, min(180, (int) $in['minutes']));
+        }
+        if (array_key_exists('body_weight', $in)) {
+            // In the account's unit (the one being saved now, if it changes too). Empty clears it.
+            $bw = $in['body_weight'];
+            if ($bw === null || $bw === '') {
+                $set['body_weight_kg'] = null;
+            } else {
+                $unit = $set['unit'] ?? $user['unit'];
+                $kg = is_numeric($bw) ? ($unit === 'kg' ? (float) $bw : (float) $bw / 2.20462262) : 0;
+                if ($kg < 20 || $kg > 350) {
+                    throw new HttpError(422, $unit === 'kg' ? 'Enter a body weight between 20 and 350 kg.' : 'Enter a body weight between 45 and 770 lb.');
+                }
+                $set['body_weight_kg'] = round($kg, 1);
+            }
         }
         if (isset($in['active_gym_id'])) {
             $this->gym($uid, (int) $in['active_gym_id']);

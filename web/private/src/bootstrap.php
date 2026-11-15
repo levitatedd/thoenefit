@@ -10,6 +10,7 @@ require_once __DIR__ . '/Migrator.php';
 require_once __DIR__ . '/Catalog.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Workouts.php';
+require_once __DIR__ . '/Calories.php';
 require_once __DIR__ . '/Generator.php';
 require_once __DIR__ . '/FitbodImport.php';
 require_once __DIR__ . '/Shares.php';
