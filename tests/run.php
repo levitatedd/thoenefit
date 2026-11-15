@@ -489,6 +489,19 @@ check('one account\'s import is invisible to another', $wk->get($uid, $hist[0]['
 check('undo removes only imported workouts', $imp->purge($uid3) === 2 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid3]) === 0 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid]) > 0);
 
 echo "Sharing a workout\n";
+// #36: only the admin can share with the chatgpt account.
+$gptId = $auth->createUser('ChatGPT', 'chatgpt-long-password', 'ChatGPT');
+$adminSees = array_column($auth->shareTargets($db->one('SELECT * FROM users WHERE id=?', [$uid])), 'id');
+$memberSees = array_column($auth->shareTargets($db->one('SELECT * FROM users WHERE id=?', [$uid2])), 'id');
+check('the admin can pick the chatgpt account when sharing', in_array($gptId, $adminSees, true) && !in_array($uid, $adminSees, true));
+check('a regular user does not see the chatgpt account, but still sees everyone else', !in_array($gptId, $memberSees, true) && in_array($uid, $memberSees, true) && !in_array($uid2, $memberSees, true));
+$gptPlan = ['day_type' => 'push', 'exercises' => [['exercise_id' => $bench, 'target_sets' => 3, 'rep_min' => 6, 'rep_max' => 10, 'rest_seconds' => 120]]];
+check('the server refuses a share from a regular user to chatgpt', throws(fn() => (new Shares($db))->send($uid2, uuid(), [$gptId], $memberSees, $gptPlan), 422) && (int) $db->val('SELECT COUNT(*) FROM workout_shares WHERE to_user=?', [$gptId]) === 0);
+(new Shares($db))->send($uid, uuid(), [$gptId], $adminSees, $gptPlan);
+check('the admin can send a share to chatgpt', (int) $db->val('SELECT COUNT(*) FROM workout_shares WHERE to_user=? AND from_user=?', [$gptId, $uid]) === 1);
+$db->run('DELETE FROM workout_shares WHERE to_user=?', [$gptId]);
+$db->run('DELETE FROM users WHERE id=?', [$gptId]);
+
 $sh = new Shares($db);
 $uid3 = $auth->createUser('third', 'third-long-password');
 $samRow = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);

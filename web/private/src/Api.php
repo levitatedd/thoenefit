@@ -123,7 +123,7 @@ final class Api
                 'weeks' => $this->workouts->weeklyTrends($uid, $user['unit'], is_string($_GET['timezone'] ?? null) ? $_GET['timezone'] : 'UTC'),
             ],
             // Other people on this server, by display name only, for sharing a workout.
-            'people' => fn() => ['people' => $this->people($uid)],
+            'people' => fn() => ['people' => $this->people($user)],
             'shares' => fn() => [
                 'incoming' => $this->shares->incoming($uid),
                 'outgoing' => $this->shares->outgoing($uid, (string) ($_GET['key'] ?? '')),
@@ -282,7 +282,7 @@ final class Api
                     $uid,
                     (string) ($in['share_key'] ?? ''),
                     (array) ($in['to'] ?? []),
-                    array_column($this->people($uid), 'id'),
+                    array_column($this->people($user), 'id'),
                     (array) ($in['plan'] ?? []),
                     isset($in['workout_id']) ? (string) $in['workout_id'] : null
                 );
@@ -330,15 +330,9 @@ final class Api
     }
 
     /** Everyone else with a working account: id and display name only. */
-    private function people(int $uid): array
+    private function people(array $user): array
     {
-        $out = [];
-        foreach ($this->auth->listUsers() as $u) {
-            if ($u['id'] !== $uid) {
-                $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
-            }
-        }
-        return $out;
+        return $this->auth->shareTargets($user);
     }
 
     private function gyms(int $uid): array
