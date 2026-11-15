@@ -1,15 +1,10 @@
 # ThoeneFit
 
-A self-hosted workout planner and logger. Open it at the gym, get a session built from the equipment at that gym and what you have trained recently, and log sets between lifts. It runs on ordinary PHP hosting (built for DreamHost shared hosting) and installs to a phone's Home Screen.
+Phone-first workout planner and log. Pick a gym and ThoeneFit builds a session around its equipment and your training history. Log sets between lifts, then look back at what you did and how your weights progressed.
 
-- Gym profiles with their own equipment and weight increments
-- Full body, upper/lower, and push/pull/legs splits; pounds or kilograms
-- Rule-based workout generation with a reason for every pick and weight
-- Fast set logging with a rest timer, autosave, and offline queueing
-- Double progression, tracked per exercise and per equipment variant
-- History you can edit, per-exercise trends, custom exercises, CSV export, Fitbod import
-- Share a planned workout so two or more people can train together, each with their own suggested weights
-- Several accounts, no public sign-up; the first account is the admin and adds the others
+**Use the app** · [Plan and log](#how-suggestions-work) · [Train together](#training-together) · [Send to Strava](#send-a-workout-to-strava) · [Import from Fitbod](#import-from-fitbod) · [Manage accounts](#more-accounts-and-password-resets)
+
+**Maintain the app** · [Run locally](#run-it-on-your-computer) · [Run checks](#run-the-checks) · [Deploy](#deploy-to-dreamhost) · [Back up or restore](#backups-and-restore)
 
 ## Screenshots
 
@@ -17,223 +12,144 @@ A self-hosted workout planner and logger. Open it at the gym, get a session buil
 | :---: | :---: | :---: |
 | <a href="docs/screenshots/workout-planner.jpg"><img src="docs/screenshots/workout-planner.jpg" width="250" alt="Push workout with suggested weights and exercises"></a> | <a href="docs/screenshots/set-logging.jpg"><img src="docs/screenshots/set-logging.jpg" width="250" alt="Completed sets and the active rest timer"></a> | <a href="docs/screenshots/exercise-history.jpg"><img src="docs/screenshots/exercise-history.jpg" width="250" alt="Leg Extension history and top-weight trend chart"></a> |
 
-## Run it on your computer
+## How suggestions work
 
-You need PHP 8.0 or newer with the SQLite extension (included in most PHP installs). No database setup is needed locally: with no config file, the app keeps its data in `data/thoenefit.sqlite`.
+1. Create a gym in **Settings**. Choose its equipment and the smallest weight jumps you can load. Each gym gets its own settings.
+2. Open **Today**. ThoeneFit picks the next day in your full-body, upper/lower, or push/pull/legs split. You can change the day or time, lock a lift, or swap it.
+3. Start the workout and log your sets in pounds or kilograms. Tap an exercise name on Today to see its trend, or open **History** to edit a completed session.
 
-```sh
-# 1. Create an account (asks for a password of 10+ characters)
-php web/private/bin/create-user.php mike "Mike"
+The planner favors familiar lifts that fit the gym’s equipment. It uses your goal, experience, and recent training to pick sets, reps, and rest. When all working sets reach the top of the rep range at the same weight, the next suggestion moves up by the gym’s smallest increment. Warm-ups don’t count toward progression. Machine and cable weights are tracked per gym.
 
-# 2. Start the app
-php -S localhost:8000 -t web
-```
+The recovery estimate uses the sets you’ve logged. A muscle estimated below 50% gets one fewer set in a suggested workout. Sleep, soreness, and training outside the app aren’t part of that estimate.
 
-Open <http://localhost:8000> and sign in.
+### How offline logging works
 
-To try it from your phone on the same Wi-Fi, start it with `php -S 0.0.0.0:8000 -t web` and open `http://YOUR-COMPUTER-IP:8000`. Over plain HTTP the app works but cannot be installed or used offline; that needs the HTTPS deployment below.
-
-## Run the checks
-
-```sh
-php tests/run.php            # server: generator, progression, sync, accounts, export
-node tests/sync.test.mjs     # phone-side offline queue
-node tests/search.test.mjs   # exercise search: spelling, typos, aliases, ranking
-```
-
-`tests/e2e.mjs` drives the whole app in Chrome at phone sizes. It needs Playwright and is optional; the instructions are at the top of that file.
-
-Every push to `main` runs the first three on GitHub, including a run of the server checks against MySQL.
-
-## Deploy to DreamHost
-
-Code gets to the server through GitHub: every push to `main` runs the checks and then uploads the `web/` folder over SFTP. Docker and a reverse proxy are not involved, because shared hosting cannot run them and does not need them. DreamHost's own web server handles HTTPS.
-
-### One-time setup
-
-**1. Create the site.** In the DreamHost panel, add a domain or subdomain (for example `fit.example.com`) as a fully hosted site with PHP 8.1 or newer, and turn on the free Let's Encrypt certificate. Wait until `https://fit.example.com` loads without a certificate warning.
-
-**2. Create a user with shell access.** The site needs a user of type **Shell** (not SFTP-only), because creating accounts and taking backups are done over SSH. Note:
-
-- the server hostname (shown in the panel, for example `iad1-shared-b8-01.dreamhost.com`)
-- the username and password
-- the site's web folder, normally `/home/USERNAME/fit.example.com`
-
-**3. Create a MySQL database.** In the panel's MySQL section, create a database, a hostname for it, and a database user. Note all four values.
-
-**4. Put the config file on the server.** Copy `config.example.php`, fill in the four database values, and upload it to the folder above the web folder, named `thoenefit-config.php`:
-
-```sh
-scp thoenefit-config.php USERNAME@SERVER:~/thoenefit-config.php
-ssh USERNAME@SERVER 'chmod 600 ~/thoenefit-config.php'
-```
-
-It lives outside the web folder, so it can never be downloaded, and it is not in this repository.
-
-**5. Add the deploy secrets to GitHub.** In this repository: Settings, then Secrets and variables, then Actions, then New repository secret. Add four:
-
-| Secret | Value |
-| --- | --- |
-| `SFTP_HOST` | the server hostname from step 2 |
-| `SFTP_USER` | the username from step 2 |
-| `SFTP_PASSWORD` | that user's password |
-| `SFTP_PATH` | the web folder, for example `/home/USERNAME/fit.example.com` |
-
-**6. Deploy.** Push to `main`, or open the Actions tab, pick "Test and deploy", and press "Run workflow". Until the secrets exist the upload step is skipped with a notice rather than failing.
-
-**7. Create your account.** Over SSH:
-
-```sh
-ssh USERNAME@SERVER
-php -v                                   # must say 8.0 or newer
-php ~/fit.example.com/private/bin/create-user.php mike "Mike"
-```
-
-The first line of output names the database it is writing to. It should show your `thoenefit-config.php`. If `php -v` shows an older version, DreamHost keeps newer ones at paths like `/usr/local/php83/bin/php`; use that in place of `php`.
-
-Open `https://fit.example.com`, sign in, and follow the setup screen.
+After you start a workout, the rest timer and set logging work offline. Changes save on the phone and sync when you’re back online. The status pill shows whether the changes have reached the server. Generating a plan, swapping a lift, and opening History need a connection.
 
 ### Add it to your phone's Home Screen
 
-**iPhone:** open the site in Safari, tap the Share button, then Add to Home Screen, then Add.
+- In **Safari on iPhone**, tap **Share → Add to Home Screen**.
+- In **Chrome on Android**, open the menu and tap **Add to Home screen** or **Install app**.
 
-**Pixel and other Android phones:** open the site in Chrome, tap the three-dot menu, then Add to Home screen (or Install app).
+## Training together
 
-The same steps are in the app under Settings.
+On **Today**, tap the people button next to **Start workout**. During a session, use **Share this workout**. The other person can accept or decline on their Today screen.
 
-### More accounts and password resets
+When they accept, they get the same exercise order, planned sets, reps, and rest as the sender has at that moment. Each person gets weight suggestions from their own history and logs a separate session. Later edits stay with the person who made them. Custom exercises are copied when needed. Shares expire after 24 hours if they go unanswered or the recipient doesn’t start the accepted workout.
+
+## Send a workout to Strava
+
+Connect under **Settings → Account**. Open a finished workout in **History** and tap **Send to Strava**.
+
+- The basic export sends one Weight Training activity with its name, start time, and duration.
+- Turn on **Include exercises, sets, reps, and weights** to populate the Strava workout log and muscle map. Exercises without a Strava match go in the description.
+- For an upload that’s still processing, tap **Check Strava upload** or reopen the workout. Once it’s confirmed, **View on Strava** opens the activity. If the send is unconfirmed, check Strava before posting the workout yourself.
+- Fitbod imports lack a recorded duration and can’t be exported.
+
+### Set up Strava on DreamHost
+
+Copy the `strava` block from `config.example.php` into the private `~/thoenefit-config.php` and fill in the Client ID and Client Secret from [Strava API Settings](https://www.strava.com/settings/api). PHP needs OpenSSL and `allow_url_fopen`.
+
+If Strava reports an invalid `redirect_uri`, compare your settings with the production values below.
+
+| Where | Production value |
+| --- | --- |
+| Strava **Authorization Callback Domain** | `fit.mikethoene.com` |
+| DreamHost config `callback_url` | `https://fit.mikethoene.com/api.php?a=strava_callback` |
+
+After changing the settings, start again with **Connect to Strava**. If you rotate the Client Secret, disconnect and reconnect each linked account.
+
+## Import from Fitbod
+
+Go to **Settings → Import from Fitbod**, choose the CSV, and pick a gym. Use **Check file** to review exercise matches before you import. Unmatched movements can be renamed, edited, or skipped.
+
+Imported workouts feed trends and weight suggestions. Rows without reps, such as timed holds or cardio, are skipped. Reimporting the same data replaces earlier imports. Use **Remove imported workouts** to undo an import. To download your ThoeneFit set history, use **Export all sets as CSV** in Settings.
+
+## More accounts and password resets
+
+The first account is the admin. In **Settings → Manage users**, the admin can create accounts directly or set an invite token. A person with the token chooses **Request an account** on the sign-in screen and sets their own password. They can sign in after the admin approves the request.
+
+Each account has its own gyms, history, and custom exercises. To reset a password over SSH, run the following command. Resetting signs out that user’s devices.
 
 ```sh
-php ~/fit.example.com/private/bin/create-user.php sam "Sam"       # add a person
-php ~/fit.example.com/private/bin/create-user.php --reset sam     # new password, signs out their devices
-```
-
-Each account has its own gyms, workouts, and custom exercises. People can change their own password in Settings.
-
-**The admin.** The first account ever created is the admin. On a database that already had accounts when roles were added, the earliest-created account became the admin. The admin sees Settings, then Manage users, and can create accounts there with a starting password to pass on. Accounts made that way, or with `create-user.php` once an account exists, are regular users. There is still no public sign-up: every account-management request is checked on the server and refused unless it comes from the signed-in admin.
-
-**Account requests.** In Manage users the admin can set an invite token. Someone who has it can choose "Request an account" on the sign-in screen and pick their own username and password. The request then waits in Manage users until the admin approves or declines it; nobody can sign in before approval, and approved people are regular users. The token is shared by everyone invited, is separate from any sign-in password, and is stored hashed, so it cannot be read back: set a new one if it is lost, or clear it to stop taking requests.
-
-To see who the admin is, open Manage users, or run this over SSH with your database details:
-
-```sh
-mysql -h mysql.example.com -u DBUSER -p DBNAME -e "SELECT username, role, created_at FROM users ORDER BY created_at"
+php ~/fit.mikethoene.com/private/bin/create-user.php --reset USERNAME
 ```
 
 ### Sharing your own exercises with everyone
 
-Exercises an account adds (or that a Fitbod import creates) belong to that account and show as "Yours". To put one account's exercises into the default library for everyone:
+The admin can move their custom exercises into the default library without breaking workout history. The command keeps the exercise IDs and skips names already in the library.
 
 ```sh
-php ~/fit.example.com/private/bin/promote-exercises.php mike
+php ~/fit.mikethoene.com/private/bin/promote-exercises.php mike
 ```
 
-The exercises keep their ids, so that account's workout history, trends and suggested weights for them are unchanged. Other accounts can then see, pick and be suggested them, each with their own history. An exercise whose name the default library already has is left as the account's own and listed in the output. The admin can still edit or archive exercises moved this way; other accounts cannot.
+## Run it on your computer
+
+Use PHP 8.1 or newer with SQLite. Without a config file, the app creates its database at `data/thoenefit.sqlite`.
+
+```sh
+php web/private/bin/create-user.php mike "Mike"
+php -S localhost:8000 -t web
+```
+
+Open <http://localhost:8000>. To test from a phone on the same Wi-Fi, bind to `0.0.0.0:8000` and open the computer’s LAN IP. Use HTTPS for installation and offline mode on the phone.
+
+## Run the checks
+
+```sh
+php tests/run.php
+node tests/sync.test.mjs
+node tests/search.test.mjs
+```
+
+GitHub Actions also runs the PHP checks against MySQL. For the phone-sized Chrome walkthrough, see the Playwright instructions at the top of [tests/e2e.mjs](tests/e2e.mjs).
+
+## Deploy to DreamHost
+
+Pushing to `main` runs checks and uploads `web/` over SFTP. You can also run **Test and deploy** from GitHub Actions.
+
+### One-time setup
+
+1. Create a hosted site with HTTPS, a MySQL database, and a DreamHost shell user.
+2. Fill in `config.example.php` with the database settings. Save it as `~/thoenefit-config.php` on DreamHost, outside the web root, and run `chmod 600 ~/thoenefit-config.php`.
+3. Set GitHub Actions secrets `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD`, and `SFTP_PATH`. The path is the site’s web folder. The upload only runs if all four secrets are set.
+4. Deploy, then create the first account over SSH with `php ~/fit.mikethoene.com/private/bin/create-user.php mike "Mike"`.
 
 ### Updates and database changes
 
-Push to `main`. The upload replaces changed files and deletes nothing. Database changes are numbered files in `web/private/migrations/`; they apply themselves the first time the app is opened after a deploy. To apply them by hand: `php ~/fit.example.com/private/bin/migrate.php`.
+Migrations run on the first request after a deploy. You can also run them over SSH.
 
-After changing the list of files the app needs offline, bump `VERSION` in `web/sw.js` so phones fetch the new set.
+```sh
+php ~/fit.mikethoene.com/private/bin/migrate.php
+```
 
-## Import from Fitbod
-
-In the app: Settings, then Import from Fitbod. Choose the CSV that Fitbod's "Export Workout Data" produces, pick the gym to file the workouts under, and press Check file. Nothing is saved until you press Import.
-
-- Rows are grouped into workouts by their timestamp. Weights are converted from Fitbod's kilograms to your unit.
-- Rows with no reps (cardio, planks and other timed holds) are left out.
-- Fitbod exercises that are the same lift as a built-in exercise use it. The rest are added as your own exercises, with equipment, movement and muscles guessed from the name; edit them under Exercises. You can change or leave out any exercise on the check screen.
-- Imported history feeds weight suggestions and trend charts like any other workout.
-- Importing the same file again replaces the earlier import. "Remove imported workouts" on the same screen undoes it.
+If you change which files are cached for offline use, bump the version in `web/sw.js`.
 
 ## Backups and restore
 
-All data is in the MySQL database. Run these over SSH on the server, using the values from your config file.
-
-**Back up:**
+Run these over SSH with the database details from the private config. Keep a copy of the backup off the server. Restoring a backup replaces the tables in the dump.
 
 ```sh
+# Back up
 mkdir -p ~/backups
-mysqldump --single-transaction --no-tablespaces -h mysql.example.com -u DBUSER -p DBNAME | gzip > ~/backups/thoenefit-$(date +%F).sql.gz
+set -o pipefail
+mysqldump --single-transaction --no-tablespaces -h DBHOST -u DBUSER -p DBNAME \
+  | gzip > ~/backups/thoenefit-$(date +%F).sql.gz
+
+# Restore the database from a chosen backup
+gunzip -c ~/backups/thoenefit-DATE.sql.gz | mysql -h DBHOST -u DBUSER -p DBNAME
 ```
 
-**Restore** (this replaces what is in the database with the backup):
-
-```sh
-gunzip < ~/backups/thoenefit-2026-11-14.sql.gz | mysql -h mysql.example.com -u DBUSER -p DBNAME
-```
-
-**Automatic nightly backups:** put the database password in `~/.my.cnf` so no prompt is needed,
-
-```ini
-[client]
-password=YOUR-DATABASE-PASSWORD
-```
-
-run `chmod 600 ~/.my.cnf`, then add a cron job in the DreamHost panel (or with `crontab -e`) that runs daily and keeps 30 days:
-
-```sh
-mysqldump --single-transaction --no-tablespaces -h mysql.example.com -u DBUSER DBNAME | gzip > ~/backups/thoenefit-$(date +\%F).sql.gz && find ~/backups -name 'thoenefit-*.sql.gz' -mtime +30 -delete
-```
-
-Download a copy now and then (`scp USERNAME@SERVER:~/backups/thoenefit-DATE.sql.gz .`) so a backup exists somewhere other than the server. Each person can also export their own sets as CSV from Settings.
-
-On a local copy, the backup is the single file `data/thoenefit.sqlite`: stop the app and copy it.
-
-## How suggestions work
-
-Nothing is random or learned. The same profile, gym, and history always give the same workout.
-
-- **Which day.** The next day in your split after your last finished workout. You can pick another on the Today screen.
-- **Which exercises.** Each day has an ordered list of movement slots (for Push: a horizontal press, an overhead press, an incline press or fly, triceps, then optional extras). A slot is filled only by exercises whose equipment is all ticked in the selected gym. Among those, it prefers the exercise you have done recently so progression continues, then the catalog's first choice. Optional slots go to muscles with the fewest sets in the last 7 days.
-- **How many.** Slots are added until the estimated time (sets, rest, and setup) reaches the time you set, with a minimum of three.
-- **Sets, reps, rest.** From your goal and experience. Big lifts get lower reps and longer rests than accessories.
-- **Weight.** Double progression: if every working set last time was at the working weight and reached the top of the rep range, the suggestion goes up by the gym's smallest increment for that equipment and reps restart at the bottom of the range. Otherwise the weight stays and the aim is more reps. Warm-up sets are ignored. You can type over any suggestion.
-- **Equipment variants.** Barbell, dumbbell, kettlebell, and bodyweight history follows you between gyms. Machine and cable history is kept separately per gym, because the same number means different things on different machines.
-- **Recovery.** An estimate from logged sets only: after a session, a muscle is treated as needing 24 hours plus 6 hours per set (half for secondary muscles), up to 96 hours. Under 50%, an exercise for that muscle gets one set fewer. It cannot see sleep, soreness, or anything done outside the app.
-
-## Training together
-
-Anyone can share the workout planned on Today, or one already in progress, with other people on the same server (the people button next to Start workout, or "Share this workout" on the workout screen). The other person sees it on their Today screen and can accept or decline.
-
-- Accepting gives them the same exercises, in the same order, with the same planned sets, rep ranges and rest. Suggested weights are worked out from their own history, so one person may see 185 lb where the other sees 45 lb.
-- The structure is taken as it stands when they accept. If the sender changed the plan, or has started and swapped an exercise since sharing, the accepted copy follows that. After accepting, the two workouts are independent; later changes are not synced.
-- Each person logs their own weights, reps and completion and gets their own entry in History.
-- If the plan includes an exercise the sender created, a copy is added to the other person's exercise library so both keep their own history for it.
-- A share that is not answered, or is accepted but not started, lapses after 24 hours.
-
-## Send a workout to Strava
-
-To enable it, create a Strava API app in [Strava API Settings](https://www.strava.com/settings/api). Set its **Authorization Callback Domain** to the site's hostname. Add the `strava` block from `config.example.php` to the private server config and fill in the client ID and secret. The callback URL is the site's HTTPS address followed by `/api.php?a=strava_callback`. For staging, use `fit-test.mikethoene.com` and edit `~/thoenefit-staging-config.php`. PHP needs OpenSSL and HTTPS stream access (`allow_url_fopen`). Keep the client secret out of Git. If you rotate it, disconnect and reconnect each Strava account.
-
-In **Settings → Account**, connect your Strava account. Open a completed session in **History** and choose **Send to Strava**. The export creates one Weight Training activity with the workout's name, start time, and duration. Select **Include exercises, sets, reps, and weights** to send sets into Strava's strength workout details. Exercises without a Strava equivalent go in the description. Fitbod imports have no recorded duration.
-
-Strava can take a few seconds to process a strength upload. Reopen the workout or tap **Check Strava upload** for an update. If Strava never confirms an export, check your Strava activities. ThoeneFit keeps the original send on record to avoid duplicates.
-
-## How offline logging works
-
-The phone is the source of truth during a workout. Every edit is written to the phone's storage first, then the whole workout is sent to the server with a rising revision number. The server replaces its copy of that workout, so a save that is retried after a dropped connection, or delivered twice, cannot create duplicate sets. The pill at the top of the workout screen shows Saved, Saving, or that changes are waiting on the phone. Building a new workout, swapping exercises, and History need a connection.
+For nightly backups, store the MySQL password in a `[client]` section of `~/.my.cnf` and set its permissions to `600`. Schedule the dump in cron without `-p`, escape the percent sign in `date +%F` in the cron entry, and prune old backups after a successful dump. For local SQLite, stop the app and copy `data/thoenefit.sqlite`.
 
 ## Project layout
 
-```
-web/                    the folder the web server serves (uploaded on deploy)
-  index.html app.css    app shell
-  js/app.js             screens
-  js/store.js           server calls and the offline workout queue
-  js/search.js          exercise search (typos, aliases, similar exercises)
-  js/ui.js              small interface helpers
-  sw.js                 keeps the app's files on the phone for offline use
-  api.php               entry point for all server calls
-  private/              never served (blocked by .htaccess)
-    src/                PHP: accounts, catalog, generator, workout storage, API
-    migrations/         numbered database changes
-    bin/                create-user.php, migrate.php
-config.example.php      template for the server's config file
-tests/                  checks
-.github/workflows/      test and deploy on push
-```
+| Path | What lives there |
+| --- | --- |
+| `web/js/` | App screens, exercise search, and the offline queue |
+| `web/private/src/` | PHP API, workout generator, storage, and Strava integration |
+| `web/private/migrations/` | Database changes |
+| `web/private/bin/` | Maintenance commands |
+| `tests/` and `.github/workflows/` | Tests and deployment |
 
-## Moving off shared hosting later
-
-Nothing here depends on DreamHost. Any server with PHP 8.0+, MySQL or MariaDB, and HTTPS will run it: point the web root at `web/`, put `thoenefit-config.php` one level above it (or set the `THOENEFIT_CONFIG` environment variable to its path), and make sure requests to `/private/` are refused if the server is not Apache.
+On another host, use `web/` as the document root, keep the config above it, and block HTTP access to `/private/`.
