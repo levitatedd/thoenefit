@@ -722,6 +722,26 @@ textarea:focus {
   border-radius: 14px;
 }
 
+/* Cardio (#18): minutes, distance and level instead of weight × reps. */
+.set-head.cardio,
+.set.cardio {
+  grid-template-columns: 28px repeat(3, minmax(0, 1fr)) 60px;
+  gap: 6px;
+}
+
+.set.cardio .set-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  font-size: 18px;
+  cursor: default;
+}
+
+.set.cardio input.num {
+  font-size: 24px;
+}
+
 .set-tag {
   appearance: none;
   width: 44px;
@@ -810,15 +830,6 @@ input.num::placeholder {
   margin-top: 8px;
 }
 
-.install-card {
-  border: 2px solid var(--blue);
-}
-
-.install-card .btn.ghost {
-  align-self: flex-start;
-  padding-left: 0;
-}
-
 .share-card {
   border: 2px solid var(--green);
 }
@@ -846,6 +857,15 @@ input.num::placeholder {
 .share-status.accepted,
 .share-status.started {
   color: var(--green);
+}
+
+.install-card {
+  border: 2px solid var(--blue);
+}
+
+.install-card .btn.ghost {
+  align-self: flex-start;
+  padding-left: 0;
 }
 
 .resume {
