@@ -29,6 +29,8 @@ jobs:
         run: node tests/sync.test.mjs
       - name: Exercise search checks
         run: node tests/search.test.mjs
+      - name: Version number checks
+        run: node tests/version.test.mjs
 
   deploy:
     name: Upload to DreamHost
@@ -43,6 +45,9 @@ jobs:
       SFTP_PATH: ${{ github.ref_name == 'staging' && '/home/thoenefit/fit-test.mikethoene.com' || secrets.SFTP_PATH }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The version number counts releases on main, so it needs main's full history.
+          fetch-depth: 0
 
       - name: Check that the server details are set
         id: cfg
@@ -89,10 +94,14 @@ jobs:
           # itself when they differ. sw.js gets the same id, so phones replace their
           # saved copies of the app files on every deploy.
           BUILD="${GITHUB_SHA::12}"
-          printf '{"build":"%s"}\n' "$BUILD" > web/version.json
+          # The human-readable version shown at the bottom of Settings (see VERSION).
+          APP_VERSION="$(.github/scripts/app-version.sh "$GITHUB_REF_NAME")"
+          printf '{"build":"%s","version":"%s"}\n' "$BUILD" "$APP_VERSION" > web/version.json
           sed -i "s/^const BUILD = 'dev';/const BUILD = '$BUILD';/" web/sw.js
           grep -q "const BUILD = '$BUILD';" web/sw.js || { echo "::error::Could not stamp the build into web/sw.js."; exit 1; }
-          echo "Build $BUILD"
+          sed -i "s/^export const APP_VERSION = 'dev';/export const APP_VERSION = '$APP_VERSION';/" web/js/version.js
+          grep -q "export const APP_VERSION = '$APP_VERSION';" web/js/version.js || { echo "::error::Could not stamp the version into web/js/version.js."; exit 1; }
+          echo "Version $APP_VERSION, build $BUILD"
 
       - name: Upload the web folder over SFTP
         if: steps.cfg.outputs.ready == 'true'

@@ -1,5 +1,6 @@
 import { Api, WorkoutSync, uuid } from './store.js';
 import { searchExercises } from './search.js';
+import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 
 const api = new Api('api.php');
@@ -1703,6 +1704,7 @@ function viewSettings() {
         }, e.currentTarget);
       } }, 'Sign out')),
     brandWide(),
+    h('p', { class: 'muted small center app-version' }, `Version ${APP_VERSION}`),
   );
 }
 
