@@ -202,6 +202,12 @@ Anyone can share the workout planned on Today, or one already in progress, with 
 - If the plan includes an exercise the sender created, a copy is added to the other person's exercise library so both keep their own history for it.
 - A share that is not answered, or is accepted but not started, lapses after 24 hours.
 
+## Send a workout to Strava
+
+To enable it, create a Strava API app in [Strava API Settings](https://www.strava.com/settings/api). Set its **Authorization Callback Domain** to the site's hostname. Add the `strava` block from `config.example.php` to the private server config and fill in the client ID and secret. The callback URL is the site's HTTPS address followed by `/api.php?a=strava_callback`. For staging, use `fit-test.mikethoene.com` and edit `~/thoenefit-staging-config.php`. PHP needs OpenSSL and HTTPS stream access (`allow_url_fopen`). Keep the client secret out of Git. If you rotate it, disconnect and reconnect each Strava account.
+
+In **Settings → Account**, connect your Strava account. Open a completed session in **History** and choose **Send to Strava**. Including exercises, sets, reps, and weights is optional. This exports one Weight Training activity with the workout's recorded name, start time, and duration. Fitbod imports have no recorded duration. If Strava does not confirm a send, check your Strava activities. ThoeneFit records the attempt so retries cannot create a duplicate.
+
 ## How offline logging works
 
 The phone is the source of truth during a workout. Every edit is written to the phone's storage first, then the whole workout is sent to the server with a rising revision number. The server replaces its copy of that workout, so a save that is retried after a dropped connection, or delivered twice, cannot create duplicate sets. The pill at the top of the workout screen shows Saved, Saving, or that changes are waiting on the phone. Building a new workout, swapping exercises, and History need a connection.

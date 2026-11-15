@@ -1,0 +1,259 @@
+<?php
+declare(strict_types=1);
+
+namespace TF;
+
+final class Strava
+{
+    private const OAUTH = 'https://www.strava.com/oauth/';
+    private const ACTIVITIES = 'https://www.strava.com/api/v3/activities';
+    private array $config;
+    private \Closure $post;
+
+    public function __construct(private Db $db, array $config, ?\Closure $post = null)
+    {
+        $this->config = $config['strava'] ?? [];
+        $this->post = $post ?? self::request(...);
+    }
+
+    public function enabled(): bool
+    {
+        $url = $this->config['callback_url'] ?? '';
+        return !empty($this->config['client_id']) && !empty($this->config['client_secret'])
+            && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https';
+    }
+
+    public function connection(int $uid): array
+    {
+        $enabled = $this->enabled();
+        return [
+            'enabled' => $enabled,
+            'connected' => $enabled && $this->db->val('SELECT user_id FROM strava_connections WHERE user_id=?', [$uid]) !== null,
+        ];
+    }
+
+    private function requireConfig(): void
+    {
+        if (!$this->enabled()) {
+            throw new HttpError(503, 'Strava is not configured on this server.');
+        }
+    }
+
+    public function authorize(string $sessionHash): string
+    {
+        $this->requireConfig();
+        $state = bin2hex(random_bytes(32));
+        $this->db->run('DELETE FROM strava_oauth_states WHERE expires_at<=?', [now_utc()]);
+        $this->db->insert('strava_oauth_states', [
+            'nonce_hash' => hash('sha256', $state),
+            'session_hash' => $sessionHash,
+            'expires_at' => now_utc(time() + 600),
+        ]);
+        return self::OAUTH . 'authorize?' . http_build_query([
+            'client_id' => $this->config['client_id'],
+            'redirect_uri' => $this->config['callback_url'],
+            'response_type' => 'code',
+            'scope' => 'activity:write',
+            'state' => $state,
+        ], '', '&', PHP_QUERY_RFC3986);
+    }
+
+    public function connect(int $uid, string $sessionHash, array $query): void
+    {
+        $this->requireConfig();
+        $state = $query['state'] ?? null;
+        if (!is_string($state) || !preg_match('/^[a-f0-9]{64}$/D', $state)
+            || $this->db->run('DELETE FROM strava_oauth_states WHERE nonce_hash=? AND session_hash=? AND expires_at>?',
+                [hash('sha256', $state), $sessionHash, now_utc()])->rowCount() !== 1) {
+            throw new HttpError(400, 'Start the Strava connection again from Settings.');
+        }
+        $code = $query['code'] ?? null;
+        $scopes = preg_split('/[\s,]+/', is_string($query['scope'] ?? null) ? $query['scope'] : '');
+        if (!is_string($code) || $code === '' || !in_array('activity:write', $scopes, true)) {
+            throw new HttpError(403, 'Allow Strava activity access to send workouts.');
+        }
+        $tokens = $this->tokens(['grant_type' => 'authorization_code', 'code' => $code]);
+        $sql = $this->db->driver === 'mysql'
+            ? 'ON DUPLICATE KEY UPDATE tokens=?, expires_at=?'
+            : 'ON CONFLICT(user_id) DO UPDATE SET tokens=?, expires_at=?';
+        $this->db->run("INSERT INTO strava_connections (user_id, tokens, expires_at) VALUES (?, ?, ?) $sql",
+            [$uid, $tokens['tokens'], $tokens['expires_at'], $tokens['tokens'], $tokens['expires_at']]);
+    }
+
+    public function disconnect(int $uid): array
+    {
+        $this->db->run('DELETE FROM strava_connections WHERE user_id=?', [$uid]);
+        return $this->connection($uid);
+    }
+
+    private function tokens(array $grant): array
+    {
+        [$status, $data] = ($this->post)(self::OAUTH . 'token', $grant + [
+            'client_id' => $this->config['client_id'],
+            'client_secret' => $this->config['client_secret'],
+        ], null);
+        if ($status === 400 || $status === 401 || $status === 403) {
+            throw new HttpError(409, 'Strava rejected the connection. Try connecting again in Settings.');
+        }
+        if ($status !== 200 || empty($data['access_token']) || empty($data['refresh_token'])
+            || !is_numeric($data['expires_at'] ?? null)) {
+            throw new HttpError(502, 'Could not connect to Strava. Try again in Settings.');
+        }
+        $iv = random_bytes(12);
+        $plain = json_encode(['access' => $data['access_token'], 'refresh' => $data['refresh_token']], JSON_THROW_ON_ERROR);
+        $box = openssl_encrypt($plain, 'aes-256-gcm', $this->key(), OPENSSL_RAW_DATA, $iv, $tag);
+        if ($box === false) {
+            throw new \RuntimeException('Could not encrypt Strava credentials.');
+        }
+        return ['tokens' => base64_encode($iv . $tag . $box), 'expires_at' => (int) $data['expires_at']];
+    }
+
+    private function key(): string
+    {
+        return hash_hkdf('sha256', $this->config['client_secret'], 32, 'ThoeneFit Strava tokens');
+    }
+
+    private function decrypt(string $tokens): array
+    {
+        $box = base64_decode($tokens, true);
+        $plain = $box !== false && strlen($box) > 28
+            ? openssl_decrypt(substr($box, 28), 'aes-256-gcm', $this->key(), OPENSSL_RAW_DATA, substr($box, 0, 12), substr($box, 12, 16))
+            : false;
+        if ($plain === false) {
+            throw new HttpError(409, 'Reconnect to Strava in Settings.');
+        }
+        return json_decode($plain, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    private function accessToken(int $uid): string
+    {
+        $row = $this->db->one('SELECT * FROM strava_connections WHERE user_id=?', [$uid]);
+        if (!$row) {
+            throw new HttpError(409, 'Connect to Strava in Settings first.');
+        }
+        if ((int) $row['expires_at'] > time() + 60) {
+            return $this->decrypt($row['tokens'])['access'];
+        }
+        return $this->db->tx(function (Db $db) use ($uid): string {
+            // Serialize refreshes so two concurrent exports cannot race a rotated token.
+            $db->run('UPDATE strava_connections SET expires_at=expires_at WHERE user_id=?', [$uid]);
+            $row = $db->one('SELECT * FROM strava_connections WHERE user_id=?', [$uid]);
+            if (!$row) {
+                throw new HttpError(409, 'Connect to Strava in Settings first.');
+            }
+            $tokens = $this->decrypt($row['tokens']);
+            if ((int) $row['expires_at'] > time() + 60) {
+                return $tokens['access'];
+            }
+            $row = $this->tokens(['grant_type' => 'refresh_token', 'refresh_token' => $tokens['refresh']]);
+            $db->update('strava_connections', $row, 'user_id=?', [$uid]);
+            return $this->decrypt($row['tokens'])['access'];
+        });
+    }
+
+    public function exportStatus(int $uid, string $id): ?array
+    {
+        $row = $this->db->one('SELECT activity_id FROM strava_exports WHERE user_id=? AND workout_id=?', [$uid, $id]);
+        return $row ? ['activity_id' => $row['activity_id']] : null;
+    }
+
+    public function export(int $uid, string $id, bool $summary): array
+    {
+        $workout = (new Workouts($this->db))->get($uid, $id);
+        if (!$workout || $workout['status'] !== 'completed') {
+            throw new HttpError(404, 'Completed workout not found.');
+        }
+        $id = $workout['id'];
+        $existing = $this->exportStatus($uid, $id);
+        if ($existing !== null) {
+            return $existing;
+        }
+        $this->requireConfig();
+        $activity = self::activity($workout, $summary);
+        $token = $this->accessToken($uid);
+        try {
+            $this->db->insert('strava_exports', ['user_id' => $uid, 'workout_id' => $id]);
+        } catch (\PDOException $e) {
+            if ((string) $e->getCode() !== '23000' || ($existing = $this->exportStatus($uid, $id)) === null) {
+                throw $e;
+            }
+            return $existing;
+        }
+
+        [$status, $data] = ($this->post)(self::ACTIVITIES, $activity, $token);
+        $activityId = (string) ($data['id'] ?? '');
+        if ($status === 201 && preg_match('/^[1-9][0-9]{0,23}$/D', $activityId)) {
+            $this->db->update('strava_exports', ['activity_id' => $activityId], 'user_id=? AND workout_id=?', [$uid, $id]);
+            return ['activity_id' => $activityId];
+        }
+        // Only release the reservation when Strava explicitly rejected the request.
+        // A timeout, invalid response or upstream failure can happen after creation.
+        if (in_array($status, [400, 401, 403, 404, 422, 429], true) && is_array($data)) {
+            $this->db->run('DELETE FROM strava_exports WHERE user_id=? AND workout_id=?', [$uid, $id]);
+            $message = match ($status) {
+                401, 403 => 'Reconnect to Strava in Settings, then try again.',
+                429 => 'Strava is rate limiting requests. Wait a little and try again.',
+                default => 'Strava rejected this workout. No activity was created.',
+            };
+            throw new HttpError(409, $message);
+        }
+        return ['activity_id' => null];
+    }
+
+    private static function activity(array $workout, bool $summary): array
+    {
+        $started = strtotime($workout['started_at'] ?? '');
+        $finished = strtotime($workout['completed_at'] ?? '');
+        if ($started === false || $finished === false || $finished <= $started) {
+            throw new HttpError(422, 'This workout has no recorded duration to send to Strava.');
+        }
+        $label = Generator::DAY_LABELS[$workout['day_type']] ?? 'Workout';
+        $activity = [
+            'name' => $label . ' at ' . $workout['gym_name'],
+            'sport_type' => 'WeightTraining',
+            'start_date_local' => $workout['started_at'],
+            'elapsed_time' => $finished - $started,
+        ];
+        if (!$summary) {
+            return $activity;
+        }
+        $lines = [];
+        foreach ($workout['exercises'] as $exercise) {
+            $sets = [];
+            foreach ($exercise['sets'] as $set) {
+                if (!$set['done'] || $set['reps'] === null) {
+                    continue;
+                }
+                $weight = $set['weight'] > 0 ? " × {$set['weight']} {$workout['unit']}" : '';
+                $sets[] = $set['reps'] . ' reps' . $weight . ($set['warmup'] ? ' (warm-up)' : '');
+            }
+            if ($sets) {
+                $lines[] = $exercise['name'] . ': ' . implode(', ', $sets);
+            }
+        }
+        if ($lines) {
+            $description = implode("\n", $lines);
+            $activity['description'] = mb_strlen($description) > 3000 ? mb_substr($description, 0, 2999) . '…' : $description;
+        }
+        return $activity;
+    }
+
+    private static function request(string $url, array $form, ?string $token): array
+    {
+        $headers = ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'];
+        if ($token !== null) {
+            $headers[] = 'Authorization: Bearer ' . $token;
+        }
+        $context = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => $headers,
+            'content' => http_build_query($form, '', '&', PHP_QUERY_RFC3986),
+            'ignore_errors' => true,
+            'follow_location' => 0,
+            'timeout' => 8,
+        ]]);
+        $body = @file_get_contents($url, false, $context);
+        preg_match('/^HTTP\/\S+ (\d{3})/', $http_response_header[0] ?? '', $match);
+        return [(int) ($match[1] ?? 0), $body === false ? null : json_decode($body, true, 512, JSON_BIGINT_AS_STRING)];
+    }
+}
