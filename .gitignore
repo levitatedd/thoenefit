@@ -1,6 +1,7 @@
 # Local database and secrets never go to GitHub
 /data/
 thoenefit-config.php
+thoenefit-staging-config.php
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

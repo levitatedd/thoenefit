@@ -87,6 +87,7 @@ async function boot() {
 
 function applyBoot(data) {
   S.user = data.user;
+  S.strava = data.strava;
   S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
   S.shares = data.shares || [];
@@ -184,6 +185,12 @@ function render() {
     ].map(([key, label, ic]) => h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, icon(ic, 24), h('span', {}, label))),
   );
   root.replaceChildren(view, restDock(), nav);
+  if (tab === 'settings' && ['strava-connected', 'strava-denied', 'strava-error'].includes(arg)) {
+    history.replaceState(null, '', '#/settings');
+    if (arg === 'strava-connected') toast('Strava connected.');
+    else if (arg === 'strava-denied') toast('Allow Strava activity access to send workouts.', 'bad');
+    else toast('Could not connect to Strava. Try again in Settings.', 'bad');
+  }
   // An exercise page opened from a workout remembers where to go back to,
   // and that screen comes back at the spot it was left.
   const onExercise = tab === 'exercises' && arg && arg !== 'new' && arg !== 'edit';
@@ -1260,7 +1267,7 @@ function viewHistoryDetail(id) {
   return h('main', { class: 'page' }, backLink('history', 'History'),
     asyncSection(
       () => api.get('workout', `&id=${encodeURIComponent(id)}`),
-      ({ workout }) => {
+      ({ workout, strava, strava_export: stravaExport }) => {
         let dirty = false;
         const save = h('button', { class: 'btn primary block', type: 'button', disabled: true }, 'Save changes');
         const touch = () => {
@@ -1316,6 +1323,7 @@ function viewHistoryDetail(id) {
           h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
           box,
           save,
+          workout.status === 'completed' && workoutStrava(workout, strava, stravaExport, () => dirty),
           h('button', { class: 'btn danger block', type: 'button', onclick: async () => {
             if (!(await confirmSheet('Delete this workout?', 'It is removed from history and from future suggestions. This cannot be undone.', 'Delete workout', true))) return;
             await act(async () => {
@@ -1328,6 +1336,85 @@ function viewHistoryDetail(id) {
         ];
       },
     ));
+}
+
+function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
+  if (!exported && !connection?.connected) return null;
+  const panel = h('div', { class: 'stack' });
+  let checking = false;
+  let statusMessage = '';
+  const checkUpload = async (automatic = false) => {
+    if (checking || !connection?.connected) return;
+    checking = true;
+    statusMessage = '';
+    paint();
+    try {
+      for (let attempt = 0; attempt < (automatic ? 5 : 1); attempt++) {
+        if (automatic) await new Promise((resolve) => setTimeout(resolve, 2200));
+        if (!panel.isConnected) return;
+        const result = await api.post('strava_check_export', { id: workout.id });
+        if (!panel.isConnected) return;
+        exported = result.export;
+        if (!exported) statusMessage = 'Strava couldn’t process this upload. You can try sending it again.';
+        if (exported?.activity_id) toast('Workout sent to Strava.');
+        if (!exported?.processing) break;
+      }
+    } catch (e) {
+      statusMessage = e.offline ? 'Reconnect to check the Strava upload.' : e.message;
+    } finally {
+      checking = false;
+      if (panel.isConnected) paint();
+    }
+  };
+  const paint = () => {
+    const status = statusMessage && h('p', { class: 'muted small', role: 'status' }, statusMessage);
+    if (exported?.processing) {
+      fill(panel,
+        status || h('p', { class: 'muted small', role: 'status' }, 'Strava is processing this workout.'),
+        connection?.connected
+          ? h('button', { class: 'btn block', type: 'button', disabled: checking, onclick: () => checkUpload() }, 'Check Strava upload')
+          : h('a', { class: 'btn block', href: '#/settings' }, 'Reconnect Strava in Settings'),
+      );
+      return;
+    }
+    if (exported) {
+      fill(panel, exported.activity_id
+        ? h('a', { class: 'btn block', href: `https://www.strava.com/activities/${exported.activity_id}`, target: '_blank', rel: 'noopener noreferrer' }, 'View on Strava')
+        : h('p', { class: 'muted small', role: 'status' }, 'This export is pending or could not be confirmed. Check your Strava activities. ThoeneFit won’t send it again to avoid a duplicate.'));
+      return;
+    }
+    if (!(Date.parse(workout.completed_at) > Date.parse(workout.started_at))) {
+      fill(panel, h('p', { class: 'muted small' }, 'This workout has no recorded duration to send to Strava.'));
+      return;
+    }
+    fill(panel, status, h('button', { class: 'btn block', type: 'button', onclick: () => {
+      if (hasUnsavedChanges()) {
+        toast('Save your workout changes first.', 'bad');
+        return;
+      }
+      const summary = h('input', { type: 'checkbox' });
+      const send = h('button', { class: 'btn primary block', type: 'button', onclick: () => act(async () => {
+        exported = await api.post('strava_export', {
+          id: workout.id,
+          include_summary: summary.checked,
+          utc_offset: -new Date(workout.started_at).getTimezoneOffset() * 60,
+        });
+        statusMessage = '';
+        close();
+        paint();
+        if (exported.activity_id) toast('Workout sent to Strava.');
+        else if (exported.processing) checkUpload(true);
+      }, send) }, 'Send workout');
+      const close = sheet('Send to Strava', h('div', { class: 'stack' },
+        h('p', {}, 'Send this workout as a Weight Training activity. Your Strava activity visibility settings apply.'),
+        h('label', { class: 'check' }, summary, 'Include exercises, sets, reps, and weights'),
+        send,
+      ));
+    } }, 'Send to Strava'));
+  };
+  paint();
+  if (exported?.processing) checkUpload(true);
+  return panel;
 }
 
 // ---------------------------------------------------------------- exercises
@@ -1489,6 +1576,21 @@ function viewSettings() {
       h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
+      S.strava?.enabled && (S.strava.connected
+        ? h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
+          const button = e.currentTarget;
+          if (!(await confirmSheet('Disconnect Strava?', 'Workouts you already sent stay on Strava.', 'Disconnect'))) return;
+          await act(async () => {
+            const result = await api.post('strava_disconnect');
+            S.strava = result.strava;
+            render();
+            toast('Strava disconnected.');
+          }, button);
+        } }, 'Disconnect Strava')
+        : h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
+          const { url } = await api.post('strava_authorize');
+          location.assign(url);
+        }, e.currentTarget) }, 'Connect to Strava')),
       h('form', { class: 'stack', onsubmit: async (e) => {
         e.preventDefault();
         await act(async () => {

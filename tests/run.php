@@ -14,6 +14,7 @@ use TF\Generator;
 use TF\HttpError;
 use TF\Migrator;
 use TF\Shares;
+use TF\Strava;
 use TF\Workouts;
 
 $pass = 0;
@@ -519,6 +520,162 @@ $sh->send($uid, $key, [$uid2], $allowed, $plan);
 check('it can be shared again with someone who already trained from it', count($sh->incoming($uid2)) === 1 && $sh->incoming($uid2)[0]['status'] === 'pending');
 $db->run('UPDATE workout_shares SET updated_at=? WHERE id=?', [TF\now_utc(time() - 25 * 3600), $third]);
 check('a share nobody answers lapses after a day', $sh->incoming($uid3) === [] && array_column($sh->outgoing($uid, $key), 'status', 'name')['third'] === 'expired');
+
+echo "Strava export\n";
+$stravaConfig = ['strava' => [
+    'client_id' => '1234',
+    'client_secret' => 'test-client-secret',
+    'callback_url' => 'https://example.com/api.php?a=strava_callback',
+]];
+$requests = [];
+$reply = [201, ['id' => '91234567890123456']];
+$overlap = null;
+$strava = new Strava($db, $stravaConfig, static function (string $url, ?array $data, ?string $token, ?string $file = null) use (&$requests, &$reply, &$overlap): array {
+    $requests[] = [$url, $data, $token, $file];
+    if (str_ends_with($url, '/token')) {
+        $refresh = $data['grant_type'] === 'refresh_token';
+        return [200, [
+            'access_token' => $refresh ? 'renewed-access' : 'first-access',
+            'refresh_token' => $refresh ? 'renewed-refresh' : 'first-refresh',
+            'expires_at' => time() + 3600,
+        ]];
+    }
+    if ($overlap) {
+        $overlap();
+    }
+    return $reply;
+});
+$session = hash('sha256', 'sign-in session');
+$getState = static function () use ($strava, $session, $stravaConfig): string {
+    $url = $strava->authorize($session);
+    parse_str(parse_url($url, PHP_URL_QUERY), $query);
+    check('OAuth requests activity write access at the configured callback',
+        parse_url($url, PHP_URL_HOST) === 'www.strava.com' && $query['scope'] === 'activity:write'
+        && $query['redirect_uri'] === $stravaConfig['strava']['callback_url']);
+    return $query['state'];
+};
+check('Strava is disabled without deployment credentials', (new Strava($db, []))->connection($uid) === ['enabled' => false, 'connected' => false]);
+$oauth = ['state' => $getState(), 'code' => 'test-code', 'scope' => 'read,activity:write'];
+check('the OAuth callback cannot be used by another sign-in session', throws(fn() => $strava->connect($uid2, hash('sha256', 'other session'), $oauth), 400) && !$requests);
+$strava->connect($uid, $session, $oauth);
+check('OAuth state is single-use', throws(fn() => $strava->connect($uid, $session, $oauth), 400) && count($requests) === 1);
+check('a connection belongs only to the authorizing ThoeneFit account', $strava->connection($uid)['connected'] && !$strava->connection($uid2)['connected']);
+check('tokens are encrypted in the database', !str_contains($db->val('SELECT tokens FROM strava_connections WHERE user_id=?', [$uid]), 'first-refresh'));
+check('export cannot read a workout owned by another user', throws(fn() => $strava->export($uid2, $d1['id'], false), 404));
+
+$exportDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8], [145, 7]]]], '2026-10-20T16:20:00Z');
+$exportDoc['completed_at'] = '2026-10-20T17:00:00Z';
+$exportDoc['exercises'][0]['sets'][1]['done'] = false;
+$wk->save($uid, $exportDoc);
+$exportId = $exportDoc['id'];
+$overlap = static function () use ($strava, $uid, $exportId): void {
+    check('a concurrent send sees the existing reservation', $strava->export($uid, $exportId, false) === ['activity_id' => null]);
+};
+$sent = $strava->export($uid, $exportId, false);
+$overlap = null;
+[$url, $body, $token] = $requests[1];
+check('exports a completed lifting workout with its recorded time and elapsed seconds',
+    $url === 'https://www.strava.com/api/v3/activities' && $token === 'first-access'
+    && $body['name'] === 'Push at ' . $home['name'] && $body['sport_type'] === 'WeightTraining'
+    && $body['start_date_local'] === '2026-10-20T16:20:00Z' && $body['elapsed_time'] === 2400);
+check('a basic activity sends no exercise details or attachment', !isset($body['description']) && $requests[1][3] === null);
+check('retries return the same Strava activity without creating another one', $sent === ['activity_id' => '91234567890123456']
+    && $strava->export($uid, $exportId, false) === $sent && count($requests) === 2);
+
+$otherDoc = $exportDoc;
+$otherDoc['id'] = uuid();
+$otherDoc['exercises'] = [];
+$wk->save($uid, $otherDoc);
+$db->run('UPDATE strava_connections SET expires_at=0 WHERE user_id=?', [$uid]);
+$reply = [429, ['message' => 'Rate limit exceeded']];
+check('a definite rejection can be retried and refresh uses the stored refresh token',
+    throws(fn() => $strava->export($uid, $otherDoc['id'], false), 409)
+    && $strava->exportStatus($uid, $otherDoc['id']) === null && $requests[2][1]['refresh_token'] === 'first-refresh');
+$reply = [0, null];
+check('an ambiguous response keeps its reservation and cannot create duplicates on retry',
+    $strava->export($uid, $otherDoc['id'], false) === ['activity_id' => null]
+    && $strava->export($uid, $otherDoc['id'], false) === ['activity_id' => null] && count($requests) === 5);
+check('the provider receives no exercise summary unless selected and uses the refreshed token',
+    !isset($requests[4][1]['description']) && $requests[4][2] === 'renewed-access');
+$otherDoc['id'] = uuid();
+$otherDoc['completed_at'] = $otherDoc['started_at'];
+$wk->save($uid, $otherDoc);
+check('a workout without a measured duration cannot be exported',
+    throws(fn() => $strava->export($uid, $otherDoc['id'], false), 422) && count($requests) === 5);
+
+$strengthDoc = $doc($home, 'push', [
+    [$bench, 5, 8, [[135, 8], [145, 7, false, false], [155, 6]]],
+    [$customId, 5, 8, [[10, 5, true]]],
+], '2026-10-20T16:20:00Z');
+$strengthDoc['completed_at'] = '2026-10-20T17:00:00Z';
+$wk->save($uid, $strengthDoc);
+$strengthId = $strengthDoc['id'];
+$pending = ['activity_id' => null, 'processing' => true];
+$reply = [201, ['id_str' => '9223372036854775000', 'activity_id' => null]];
+check('acceptance persists a pending upload without confirming an activity', $strava->export($uid, $strengthId, true, -18000) === $pending);
+[$url, $form, $token, $file] = $requests[5];
+$json = json_decode($file, true, 512, JSON_THROW_ON_ERROR);
+check('strength export sends the documented upload fields and preserves title, sport, and timing',
+    $url === 'https://www.strava.com/api/v3/uploads' && $token === 'renewed-access'
+    && $form['data_type'] === 'json' && $form['external_id'] === 'thoenefit-' . $strengthId
+    && $form['name'] === 'Push at ' . $home['name'] && $form['sport_type'] === 'WeightTraining'
+    && $json['version'] === '1.0' && $json['start_time'] === '2026-10-20T16:20:00Z'
+    && $json['utc_offset'] === -18000 && $json['elapsed_time'] === 2400);
+check('structured sets use documented exercise identifiers and kilograms and omit incomplete sets', $json['sets'] === [
+    ['exercise_type' => 'BARBELL_BENCH_PRESS', 'repetitions' => 8, 'weight' => 61.235],
+    ['exercise_type' => 'BARBELL_BENCH_PRESS', 'repetitions' => 6, 'weight' => 70.307],
+]);
+check('unmapped sets keep the original exercise name, weight unit and warm-up note in the description',
+    $form['description'] === 'Mike Special Press: 5 reps × 10 lb (warm-up)');
+check('reopening the history entry and repeating export reuse the pending upload',
+    $strava->exportStatus($uid, $strengthId) === $pending && $strava->export($uid, $strengthId, true) === $pending && count($requests) === 6);
+check('status checks cannot access a different account or poll the same upload too soon',
+    $strava->checkExport($uid2, $strengthId) === null && $strava->checkExport($uid, $strengthId) === $pending && count($requests) === 6);
+$due = static fn(string $id) => $db->run('UPDATE strava_exports SET poll_after=0 WHERE user_id=? AND workout_id=?', [$uid, $id]);
+$due($strengthId);
+$reply = [200, ['activity_id' => null, 'error' => null]];
+check('checking an unfinished upload uses its original 64-bit ID and does not create a second activity',
+    $strava->checkExport($uid, $strengthId) === $pending
+    && $requests[6] === ['https://www.strava.com/api/v3/uploads/9223372036854775000', null, 'renewed-access', null]);
+$due($strengthId);
+$reply = [200, ['activity_id' => '9223372036854775001', 'error' => null]];
+$confirmed = ['activity_id' => '9223372036854775001'];
+check('a completed upload records the activity ID and further attempts reuse its receipt',
+    $strava->checkExport($uid, $strengthId) === $confirmed && $strava->checkExport($uid, $strengthId) === $confirmed
+    && $strava->export($uid, $strengthId, true) === $confirmed && count($requests) === 8);
+
+$fallback = $doc($home, 'push', [[$customId, 5, 8, [[10, 5]]]], '2026-10-20T16:20:00Z');
+$fallback['completed_at'] = '2026-10-20T17:00:00Z';
+$wk->save($uid, $fallback);
+$reply = [201, ['id' => '45']];
+check('a workout with only unmapped lifts uses a manual activity with the requested text summary',
+    $strava->export($uid, $fallback['id'], true) === ['activity_id' => '45']
+    && $requests[8][0] === 'https://www.strava.com/api/v3/activities'
+    && $requests[8][1]['description'] === 'Mike Special Press: 5 reps × 10 lb' && $requests[8][3] === null);
+
+$failure = $doc($home, 'push', [[$bench, 5, 8, [[61.5, 8]]]], '2026-10-20T16:20:00Z');
+$failure['unit'] = 'kg';
+$failure['completed_at'] = '2026-10-20T17:00:00Z';
+$wk->save($uid, $failure);
+$failureId = $failure['id'];
+$reply = [201, ['id' => '123']];
+$strava->export($uid, $failureId, true);
+check('already-metric workouts keep their logged weight', json_decode($requests[9][3], true)['sets'][0]['weight'] === 61.5);
+$due($failureId);
+$reply = [503, null];
+check('a transient response keeps the upload pending', $strava->checkExport($uid, $failureId) === $pending);
+$due($failureId);
+$reply = [200, ['activity_id' => null, 'error' => 'Invalid file']];
+check('a rejected upload can be corrected and sent again', $strava->checkExport($uid, $failureId) === null && $strava->exportStatus($uid, $failureId) === null);
+$reply = [201, ['id' => '124']];
+$strava->export($uid, $failureId, true);
+$due($failureId);
+$reply = [200, ['activity_id' => null, 'error' => 'Duplicate of activity 111']];
+check('a reported duplicate cannot be posted again',
+    $strava->checkExport($uid, $failureId) === ['activity_id' => null] && $strava->export($uid, $failureId, true) === ['activity_id' => null]
+    && count($requests) === 14);
+check('disconnect removes credentials and preserves the export receipt',
+    !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 
 echo "Upgrading a database that already has accounts\n";
 $old = $freshDb('upgrade');
