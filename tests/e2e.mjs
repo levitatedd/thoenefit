@@ -52,6 +52,13 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && !/Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(m.text()) && errors.push(m.text()));
+// Waits for a toast with this text. Waiting for any '.toast.show' can match a toast
+// left over from an earlier step (they stay up 3.2 s), and then the next check runs
+// before the action has finished (#84).
+const waitForToast = (pg, text) => pg.waitForFunction((src) => {
+  const t = document.getElementById('toast');
+  return !!t && t.classList.contains('show') && new RegExp(src).test(t.textContent);
+}, text.source);
 const shot = async (name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png` });
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
@@ -301,7 +308,7 @@ check('ticking Send to Strava shows the option to include exercises, sets, reps 
 await detailsRow.click();
 await shot('07b-finish-send-to-strava');
 await page.click('.sheet button:has-text("Finish and save")');
-await page.waitForSelector('.toast.show');
+await waitForToast(page, /Workout saved/);
 check('the message says it goes to Strava once it syncs', /goes to Strava once it syncs/.test(await page.textContent('.toast')));
 for (let i = 0; i < 40 && !finishSave; i++) await page.waitForTimeout(250);
 page.off('request', watchSave);
@@ -329,11 +336,18 @@ await page.waitForSelector('.lift');
 const editRow = page.locator('.lift', { hasText: liftName }).locator('.set').last();
 await editRow.locator('input').nth(1).fill(String(repMax - 3));
 await page.click('button:has-text("Save changes")');
-await page.waitForSelector('.toast.show');
+// The page redraws its exercises once the save returns; wait for that before reading it.
+await waitForToast(page, /Changes saved/);
 // #19: the Trend link on a past workout reads as a link and comes back to that workout.
 const workoutHash = await page.evaluate(() => location.hash);
 const trendLink = page.locator('.lift', { hasText: liftName }).locator('a.trend-link');
-check('the Trend link on a past workout is underlined', (await trendLink.evaluate((el) => getComputedStyle(el).textDecorationLine)).includes('underline'));
+// Looked up fresh on each try, so a redraw cannot leave the check holding a removed link (#84).
+const underlined = await page.waitForFunction((name) => {
+  const lift = [...document.querySelectorAll('.lift')].find((l) => l.textContent.includes(name));
+  const link = lift && lift.querySelector('a.trend-link');
+  return !!link && link.isConnected && getComputedStyle(link).textDecorationLine.includes('underline');
+}, liftName, { timeout: 5000 }).then(() => true, () => false);
+check('the Trend link on a past workout is underlined', underlined);
 await trendLink.click();
 await page.waitForSelector('.chart');
 check('opened from a past workout, the way back says Workout History', (await page.textContent('.back')).trim() === 'Workout History');
@@ -746,7 +760,7 @@ if (!process.env.TF_URL) {
   try {
     writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
     await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
-    await page.waitForSelector('.toast.show');
+    await waitForToast(page, /ThoeneFit was updated/).catch(() => {});
     check('after a deploy, reopening the app reloads it and says so', /ThoeneFit was updated/.test(await page.textContent('.toast')));
   } finally {
     writeFileSync(versionFile, original);
@@ -806,7 +820,7 @@ if (!process.env.TF_URL) {
   await phone.fill('input[autocomplete=current-password]', 'buddy-password-1');
   await phone.fill('input[autocomplete=new-password]', 'buddy-password-3');
   await phone.click('button:has-text("Change password")');
-  await phone.waitForSelector('.toast.show');
+  await waitForToast(phone, /Password changed/).catch(() => {});
   check('changing the password says other devices are signed out', /Other devices are signed out/.test(await phone.textContent('.toast')));
   // The device that made the change keeps working: a write needs its new session and security token.
   await phone.goto(`${URL}#/exercises/new`);
