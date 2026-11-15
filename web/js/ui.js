@@ -196,11 +196,19 @@ export function stepper(value, { min, max, step, suffix, onChange }) {
   );
 }
 
-/** Line chart of {label, value} points drawn as SVG. */
-export function lineChart(points, { unit = '' } = {}) {
+/**
+ * Line chart drawn as SVG. Each point is {label, value} plus, optionally:
+ *   t      time in ms, to space points by date instead of evenly
+ *   title  heading shown when the point is selected (defaults to label)
+ *   lines  extra lines of detail for the selected point
+ *   href   where "Open workout" goes for that point
+ * Tapping, hovering or using the arrow keys selects the nearest point and shows
+ * its details above the chart (#11). opts.onOpen runs before following href.
+ */
+export function lineChart(points, { unit = '', format = fmtW, onOpen, openLabel = 'Open workout', hint = 'Tap a point to see its details.' } = {}) {
   const W = 320;
   const H = 120;
-  const pad = { l: 8, r: 8, t: 14, b: 8 };
+  const pad = { l: 10, r: 10, t: 14, b: 10 };
   const vals = points.map((p) => p.value);
   let lo = Math.min(...vals);
   let hi = Math.max(...vals);
@@ -208,21 +216,81 @@ export function lineChart(points, { unit = '' } = {}) {
     lo -= 1;
     hi += 1;
   }
-  const x = (i) => pad.l + (points.length === 1 ? (W - pad.l - pad.r) / 2 : (i * (W - pad.l - pad.r)) / (points.length - 1));
+  const timed = points.length > 1 && points.every((p) => Number.isFinite(p.t)) && points[points.length - 1].t > points[0].t;
+  const t0 = timed ? points[0].t : 0;
+  const span = timed ? points[points.length - 1].t - t0 : 1;
+  const x = (i) => {
+    if (points.length === 1) return W / 2;
+    const f = timed ? (points[i].t - t0) / span : i / (points.length - 1);
+    return pad.l + f * (W - pad.l - pad.r);
+  };
   const y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ');
   // With a long history the line alone reads better; only the latest point keeps its dot.
   const dense = points.length > 40;
   const dots = points
-    .map((p, i) => (dense && i !== points.length - 1 ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${i === points.length - 1 ? 4.5 : 3}"/>`))
+    .map((p, i) => (dense && i !== points.length - 1 ? '' : `<circle class="dot${i === points.length - 1 ? ' latest' : ''}" cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${i === points.length - 1 ? 4.5 : 3}"/>`))
     .join('');
   const fig = h('figure', { class: 'chart' });
   const first = points[0];
   const last = points[points.length - 1];
   if (dense) fig.classList.add('dense');
-  fig.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="From ${fmtW(first.value)} ${unit} on ${first.label} to ${fmtW(last.value)} ${unit} on ${last.label}"><path d="${d}"/>${dots}</svg>`;
+  const summary = `From ${format(first.value)} ${unit} on ${first.label} to ${format(last.value)} ${unit} on ${last.label}`;
+  const readout = h('div', { class: 'chart-readout', 'aria-live': 'polite' }, h('span', { class: 'muted small' }, hint));
+  fig.append(readout);
+  fig.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 ${W} ${H}" role="img" tabindex="0" aria-label="${summary}. Use the arrow keys to step through points."><path d="${d}"/>${dots}<line class="guide" x1="0" x2="0" y1="${pad.t - 6}" y2="${H - pad.b + 6}" visibility="hidden"/><circle class="sel" r="6" visibility="hidden"/></svg>`);
+  const svg = fig.querySelector('svg');
+  const guide = svg.querySelector('.guide');
+  const mark = svg.querySelector('.sel');
+  let current = -1;
+
+  const select = (i) => {
+    i = Math.max(0, Math.min(points.length - 1, i));
+    if (i === current) return;
+    current = i;
+    const p = points[i];
+    const cx = x(i).toFixed(1);
+    guide.setAttribute('x1', cx);
+    guide.setAttribute('x2', cx);
+    mark.setAttribute('cx', cx);
+    mark.setAttribute('cy', y(p.value).toFixed(1));
+    guide.setAttribute('visibility', 'visible');
+    mark.setAttribute('visibility', 'visible');
+    const text = h('div', { class: 'chart-readout-text' },
+      h('strong', {}, p.title || p.label),
+      h('span', {}, `${format(p.value)} ${unit}`.trim()),
+      (p.lines || []).map((line) => h('span', { class: 'muted' }, line)));
+    // Only points that stand for one workout get a link (Trends' weekly points do not).
+    if (p.href) readout.replaceChildren(text, h('a', { class: 'btn small', href: p.href, onclick: () => onOpen && onOpen(p) }, openLabel));
+    else readout.replaceChildren(text);
+  };
+  // Nearest point to where the pointer is across the chart.
+  const nearest = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    const sx = ((clientX - r.left) / r.width) * W;
+    let best = 0;
+    for (let i = 1; i < points.length; i++) if (Math.abs(x(i) - sx) < Math.abs(x(best) - sx)) best = i;
+    return best;
+  };
+  svg.addEventListener('pointerdown', (e) => select(nearest(e.clientX)));
+  svg.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse' || e.buttons) select(nearest(e.clientX));
+  });
+  svg.addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+    if (step) {
+      e.preventDefault();
+      select(current < 0 ? points.length - 1 : current + step);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      select(e.key === 'Home' ? 0 : points.length - 1);
+    } else if (e.key === 'Enter' && current >= 0 && points[current].href) {
+      if (onOpen) onOpen(points[current]);
+      location.hash = points[current].href.replace(/^#/, '');
+    }
+  });
   fig.append(
-    h('figcaption', {}, h('span', {}, `${first.label}: ${fmtW(first.value)} ${unit}`), points.length > 2 && h('span', {}, `Best: ${fmtW(Math.max(...vals))} ${unit}`), h('span', {}, `${last.label}: ${fmtW(last.value)} ${unit}`)),
+    h('figcaption', {}, h('span', {}, `${first.label}: ${format(first.value)} ${unit}`), points.length > 2 && h('span', {}, `Best: ${format(Math.max(...vals))} ${unit}`), h('span', {}, `${last.label}: ${format(last.value)} ${unit}`)),
   );
   return fig;
 }
