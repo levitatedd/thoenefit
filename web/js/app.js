@@ -1407,7 +1407,8 @@ function viewExercise(id) {
     h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
     section('History', trend),
-    ex.custom && h('div', { class: 'stack' },
+    ex.shared && h('p', { class: 'muted small' }, S.user.role === 'admin' ? 'This is in the default library for everyone. As the admin you can still edit or archive it; archiving hides it from suggestions for all accounts.' : 'Added to the default library by the admin.'),
+    (ex.custom || (ex.shared && S.user.role === 'admin')) && h('div', { class: 'stack' },
       h('a', { class: 'btn block', href: `#/exercises/edit/${ex.id}` }, 'Edit exercise'),
       h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
         await api.post('archive_exercise', { id: ex.id, archived: !ex.archived });

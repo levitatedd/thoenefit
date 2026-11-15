@@ -516,6 +516,38 @@ await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 check('settings include Home Screen instructions for Safari', (await page.textContent('.page')).includes('Tap the Share button'));
 await shot('11-settings');
+if (!process.env.TF_URL) {
+  console.log('Default library');
+  // The admin adds an exercise of their own, it is moved into the default library, and another account can see it.
+  await page.goto(`${URL}#/exercises/new`);
+  await page.waitForSelector('form');
+  await page.fill('form input[type=text]', 'Landmine Press Special');
+  await page.locator('fieldset, .field', { hasText: 'Primary muscles' }).locator('label:has-text("Shoulders")').first().click();
+  await page.click('button:has-text("Add exercise")');
+  await page.waitForSelector('h1:has-text("Landmine Press Special")');
+  const { execFileSync } = await import('node:child_process');
+  const out = execFileSync('php', ['web/private/bin/promote-exercises.php', USER], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  check(`the move command reports what it did (${out.trim().split('\n')[0]})`, /Moved 1 exercise/.test(out));
+  const other = await browser.newContext();
+  const op = await other.newPage();
+  await op.goto(URL);
+  await op.fill('input[name=username]', newUser);
+  await op.fill('input[name=password]', 'buddy-password-1');
+  await op.click('button[type=submit]');
+  await op.waitForSelector('.tabs');
+  await op.goto(`${URL}#/exercises`);
+  await op.fill('input[type=search]', 'landmine');
+  await op.waitForSelector('.log-row:has-text("Landmine Press Special")');
+  check('another account now finds the exercise in the library, not marked as someone\'s own', !(await op.locator('.log-row:has-text("Landmine Press Special")').textContent()).includes('Yours'));
+  await op.click('.log-row:has-text("Landmine Press Special")');
+  await op.waitForSelector('.facts');
+  check('a regular account cannot edit it', (await op.locator('a:has-text("Edit exercise")').count()) === 0 && /Added to the default library/.test(await op.textContent('.page')));
+  await other.close();
+  await page.reload();
+  await page.waitForSelector('h1:has-text("Landmine Press Special")');
+  check('the admin can still edit it', (await page.locator('a:has-text("Edit exercise")').count()) === 1);
+}
+
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;

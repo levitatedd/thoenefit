@@ -327,6 +327,70 @@ $ppl = ['split_type' => 'ppl'] + $user;
 check('push/pull/legs moves to the next day after the last workout (' . $gen->nextDayType($uid, 'ppl') . ')', $gen->nextDayType($uid, 'ppl') === 'legs');
 check('upper/lower starts at upper when the last day was not part of it', $gen->nextDayType($uid, 'upper_lower') === 'upper');
 
+echo "Moving the admin's own exercises into the default library\n";
+$pdb = $freshDb('promote');
+Migrator::ensure($pdb);
+$pa = new Auth($pdb, []);
+$adm = $pa->createUser('mike', 'mike-password-12');
+$pat = $pa->createUser('pat', 'pat-password-123');
+$admRow = $pdb->one('SELECT * FROM users WHERE id=?', [$adm]);
+$patRow = $pdb->one('SELECT * FROM users WHERE id=?', [$pat]);
+$mkEx = fn(int $owner, string $name, string $slug, string $pattern = 'horizontal_push') => $pdb->insert('exercises', ['user_id' => $owner, 'slug' => $slug, 'name' => $name, 'kind' => 'machine', 'equipment' => '["chest_press"]', 'pattern' => $pattern, 'muscles_main' => '["chest"]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 4]);
+$hs = $mkEx($adm, 'Hammerstrength Chest Press', TF\FitbodImport::slug('Hammerstrength Chest Press'));
+$roller = $mkEx($adm, 'Wrist Roller', 'custom-bbbbbbbbbbbb', 'other');
+$clash = $mkEx($adm, 'push-up', 'custom-cccccccccccc');
+$patOwn = $mkEx($pat, 'Pat Press', 'custom-dddddddddddd');
+$pgId = $pdb->insert('gyms', ['user_id' => $adm, 'name' => 'Mike gym', 'equipment' => json_encode(Catalog::equipmentKeys()), 'increments' => '{}', 'created_at' => TF\now_utc()]);
+$pg = Generator::gymShape($pdb->one('SELECT * FROM gyms WHERE id=?', [$pgId]));
+$ogId = $pdb->insert('gyms', ['user_id' => $pat, 'name' => 'Pat gym', 'equipment' => json_encode(Catalog::equipmentKeys()), 'increments' => '{}', 'created_at' => TF\now_utc()]);
+$og = Generator::gymShape($pdb->one('SELECT * FROM gyms WHERE id=?', [$ogId]));
+$wkp = new Workouts($pdb);
+$genp = new Generator($pdb);
+$hist = $doc($pg, 'push', [[$hs, 6, 10, [[100, 10], [100, 10], [100, 10]]]], $ago(3));
+$wkp->save($adm, $hist);
+$shapeOf = fn(int $id) => Catalog::shape($pdb->one('SELECT * FROM exercises WHERE id=?', [$id]));
+$before = $genp->block($admRow, $pg, $shapeOf($hs));
+$keyBefore = $pdb->val('SELECT variant_key FROM workout_exercises WHERE exercise_id=?', [$hs]);
+$seenBy = fn(int $u) => array_column(Catalog::forUser($pdb, $u), 'id');
+check('before the move, other accounts cannot see the admin\'s own exercises', !in_array($hs, $seenBy($pat), true));
+$res = Catalog::promote($pdb, $adm);
+check('the admin\'s own exercises move into the default library', $res['promoted'] === 2 && $pdb->val('SELECT user_id FROM exercises WHERE id=?', [$hs]) === null && (int) $pdb->val('SELECT promoted_from FROM exercises WHERE id=?', [$hs]) === $adm);
+check('every account can now see them, and they are no longer marked as someone\'s own', in_array($hs, $seenBy($pat), true) && in_array($roller, $seenBy($pat), true) && $shapeOf($hs)['custom'] === false && $shapeOf($hs)['shared'] === true);
+$after = $genp->block($admRow, $pg, $shapeOf($hs));
+check('existing workout history is untouched: same exercise id, same history key, same next suggestion (' . $after['suggested_weight'] . ' lb)', count($wkp->exerciseHistory($adm, $hs)) === 1 && $pdb->val('SELECT variant_key FROM workout_exercises WHERE exercise_id=?', [$hs]) === $keyBefore && $after['suggested_weight'] === $before['suggested_weight'] && $after['suggested_weight'] === 110.0 && $wkp->get($adm, $hist['id'])['exercises'][0]['name'] === 'Hammerstrength Chest Press');
+$alts = array_column($genp->alternatives($pat, $og, (int) $pdb->val("SELECT id FROM exercises WHERE slug='machine-chest-press'")), 'exercise_id');
+$patDoc = $doc($og, 'push', [[$hs, 6, 10, [[40, 8]]]], $ago(1));
+check('other accounts can pick them, be offered them as alternatives, and log them', in_array($hs, $alts, true) && $wkp->save($pat, $patDoc)['ok'] === true && $genp->block($patRow, $og, $shapeOf($hs))['suggested_weight'] === 40.0);
+check('each account keeps its own history for a moved exercise', count($wkp->exerciseHistory($pat, $hs)) === 1 && count($wkp->exerciseHistory($adm, $hs)) === 1);
+check('an exercise whose name the default library already has stays the admin\'s own', $res['skipped'] === ['push-up'] && (int) $pdb->val('SELECT user_id FROM exercises WHERE id=?', [$clash]) === $adm);
+check('other people\'s own exercises are left alone', (int) $pdb->val('SELECT user_id FROM exercises WHERE id=?', [$patOwn]) === $pat && !in_array($patOwn, $seenBy($adm), true));
+$rowOf = fn(int $id) => $pdb->one('SELECT * FROM exercises WHERE id=?', [$id]);
+check('the admin can still edit or archive a moved exercise; nobody else can, and built-in ones stay read-only', Catalog::canEdit($rowOf($hs), $admRow) && !Catalog::canEdit($rowOf($hs), $patRow) && !Catalog::canEdit($pdb->one("SELECT * FROM exercises WHERE slug='push-up'"), $admRow) && Catalog::canEdit($rowOf($patOwn), $patRow) && !Catalog::canEdit($rowOf($patOwn), $admRow));
+check('moving again changes nothing', Catalog::promote($pdb, $adm)['promoted'] === 0 && (int) $pdb->val('SELECT COUNT(*) FROM exercises WHERE promoted_from IS NOT NULL') === 2);
+$planned = (new TF\FitbodImport($pdb))->plan($pat, ['names' => ['Hammerstrength Chest Press' => ['sets' => 3, 'weighted' => true]]]);
+check('a Fitbod import by another account uses the moved exercise instead of making a duplicate', $planned[0]['action'] === 'match' && $planned[0]['exercise_id'] === $hs);
+Catalog::sync($pdb);
+check('refreshing the built-in catalog leaves moved exercises in place', $pdb->val('SELECT name FROM exercises WHERE id=?', [$hs]) === 'Hammerstrength Chest Press' && (int) $pdb->val('SELECT COUNT(*) FROM exercises WHERE user_id IS NULL') === count(Catalog::exercises()) + 2);
+// The same thing through the migration, on a database that already has accounts and exercises.
+$mdb = $freshDb('promote2');
+Migrator::ensure($mdb, 3);
+foreach ([['owner', 'admin', '2025-01-01 00:00:00'], ['member', 'user', '2025-02-01 00:00:00']] as [$n, $role, $when]) {
+    $mdb->insert('users', ['username' => $n, 'password_hash' => 'x', 'display_name' => $n, 'role' => $role, 'created_at' => $when]);
+}
+$ownerId = (int) $mdb->val("SELECT id FROM users WHERE username='owner'");
+$memberId = (int) $mdb->val("SELECT id FROM users WHERE username='member'");
+$mk2 = fn(int $owner, string $name) => $mdb->insert('exercises', ['user_id' => $owner, 'slug' => 'custom-' . md5($name), 'name' => $name, 'kind' => 'dumbbell', 'equipment' => '[]', 'pattern' => 'other', 'muscles_main' => '["forearms"]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 4]);
+$o1 = $mk2($ownerId, 'Owner Special');
+$m1 = $mk2($memberId, 'Member Special');
+Migrator::ensure($mdb);
+check('the migration moves the admin\'s exercises and nobody else\'s', $mdb->val('SELECT user_id FROM exercises WHERE id=?', [$o1]) === null && (int) $mdb->val('SELECT promoted_from FROM exercises WHERE id=?', [$o1]) === $ownerId && (int) $mdb->val('SELECT user_id FROM exercises WHERE id=?', [$m1]) === $memberId);
+unset($pa, $wkp, $genp, $pdb, $mdb);
+foreach (['promote', 'promote2'] as $sfx) {
+    @unlink("$file-$sfx");
+    @unlink("$file-$sfx-wal");
+    @unlink("$file-$sfx-shm");
+}
+
 echo "Recovery estimate\n";
 $hard = $doc($big, 'push', [[$bench, 6, 10, [[135, 8], [135, 8], [135, 8], [135, 8]]], [$bySlug['cable-fly'], 10, 15, [[30, 12], [30, 12], [30, 12]]]], $ago(0));
 $wk->save($uid, $hard);
