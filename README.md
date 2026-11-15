@@ -20,6 +20,14 @@ Phone-first workout planner and log. Pick a gym and ThoeneFit builds a session a
 
 The planner favors familiar lifts that fit the gym’s equipment. It uses your goal, experience, and recent training to pick sets, reps, and rest. When all working sets reach the top of the rep range at the same weight, the next suggestion moves up by the gym’s smallest increment. Warm-ups don’t count toward progression. Machine and cable weights are tracked per gym.
 
+### Cardio warm-ups
+
+If a gym has a cardio machine ticked (stationary bike, treadmill, rowing machine, elliptical or stair climber), **Today** offers **Include a warm-up**. The workout then starts with that machine: 10 minutes the first time, then the time you did last, on the machine you used last. Log it as minutes, with optional distance and level. The warm-up counts toward the workout's planned time and its duration, but not toward volume, sets per muscle, recovery or weight suggestions. On Strava it's listed in the activity description. Outdoor and standalone cardio isn't tracked here.
+
+### Estimated calories
+
+Add your body weight under **Settings → Training** to see an estimate of the calories each workout burned. When you finish a workout, you choose how hard it felt (light, moderate or hard). The estimate is MET × body weight × time, using the same idle-trimmed duration as Trends and Strava. A warm-up counts at its machine's value, and the rest of the session counts as lifting at the effort you chose. It's shown on the workout in **History**. When sending to Strava you can include it: it goes in Strava's calorie field when exercises are included, and in the description otherwise. Strava doesn't estimate calories for weight training itself. It's only an estimate, from typical values for each activity.
+
 The recovery estimate uses the sets you’ve logged. A muscle estimated below 50% gets one fewer set in a suggested workout. Sleep, soreness, and training outside the app aren’t part of that estimate.
 
 ### How offline logging works
@@ -63,7 +71,7 @@ After changing the settings, start again with **Connect to Strava**. If you rota
 
 Go to **Settings → Import from Fitbod**, choose the CSV, and pick a gym. Use **Check file** to review exercise matches before you import. Unmatched movements can be renamed, edited, or skipped.
 
-Imported workouts feed trends and weight suggestions. Rows without reps, such as timed holds or cardio, are skipped. Reimporting the same data replaces earlier imports. Use **Remove imported workouts** to undo an import. To download your ThoeneFit set history, use **Export all sets as CSV** in Settings.
+Imported workouts feed trends and weight suggestions. **Cycling - Stationary** and **Stair Stepper** come in as cardio warm-ups, with their time, distance and resistance. Other rows without reps, such as outdoor runs, rides and walks or timed holds like planks, are skipped. Reimporting the same data replaces earlier imports. Use **Remove imported workouts** to undo an import. To download your ThoeneFit set history, use **Export all sets as CSV** in Settings.
 
 ## More accounts and password resets
 

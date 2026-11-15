@@ -78,6 +78,10 @@ echo "Migrations and catalog\n";
 $applied = Migrator::ensure($db);
 check('migrations apply on an empty database', $applied === array_keys(Migrator::files()));
 check('running them again changes nothing', Migrator::ensure($db) === []);
+// Two branches can each add a migration at once. The runner keys migrations by number,
+// so two files with one number would hide each other and one would never run.
+$migrationNumbers = array_map(static fn($f) => (int) basename($f), glob(dirname(__DIR__) . '/web/private/migrations/*.php'));
+check('no two migration files share a number', count($migrationNumbers) === count(array_unique($migrationNumbers)) && count($migrationNumbers) === count(Migrator::files()), implode(',', $migrationNumbers));
 $db->run('DELETE FROM schema_migrations WHERE version=2');
 check('a migration that was skipped (merged out of order) is still applied', Migrator::ensure($db) === [2] && Migrator::ensure($db) === []);
 $n = (int) $db->val('SELECT COUNT(*) FROM exercises');
@@ -850,6 +854,38 @@ check('sending it again by hand afterwards works', $strava->export($uid, $reject
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 
+echo "Saved routines\n";
+$rt = new TF\Routines($db);
+$rtPlan = ['day_type' => 'push', 'exercises' => [
+    ['exercise_id' => $bench, 'target_sets' => 4, 'rep_min' => 5, 'rep_max' => 8, 'rest_seconds' => 150],
+    ['exercise_id' => $bySlug['cable-fly'], 'target_sets' => 3, 'rep_min' => 10, 'rep_max' => 15, 'rest_seconds' => 60],
+    ['exercise_id' => 987654, 'target_sets' => 3, 'rep_min' => 8, 'rep_max' => 12, 'rest_seconds' => 90],
+]];
+check('a routine needs a name and at least one usable exercise', throws(fn() => $rt->save($uid, '  ', $rtPlan), 422) && throws(fn() => $rt->save($uid, 'Empty', ['exercises' => [['exercise_id' => 987654]]]), 422));
+$first = $rt->save($uid, ' Monday   Push ', $rtPlan);
+$mine = $rt->all($uid);
+check('saving keeps the name tidy and drops exercises that do not exist', !$first['replaced'] && count($mine) === 1 && $mine[0]['name'] === 'Monday Push' && $mine[0]['exercises'] === ['Barbell Bench Press', 'Cable Fly'] && $mine[0]['sets'] === 7);
+$again = $rt->save($uid, 'monday push', ['day_type' => 'push', 'exercises' => [$rtPlan['exercises'][0]]]);
+check('saving under a name already used replaces that routine instead of adding another', $again['replaced'] && $again['id'] === $first['id'] && count($rt->all($uid)) === 1 && $rt->all($uid)[0]['sets'] === 4);
+$rt->save($uid, 'Monday Push', $rtPlan);
+check('routines are private to each account', $rt->all($uid2) === [] && throws(fn() => $rt->delete($uid2, $first['id']), 404) && throws(fn() => $rt->draft($samRow ?? $db->one('SELECT * FROM users WHERE id=?', [$uid2]), $big, $first['id'], $gen), 404));
+$rtDraft = $rt->draft($user, $big, $first['id'], $gen);
+$rx = $rtDraft['exercises'];
+check('starting a routine gives its exercises, order, sets and rep ranges', $rtDraft['routine_name'] === 'Monday Push' && array_column($rx, 'name') === ['Barbell Bench Press', 'Cable Fly'] && array_column($rx, 'target_sets') === [4, 3] && array_column($rx, 'rep_min') === [5, 10] && array_column($rx, 'rest_seconds') === [150, 60]);
+check('with the last logged weight and reps for reference, and a weight suggested from history', $rx[0]['previous'] !== null && count($rx[0]['previous']['sets']) > 0 && $rx[0]['suggested_weight'] !== null && strpos($rx[0]['reason'], 'From your routine Monday Push') === 0);
+$rtHome = $rt->draft($user, $home, $first['id'], $gen);
+check('an exercise the gym may not have equipment for is kept, with a note', count($rtHome['exercises']) === 2 && strpos($rtHome['exercises'][1]['reason'], 'may not have the equipment') !== false);
+$second = $rt->save($uid, 'Leg Day', ['day_type' => 'legs', 'exercises' => [['exercise_id' => $bySlug['back-squat'], 'target_sets' => 5, 'rep_min' => 3, 'rep_max' => 5, 'rest_seconds' => 180]]]);
+check('renaming works, but not to a name another routine already has', throws(fn() => $rt->rename($uid, $second['id'], 'MONDAY PUSH'), 409) && (function () use ($rt, $uid, $second) { $rt->rename($uid, $second['id'], 'Squat Day'); return in_array('Squat Day', array_column($rt->all($uid), 'name'), true); })());
+$db->run('UPDATE routines SET updated_at=? WHERE id=?', [TF\now_utc(time() - 3600), $second['id']]); // saved an hour ago
+$db->run('UPDATE routines SET updated_at=? WHERE id=?', [TF\now_utc(time() - 7200), $first['id']]);
+check('otherwise the most recently saved is listed first', $rt->all($uid)[0]['name'] === 'Squat Day');
+$rt->markUsed($uid, $first['id']);
+check('the routine used most recently is listed first', $rt->all($uid)[0]['name'] === 'Monday Push');
+$rt->delete($uid, $second['id']);
+check('a routine can be deleted', array_column($rt->all($uid), 'name') === ['Monday Push'] && throws(fn() => $rt->draft($user, $big, $second['id'], $gen), 404));
+$rt->delete($uid, $first['id']);
+
 echo "Idle time in workout durations\n";
 $span = fn(...$a) => TF\Workouts::activeSpan(...$a);
 $len = fn(?array $s) => $s === null ? null : $s['end'] - $s['start'];
@@ -910,6 +946,130 @@ check('Trends counts a workout left open overnight as 45 minutes, not 14 hours',
 check('a workout still over 4 hours after removing idle time is left out of weekly time, but its volume counts', $idleWeeks[7]['volume'] === 3800.0);
 check('weekly elapsed time counts each recorded duration once and leaves untimed imports out',
     $weeks[6]['seconds'] === 2400 && $weeks[7]['seconds'] === 1500);
+
+echo "Cardio warm-ups\n";
+$cUid = $auth->createUser('cardio-user', 'cardio-user-123');
+$cUser = $db->one('SELECT * FROM users WHERE id=?', [$cUid]);
+$cGym = $mkGym($cUid, 'Cardio gym', ['barbell', 'bench', 'rack', 'dumbbells', 'stationary_bike', 'elliptical', 'treadmill']);
+$noCardioGym = $mkGym($cUid, 'No cardio gym', ['barbell', 'bench', 'rack', 'dumbbells']);
+$cardioEx = array_filter(Catalog::exercises(), static fn($e) => $e[2] === 'cardio');
+check('five cardio machines, each needing its checkbox, listing no muscles', count($cardioEx) === 5 && !array_filter($cardioEx, static fn($e) => $e[4] !== 'cardio' || $e[5] || $e[6] || count($e[3]) !== 1));
+$plain = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'now' => strtotime('2026-11-10T12:00:00Z')]);
+check('without the option, no cardio is ever picked for the workout', !array_filter($plain['exercises'], static fn($b) => $b['kind'] === 'cardio') && $plain['warm_up'] === false && $plain['warm_up_available'] === true);
+$warm = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'now' => strtotime('2026-11-10T12:00:00Z')]);
+$first = $warm['exercises'][0];
+check('with it, the workout starts with 10 minutes on a cardio machine the gym has (' . $first['name'] . ')', $warm['warm_up'] === true && $first['slot'] === 'warmup' && $first['kind'] === 'cardio' && $first['target_seconds'] === 600 && $first['name'] === 'Stationary Bike' && $first['target_sets'] === 1 && $first['rest_seconds'] === 0);
+check('the warm-up counts toward the planned time, and the lifts start the same as without it', $warm['est_minutes'] === (int) round(array_sum(array_column($warm['exercises'], 'minutes'))) && $warm['est_minutes'] <= $warm['minutes'] && array_column(array_slice($warm['exercises'], 1, 3), 'exercise_id') === array_column(array_slice($plain['exercises'], 0, 3), 'exercise_id'));
+$none = $gen->generate($cUser, $noCardioGym, ['day_type' => 'push', 'warm_up' => true]);
+check('a gym with no cardio machine gets no warm-up and does not offer one', $none['warm_up'] === false && $none['warm_up_available'] === false && $none['exercises'][0]['kind'] !== 'cardio');
+$bw = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'bodyweight_only' => true]);
+check('bodyweight-only workouts get no machine warm-up', $bw['warm_up'] === false && $bw['warm_up_available'] === false);
+$ellip = $bySlug['elliptical'];
+$bike = $bySlug['stationary-bike'];
+$cardioDoc = $doc($cGym, 'push', [[$bench, 6, 10, [[135, 8]]]], '2026-11-08T17:00:00Z');
+array_unshift($cardioDoc['exercises'], ['id' => uuid(), 'exercise_id' => $ellip, 'rep_min' => 1, 'rep_max' => 1, 'target_sets' => 1, 'target_seconds' => 600,
+    'sets' => [['id' => uuid(), 'weight' => null, 'reps' => null, 'duration_s' => 745, 'distance_m' => 2414.0, 'level' => 8, 'done' => true, 'done_at' => '2026-11-08T17:12:00Z']]]);
+$wk->save($cUid, $cardioDoc);
+$saved = $wk->get($cUid, $cardioDoc['id']);
+$cs = $saved['exercises'][0]['sets'][0];
+check('a cardio set saves its time, distance and level, and the plan its target time', $cs['duration_s'] === 745 && $cs['distance_m'] === 2414.0 && $cs['level'] === 8.0 && $cs['weight'] === null && $cs['reps'] === null && $saved['exercises'][0]['target_seconds'] === 600);
+$again = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'now' => strtotime('2026-11-10T12:00:00Z')])['exercises'][0];
+check('next time it picks the machine used last and its time, to the minute (12:25 -> 12 min)', $again['exercise_id'] === $ellip && $again['target_seconds'] === 720 && $again['previous']['sets'][0]['level'] === 8.0 && str_contains($again['reason'], 'same as last time'));
+$locked = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'locked' => ['warmup' => $bike], 'avoid' => [$ellip]])['exercises'][0];
+check('a swapped-in warm-up is kept when the plan changes', $locked['exercise_id'] === $bike && $locked['locked'] === true);
+$regen = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'avoid' => [$ellip]])['exercises'][0];
+check('Regenerate keeps the same warm-up machine', $regen['exercise_id'] === $ellip);
+$alts = array_column($gen->alternatives($cUid, $cGym, $bike), 'exercise_id');
+check('swapping a warm-up offers only the other cardio machines at the gym', $alts && !array_diff($alts, [$ellip, $bySlug['treadmill']]) && !in_array($bySlug['rowing-machine'], $alts, true));
+$strengthAlts = array_column($gen->alternatives($cUid, $cGym, $bench), 'exercise_id');
+check('swapping a lift never offers a cardio machine', !array_intersect($strengthAlts, [$bike, $ellip, $bySlug['treadmill']]));
+check('a shared plan with a warm-up gives the recipient a cardio block too', $gen->block($cUser, $cGym, $exById[$bike], false, ['target_sets' => 1, 'rep_min' => 1, 'rep_max' => 1, 'rest_seconds' => 0])['target_seconds'] === 600);
+$cHist = $wk->history($cUid);
+check('History counts lifting sets and volume only', $cHist[0]['sets'] === 1 && $cHist[0]['volume'] == 1080 && $cHist[0]['exercises'][0] === 'Elliptical');
+check('recovery and weekly sets ignore cardio', $gen->muscleStats($cUid, strtotime('2026-11-08T18:00:00Z'))['quads']['weekly_sets'] == 0);
+check('the warm-up is never used for weight suggestions', $gen->lastPerformance($cUid, (string) $ellip) === null);
+$eh = $wk->exerciseHistory($cUid, $ellip);
+check('the elliptical history lists time, distance and level', count($eh) === 1 && $eh[0]['sets'][0] === ['duration_s' => 745, 'distance_m' => 2414.0, 'level' => 8.0]);
+$cWeeks = $wk->weeklyTrends($cUid, 'lb', 'America/Chicago', strtotime('2026-11-10T12:00:00Z'));
+check('weekly volume ignores cardio', $cWeeks[7]['volume'] == 0 && $cWeeks[6]['volume'] == 1080.0);
+$fh = fopen('php://memory', 'w+');
+$wk->exportCsv($cUid, $fh);
+rewind($fh);
+$csvOut = stream_get_contents($fh);
+check('CSV export has time, distance and level', str_contains($csvOut, ',seconds,distance_m,level') && str_contains($csvOut, ',745,2414,8'));
+$stravaDetails = TF\StravaStrength::details($saved);
+check('Strava gets the warm-up in the description and the lifts as sets', str_contains($stravaDetails['description'], 'Elliptical: 12.4 min, 1.5 mi, level 8') && count($stravaDetails['sets']) === 1);
+$fitbodCsv = "Date,Exercise,Reps,Weight(kg),Duration(s),Distance(m),Incline,Resistance,isWarmup,Note,multiplier\n"
+    . "2025-11-06 19:23:18 +0000,Cycling - Stationary, 0,0.0,300.0,2607.1,0.0,12.0,false,, 1.0\n"
+    . "2025-11-06 19:23:18 +0000,Barbell Bench Press, 8,60.0,0.0,0.0,0.0,0.0,false,, 1.0\n"
+    . "2025-11-07 12:00:00 +0000,Running, 0,0.0,1800.0,5000.0,0.0,0.0,false,, 1.0\n"
+    . "2025-11-08 12:00:00 +0000,Stair Stepper, 0,0.0,900.0,0.0,0.0,0.0,false,, 1.0\n";
+$fp = FitbodImport::parse($fitbodCsv);
+check('Fitbod stationary bike and stair stepper are imported; outdoor runs are still skipped', isset($fp['names']['Cycling - Stationary'], $fp['names']['Stair Stepper']) && $fp['skipped'] === ['Running' => 1]);
+$fImp = new FitbodImport($db);
+$fRes = $fImp->run($cUid, $cGym, 'lb', $fp, $fImp->plan($cUid, $fp));
+$fw = $wk->get($cUid, current(array_filter($wk->history($cUid, 5), static fn($w) => $w['started_at'] === '2025-11-06T19:23:18Z'))['id']);
+check('an imported bike warm-up keeps its time, distance and level, in the same workout as the lifts', $fRes['workouts'] === 2 && $fw['exercises'][0]['name'] === 'Stationary Bike' && $fw['exercises'][0]['sets'][0]['duration_s'] === 300 && $fw['exercises'][0]['sets'][0]['distance_m'] === 2607.1 && $fw['exercises'][0]['sets'][0]['level'] === 12.0 && $fw['exercises'][1]['name'] === 'Barbell Bench Press' && $fw['exercises'][0]['target_seconds'] === 300, json_encode($fw['exercises'][0] ?? null));
+
+echo "Estimated calories\n";
+$kUid = $auth->createUser('calorie-user', 'calorie-user-123');
+$kGym = $mkGym($kUid, 'Calorie gym', ['barbell', 'bench', 'rack', 'stationary_bike']);
+$hour = function (?string $effort, bool $warm = false, string $start = '2026-11-09T10:00:00Z', string $end = '2026-11-09T11:00:00Z') use ($doc, $kGym, $bench, $bySlug): array {
+    $w = $doc($kGym, 'push', [[$bench, 6, 10, [[135, 8], [135, 8]]]], $start);
+    $w['completed_at'] = $end;
+    $w['exercises'][0]['sets'][0]['done_at'] = '2026-11-09T10:15:00Z';
+    $w['exercises'][0]['sets'][1]['done_at'] = '2026-11-09T10:50:00Z';
+    $w['effort'] = $effort;
+    if ($warm) {
+        array_unshift($w['exercises'], ['id' => uuid(), 'exercise_id' => $bySlug['stationary-bike'], 'rep_min' => 1, 'rep_max' => 1, 'target_sets' => 1, 'target_seconds' => 600,
+            'sets' => [['id' => uuid(), 'weight' => null, 'reps' => null, 'duration_s' => 600, 'distance_m' => 4000.0, 'level' => 8, 'done' => true, 'done_at' => '2026-11-09T10:10:00Z']]]);
+    }
+    return $w;
+};
+$kSave = function (array $w) use ($wk, $kUid): array {
+    $wk->save($kUid, $w);
+    return $wk->get($kUid, $w['id']);
+};
+$moderate = $kSave($hour('moderate'));
+check('no body weight, no estimate', TF\Calories::estimate($moderate, null) === null);
+check('an hour of lifting at 80 kg: light 280, moderate 400, hard 480 (MET × kg × hours)',
+    TF\Calories::estimate($kSave($hour('light')), 80.0) === 280 && TF\Calories::estimate($moderate, 80.0) === 400 && TF\Calories::estimate($kSave($hour('hard')), 80.0) === 480);
+check('the effort is saved with the workout, and a missing or unknown one counts as moderate',
+    $moderate['effort'] === 'moderate' && ($unknown = $kSave($hour('extreme')))['effort'] === null && TF\Calories::estimate($unknown, 80.0) === 400);
+$withBike = $kSave($hour('moderate', true));
+check('a 10-minute bike warm-up counts at the bike\'s value and the other 50 minutes as lifting (64 + 333 = 397)', TF\Calories::estimate($withBike, 80.0) === 397);
+check('a workout left open overnight uses the same trimmed time as Trends and Strava',
+    TF\Calories::estimate($kSave($hour('moderate', false, '2026-11-09T10:00:00Z', '2026-11-10T04:00:00Z')), 80.0) === (int) round(5.0 * 80 * (55 / 60)));
+check('an imported workout without a duration has no estimate', TF\Calories::estimate($kSave($hour('moderate', false, '2026-11-09T10:00:00Z', '2026-11-09T10:00:00Z')), 80.0) === null);
+$db->run('UPDATE users SET body_weight_kg=80 WHERE id=?', [$uid]);
+if (!$strava->connection($uid)['connected']) {
+    $strava->connect($uid, $session, ['state' => $getState(), 'code' => 'calorie-code', 'scope' => 'activity:write']);
+}
+$calDoc = $hour('moderate', true);
+$calDoc['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc);
+$requests = [];
+$reply = [201, ['id' => '1', 'id_str' => '1', 'activity_id' => 55501]];
+$strava->export($uid, $calDoc['id'], true, 0, true);
+$stravaFile = json_decode((string) ($requests[0][3] ?? $requests[1][3] ?? 'null'), true);
+check('with exercises included, Strava gets the estimate as total_calories in the strength file', ($stravaFile['total_calories'] ?? null) === 397 && count($stravaFile['sets']) === 2, json_encode($stravaFile));
+$calDoc2 = $hour('moderate', true);
+$calDoc2['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc2);
+$requests = [];
+$reply = [201, ['id' => '55502']];
+$strava->export($uid, $calDoc2['id'], false, 0, true);
+$basic = end($requests);
+check('without exercises (no strength file), the estimate goes in the description', $basic[3] === null && ($basic[1]['description'] ?? '') === 'Estimated calories: 397');
+$calDoc3 = $hour('moderate');
+$calDoc3['gym_id'] = $big['id'];
+$wk->save($uid, $calDoc3);
+$requests = [];
+$reply = [201, ['id' => '1', 'id_str' => '1', 'activity_id' => 55503]];
+$strava->export($uid, $calDoc3['id'], true, 0, false);
+$plainFile = json_decode((string) end($requests)[3], true);
+check('calories are only sent when asked for', !isset($plainFile['total_calories']));
+$db->run('UPDATE users SET body_weight_kg=NULL WHERE id=?', [$uid]);
 
 echo "Upgrading a database that already has accounts\n";
 $old = $freshDb('upgrade');

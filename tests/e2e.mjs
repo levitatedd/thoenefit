@@ -48,6 +48,14 @@ if (!process.env.TF_URL) {
   };
 }
 const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+// The install reminder (#89) is tested on its own below; keep it out of the main walk-through.
+await context.addInitScript(() => {
+  try {
+    localStorage.setItem('tf.install', JSON.stringify({ never: true }));
+  } catch (e) {
+    // about:blank has no storage
+  }
+});
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -315,7 +323,7 @@ page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
 check('the finished workout carries the Strava request to the server',
   finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
-check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true}');
+check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
@@ -360,6 +368,83 @@ await page.selectOption('select[aria-label="Workout type"]', 'push');
 await page.waitForFunction((n) => [...document.querySelectorAll('.plan-row h3')].some((e) => e.textContent === n) && !document.querySelector('.stack.loading'), liftName);
 const target2 = await page.locator('.plan-row', { hasText: liftName }).first().locator('.target').textContent();
 check(`correcting a past set changes the advice: "${target2.trim()}"`, /at 135 lb/.test(target2));
+
+console.log('Install reminder');
+{
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
+  const PIXEL = 'Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+  const phoneAs = async (userAgent, init) => {
+    const ctx = await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true, userAgent });
+    if (init) await ctx.addInitScript(init);
+    const pg = await ctx.newPage();
+    await pg.goto(URL);
+    await pg.fill('input[name=username]', USER);
+    await pg.fill('input[name=password]', PASS);
+    await pg.click('button[type=submit]');
+    await pg.waitForSelector('.plan-row');
+    return [ctx, pg];
+  };
+  const [ic, ip] = await phoneAs(IPHONE);
+  check('no install reminder on the first visit', (await ip.locator('.install-card').count()) === 0);
+  await ip.reload();
+  await ip.waitForSelector('.plan-row');
+  check('on a later visit in Safari, Today reminds them they can install it', (await ip.locator('.install-card').count()) === 1);
+  check('no sideways scrolling with the reminder', (await ip.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await ip.screenshot({ path: `${SHOTS}/21-install-card.png` });
+  await ip.click('.install-card button:has-text("Show me how")');
+  await ip.waitForSelector('[data-install-guide]');
+  const iSteps = await ip.textContent('.sheet-body');
+  check('the popup shows the iPhone Safari steps', (await ip.getAttribute('[data-install-guide]', 'data-install-guide')) === 'ios-safari' && /Share button/.test(iSteps) && /Add to Home Screen/.test(iSteps) && !/three-dot/.test(iSteps));
+  if (SHOTS) await ip.screenshot({ path: `${SHOTS}/22-install-steps.png` });
+  await ip.click('.sheet button:has-text("Close")');
+  await ip.click('.install-card button:has-text("Not now")');
+  check('"Not now" hides it', (await ip.locator('.install-card').count()) === 0);
+  await ip.reload();
+  await ip.waitForSelector('.plan-row');
+  check('and it stays hidden after reopening', (await ip.locator('.install-card').count()) === 0);
+  await ip.goto(`${URL}#/settings`);
+  await ip.waitForSelector('text=Add to your Home Screen');
+  const firstGuide = await ip.locator('.section', { hasText: 'Add to your Home Screen' }).locator('h3').first().textContent();
+  check(`Settings lists this browser's steps first (${firstGuide})`, firstGuide === 'iPhone or iPad, Safari' && (await ip.locator('details.fold summary:has-text("Other browsers and phones")').count()) === 1);
+  await ic.close();
+
+  const [ac, ap] = await phoneAs(PIXEL);
+  await ap.reload();
+  await ap.waitForSelector('.plan-row');
+  // Stand in for Chrome's own install prompt, which only real installable sites get.
+  await ap.evaluate(() => {
+    const e = new Event('beforeinstallprompt', { cancelable: true });
+    e.prompt = () => { window.__prompted = true; return Promise.resolve(); };
+    e.userChoice = Promise.resolve({ outcome: 'accepted' });
+    window.dispatchEvent(e);
+  });
+  await ap.goto(`${URL}#/history`);
+  await ap.goto(`${URL}#/today`);
+  await ap.waitForSelector('.install-card');
+  check('on Android Chrome the reminder offers the browser\'s own Install button', (await ap.locator('.install-card button.primary').textContent()) === 'Install');
+  await ap.click('.install-card button:has-text("Install")');
+  await ap.waitForFunction(() => !document.querySelector('.install-card'));
+  check('tapping Install opens the browser\'s install prompt, and accepting hides the reminder', await ap.evaluate(() => window.__prompted === true));
+  await ap.reload();
+  await ap.waitForSelector('.plan-row');
+  check('after installing, the browser tab no longer reminds', (await ap.locator('.install-card').count()) === 0);
+  await ac.close();
+
+  const [sc, sp] = await phoneAs(IPHONE, () => Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true }));
+  await sp.reload();
+  await sp.waitForSelector('.plan-row');
+  check('people already using the installed app never see it', (await sp.locator('.install-card').count()) === 0);
+  await sc.close();
+
+  const [dc, dp] = await phoneAs(IPHONE);
+  await dp.reload();
+  await dp.waitForSelector('.install-card');
+  await dp.click('.install-card button:has-text("Don\'t show this again")');
+  await dp.reload();
+  await dp.waitForSelector('.plan-row');
+  check('"Don\'t show this again" turns it off on that device', (await dp.locator('.install-card').count()) === 0 && (await dp.evaluate(() => JSON.parse(localStorage.getItem('tf.install')).never)) === true);
+  await dc.close();
+}
 
 console.log('Trends');
 await page.click('.tab:has-text("Trends")');
@@ -742,6 +827,72 @@ if (!process.env.TF_URL) {
 await page.click('a:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 
+console.log('Saved routines');
+{
+  // Save a past workout (it includes the lift with history) as a routine.
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  await page.locator('.log-row', { hasText: liftName }).first().click();
+  await page.waitForSelector('.lift');
+  const pastNames = await page.$$eval('.lift h2', (els) => els.map((e) => e.textContent));
+  await page.click('button:has-text("Save as routine")');
+  await page.waitForSelector('input[name=routine_name]');
+  check('saving a past workout as a routine suggests a name', (await page.inputValue('input[name=routine_name]')).length > 0 && (await page.textContent('.sheet button[type=submit]')) === 'Save routine');
+  await page.fill('input[name=routine_name]', 'Monday Push');
+  await page.click('.sheet button[type=submit]');
+  await waitForToast(page, /Saved Monday Push/);
+  check('the routine is saved', true);
+
+  // Start a fresh session from it on Today.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const options = await page.$$eval('select[aria-label="Workout type"] optgroup[label="Your routines"] option', (els) => els.map((e) => e.textContent));
+  check('Today lists the routine under Workout', options.includes('Monday Push'), options.join(', '));
+  await page.selectOption('select[aria-label="Workout type"]', { label: 'Monday Push' });
+  await page.waitForSelector('.routine-note');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const routineRows = await page.$$eval('.plan-row', (rows) => rows.map((r) => ({ name: r.querySelector('h3').textContent, last: r.querySelector('.last').textContent, target: r.querySelector('.target').textContent })));
+  check('picking it loads the same exercises in the same order', routineRows.map((r) => r.name).join() === pastNames.join(), routineRows.map((r) => r.name).join() + ' <> ' + pastNames.join());
+  const liftRow = routineRows.find((r) => r.name === liftName);
+  check(`each exercise shows the last logged weight and reps (${liftRow && liftRow.last})`, !!liftRow && /^Last: \d+ lb × /.test(liftRow.last) && / at \d+ lb/.test(liftRow.target));
+  check('a routine plan has no Regenerate, Lock or Swap', (await page.locator('button:has-text("Regenerate")').count()) === 0 && (await page.locator('.plan-row button').count()) === 0);
+  check('no sideways scrolling with a routine on Today', (await overflow()) <= 0);
+  await shot('23-routine-on-today');
+  await page.click('button:has-text("Save changes to this routine")');
+  await page.waitForSelector('input[name=routine_name]');
+  check('saving again under the same name offers to replace it', (await page.inputValue('input[name=routine_name]')) === 'Monday Push' && (await page.textContent('.sheet button[type=submit]')) === 'Replace routine');
+  await page.click('.sheet button:has-text("Close")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  check('starting it gives a fresh session with those exercises', (await page.$$eval('.lift h2', (els) => els.map((e) => e.textContent))).join() === pastNames.join() && (await page.locator('.set.done').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+  check('afterwards Today goes back to a suggested workout', (await page.locator('.routine-note').count()) === 0);
+
+  // Rename and delete in Settings.
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('[data-list=routines] .routine-row');
+  await page.locator('.routine-row', { hasText: 'Monday Push' }).locator('button:has-text("Rename")').click();
+  await page.fill('.sheet input[name=routine_name]', 'Push A');
+  await page.click('.sheet button:has-text("Rename")');
+  await page.waitForSelector('.routine-row[data-routine="Push A"]');
+  check('a routine can be renamed in Settings', (await page.locator('.routine-row').count()) === 1);
+  await page.locator('[data-list=routines]').scrollIntoViewIfNeeded();
+  await shot('24-settings-routines');
+  await page.locator('.routine-row', { hasText: 'Push A' }).locator('button:has-text("Delete")').click();
+  await page.click('.sheet button:has-text("Delete routine")');
+  await page.waitForFunction(() => !document.querySelector('.routine-row'));
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  check('and deleted, after which Today no longer lists it', (await page.locator('select[aria-label="Workout type"] optgroup[label="Your routines"]').count()) === 0);
+  // Leave things as the next block expects: on Settings, with no toast showing.
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Add to your Home Screen');
+  await page.waitForFunction(() => !document.querySelector('.toast.show'), null, { timeout: 8000 });
+}
+
 console.log('Staying up to date');
 if (!process.env.TF_URL) {
   const { readFileSync, writeFileSync } = await import('node:fs');
@@ -843,6 +994,72 @@ if (!process.env.TF_URL) {
   check('it can sign back in with the new password, not the old one', (await laptop.locator('.tabs').count()) === 1);
   await phoneCtx.close();
   await laptopCtx.close();
+}
+
+if (!process.env.TF_URL) {
+  console.log('Cardio warm-up');
+  // #18: tick a stationary bike at the gym, ask for a warm-up, and log it.
+  await page.goto(`${URL}#/settings`);
+  await page.click('.log-row:has(.badge:has-text("Selected"))');
+  await page.click('label.check:has-text("Stationary bike")');
+  await page.click('button:has-text("Save gym")');
+  await page.waitForSelector('.toast.show');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const warmBox = page.locator('label.check:has-text("Include a warm-up") input');
+  check('with a cardio machine at the gym, Today offers Include a warm-up, unticked at first', (await warmBox.count()) === 1 && !(await warmBox.isChecked()));
+  await warmBox.click();
+  await page.waitForFunction(() => document.querySelector('.plan-row h3')?.textContent === 'Stationary Bike' && !document.querySelector('.stack.loading'));
+  check('ticking it starts the plan with a 10 minute bike warm-up', (await page.textContent('.plan-row .target')) === '10 min warm-up' && /^Warm-up and \d+ exercises/.test(await page.textContent('.summary')));
+  await shot('13-warm-up-plan');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const bikeCard = page.locator('.lift').first();
+  check('the warm-up is logged as minutes, distance and level, not weight and reps', (await bikeCard.locator('h2').textContent()) === 'Stationary Bike' && /Min\s*mi\s*Level/.test(await bikeCard.locator('.set-head').innerText()) && (await bikeCard.locator('.set input').first().inputValue()) === '10');
+  await bikeCard.locator('.set input').nth(0).fill('12');
+  await bikeCard.locator('.set input').nth(1).fill('1.8');
+  await bikeCard.locator('.set input').nth(2).fill('9');
+  await bikeCard.locator('.plate').click();
+  check('completing it starts no rest timer', (await bikeCard.locator('.plate').getAttribute('aria-pressed')) === 'true' && await page.locator('#rest').isHidden());
+  await shot('14-warm-up-logged');
+  await page.waitForFunction(() => document.querySelector('#sync')?.textContent === 'Saved');
+  const active = (await page.evaluate(async () => (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json())).active;
+  const bikeSet = active.exercises[0].sets[0];
+  check('the server has the time, distance in metres and level', bikeSet.duration_s === 720 && Math.abs(bikeSet.distance_m - 2896.8) < 0.2 && bikeSet.level === 9 && bikeSet.reps === null, JSON.stringify(bikeSet));
+  await page.reload();
+  await page.waitForSelector('.lift');
+  check('after a reload, the warm-up still shows what was logged', (await page.locator('.lift').first().locator('.set input').nth(1).inputValue()) === '1.8');
+
+  console.log('Estimated calories');
+  // #38: no body weight, no effort question. Add one in Settings, finish, and see the estimate.
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  check('without a body weight, finishing does not ask how hard it was', (await page.locator('.sheet :text("How hard was it?")').count()) === 0);
+  await page.click('.sheet button:has-text("Close")');
+  await page.goto(`${URL}#/settings`);
+  const bw = page.locator('input[aria-label^="Body weight"]');
+  await bw.fill('180');
+  await bw.press('Tab');
+  await waitForToast(page, /Body weight saved/);
+  check('body weight is saved from Settings', (await bw.inputValue()) === '180');
+  await page.goto(`${URL}#/workout`);
+  await page.waitForSelector('.lift');
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet :text("How hard was it?")');
+  check('finishing now asks how hard it was, starting at Moderate', (await page.locator('.sheet .choice[aria-pressed="true"]').textContent()).trim() === 'Moderate');
+  await page.click('.sheet .choice:has-text("Hard")');
+  await shot('15-finish-effort');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForSelector('.plan-row, .page-head');
+  await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  await page.click('.log-row');
+  await page.waitForSelector('.calories');
+  // This test workout lasted seconds, so there is no estimate, and History says why.
+  check('History explains when a workout is too short for an estimate', /under a minute/.test(await page.textContent('.calories')), await page.textContent('.calories'));
+  check('a panel with nothing to show leaves no stray text behind', !/(^|\s)null(\s|$)/.test(await page.textContent('.page')));
+  await shot('16-history-calories');
 }
 
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
