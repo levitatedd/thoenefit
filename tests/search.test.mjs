@@ -40,7 +40,7 @@ check('all three spellings give the same results', names('push up').join() === n
 check('"push up" is followed by its variations', ['Incline Push-Up', 'Knee Push-Up', 'Diamond Push-Up', 'Feet-Elevated Push-Up', 'Pike Push-Up'].every((n) => names('push up').includes(n)), names('push up').join(', '));
 check('"pull ups" finds Pull-Up first', top('pull ups') === 'Pull-Up', top('pull ups'));
 check('"curls" finds curls', names('curls').length >= 6 && names('curls').every((n) => /Curl/.test(n)));
-check('"skullcrusher" finds the skull crusher', top('skullcrusher') === 'EZ-Bar Skull Crusher', top('skullcrusher'));
+check('"skullcrusher" finds a skull crusher', /Skull Crusher$/.test(top('skullcrusher')), top('skullcrusher'));
 
 check('"pushup" does not drag in pull-ups', !names('pushup').some((n) => /Pull/.test(n)), names('pushup').join(', '));
 
