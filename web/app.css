@@ -796,6 +796,7 @@ input.num::placeholder {
 
 .set-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 4px;
 }
