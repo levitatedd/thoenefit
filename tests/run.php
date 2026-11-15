@@ -103,6 +103,18 @@ foreach (Catalog::exercises() as $e) {
 }
 check('every catalog tag is a known equipment, muscle, movement and kind', !$bad, implode(' ', $bad));
 check('catalog slugs are unique', count(array_unique(array_column(Catalog::exercises(), 0))) === count(Catalog::exercises()));
+$untickable = array_column(array_filter(Catalog::exercises(), static fn($e) => $e[2] === 'machine' && !$e[3]), 1);
+check('every machine needs a checkbox, so none looks available everywhere', !$untickable, implode(', ', $untickable));
+$shapes = [];
+foreach (Catalog::exercises() as $e) {
+    $shapes[$e[0]] = ['kind' => $e[2], 'equipment' => $e[3], 'pattern' => $e[4]];
+}
+$full = Catalog::equipmentKeys();
+$without = fn(string ...$gear) => array_values(array_diff($full, $gear));
+check('specialty gear and machines are only available when ticked', Catalog::supports($shapes['machine-biceps-curl'], $full) && !Catalog::supports($shapes['machine-biceps-curl'], $without('biceps_machine')) && !Catalog::supports($shapes['ez-bar-preacher-curl'], $without('preacher_bench')) && !Catalog::supports($shapes['decline-crunch'], $without('decline_bench')) && !Catalog::supports($shapes['stability-ball-crunch'], $without('stability_ball')) && !Catalog::supports($shapes['hip-abductor-machine'], $without('hip_abduction')));
+check('stability ball and medicine ball exercises no longer count as bodyweight-only', !Catalog::supports($shapes['stability-ball-pike'], [], true) && !Catalog::supports($shapes['alternating-medicine-ball-push-up'], [], true));
+check('the Commercial gym preset includes the new gear', !array_diff(['medicine_ball', 'stability_ball', 'decline_bench', 'preacher_bench', 'biceps_machine', 'triceps_machine', 'ab_crunch', 'rotary_torso', 'hip_abduction', 'glute_kickback', 'back_extension_machine'], Catalog::presets()[0]['equipment']));
+check('machines with a checkbox can be suggested where they fit; ones with no slot still cannot', $shapes['machine-biceps-curl']['pattern'] === 'biceps' && $shapes['machine-triceps-dip']['pattern'] === 'triceps' && $shapes['ab-crunch-machine']['pattern'] === 'core' && $shapes['hip-adductor-machine']['pattern'] === 'other' && $shapes['partner-medicine-ball-twist']['pattern'] === 'other');
 
 echo "Accounts\n";
 $auth = new Auth($db, []);
