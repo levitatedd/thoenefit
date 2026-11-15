@@ -13,7 +13,7 @@ const S = {
   vocab: null,
   offlineBoot: false,
   draft: null, // generated workout not started yet
-  draftOpts: { day_type: null, minutes: null },
+  draftOpts: { day_type: null, minutes: null, bodyweight_only: false },
   draftError: null,
   draftLoading: false,
   rest: null, // {endsAt, total}
@@ -337,7 +337,7 @@ function equipmentPicker(gym) {
       ),
     ),
   );
-  return h('div', { class: 'stack' }, field('Start from a preset', presets, 'Then tick or untick anything below. Bodyweight exercises are always available.'), groups);
+  return h('div', { class: 'stack' }, field('Start from a preset', presets, 'Then tick or untick anything below. Exercises that need no equipment are always available.'), groups);
 }
 
 function viewOnboarding() {
@@ -383,7 +383,7 @@ function activeGym() {
 async function loadDraft({ regenerate = false } = {}) {
   const gym = activeGym();
   if (!gym) return;
-  const body = { gym_id: gym.id };
+  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
@@ -646,6 +646,20 @@ function viewToday() {
     { class: 'controls' },
     field('Gym', gymSelect),
     field('Workout', daySelect),
+    h('label', { class: 'check' },
+      h('input', {
+        type: 'checkbox',
+        checked: S.draftOpts.bodyweight_only,
+        disabled: S.draftLoading,
+        onchange: (e) => {
+          clearTimeout(S.minutesTimer);
+          S.draftOpts.bodyweight_only = e.target.checked;
+          S.draft = null;
+          loadDraft();
+        },
+      }),
+      'Bodyweight only',
+    ),
     field(
       'Time',
       stepper(S.draftOpts.minutes || S.user.minutes, {
@@ -672,7 +686,7 @@ function viewToday() {
     body = h(
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
-      h('p', { class: 'summary' }, `${d.exercises.length} exercises, about ${d.est_minutes} minutes`),
+      h('p', { class: 'summary' }, `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${d.exercises.length} exercises, about ${d.est_minutes} minutes`),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
@@ -748,7 +762,7 @@ function planRow(b, gym) {
         Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in. ${block.reason}` });
         pushSharedPlan();
         render();
-      }) }, icon('swap', 18), 'Swap'),
+      }, S.draft.bodyweight_only) }, icon('swap', 18), 'Swap'),
     ),
   );
 }
@@ -762,13 +776,13 @@ function recoveryPanel(recovery) {
   return h('details', { class: 'card fold' }, h('summary', {}, 'Recovery estimate'), h('p', { class: 'muted small' }, 'Estimated only from sets logged here in the last 7 days. It cannot see sleep, soreness or other activity, so treat it as a rough guide.'), h('ul', { class: 'meters' }, rows));
 }
 
-async function swapSheet(gymId, exerciseId, exclude, onPick) {
+async function swapSheet(gymId, exerciseId, exclude, onPick, bodyweightOnly = false) {
   const list = h('div', { class: 'stack' }, h('p', { class: 'muted' }, 'Finding options'));
   const close = sheet('Swap exercise', list);
   try {
-    const res = await api.post('alternatives', { gym_id: gymId, exercise_id: exerciseId, exclude });
+    const res = await api.post('alternatives', { gym_id: gymId, exercise_id: exerciseId, exclude, bodyweight_only: bodyweightOnly });
     if (!res.alternatives.length) {
-      list.replaceChildren(h('p', { class: 'muted' }, 'Nothing else fits the equipment at this gym.'));
+      list.replaceChildren(h('p', { class: 'muted' }, bodyweightOnly ? 'No other option without equipment.' : 'Nothing else fits the equipment at this gym.'));
       return;
     }
     list.replaceChildren(
@@ -780,7 +794,7 @@ async function swapSheet(gymId, exerciseId, exclude, onPick) {
             type: 'button',
             class: 'pick',
             onclick: async (e) => {
-              const block = await act(async () => (await api.post('suggest', { gym_id: gymId, exercise_id: a.exercise_id })).block, e.currentTarget);
+              const block = await act(async () => (await api.post('suggest', { gym_id: gymId, exercise_id: a.exercise_id, bodyweight_only: bodyweightOnly })).block, e.currentTarget);
               if (block) {
                 close();
                 onPick(block);
@@ -1151,7 +1165,9 @@ function addExerciseSheet(doc) {
   const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', oninput: () => paint() });
   let close = null;
   // Only exercises this gym has the equipment for, and that are not already in the workout.
-  const pool = S.exercises.filter((x) => !x.archived && !used.has(x.id) && x.equipment.every((k) => have.has(k)));
+  const aliases = S.vocab.equipment_alternatives || {};
+  const pool = S.exercises.filter((x) => !x.archived && !used.has(x.id)
+    && x.equipment.every((k) => have.has(k) || aliases[k]?.some((option) => have.has(option))));
   const row = (x) =>
     h('button', { type: 'button', class: 'pick', onclick: async (ev) => {
           let block = null;
@@ -1551,7 +1567,7 @@ function viewSettings() {
     const r = await api.post('save_profile', { [key]: value });
     S.user = r.user;
     S.draft = null;
-    S.draftOpts = { day_type: null, minutes: null };
+    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false };
   });
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });

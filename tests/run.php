@@ -206,10 +206,8 @@ foreach ([[$big, 3], [$home, 3], [$none, 2]] as [$gym, $min]) {
     foreach (['full', 'upper', 'lower', 'push', 'pull', 'legs'] as $day) {
         $w = $gen->generate($user, $gym, ['day_type' => $day, 'minutes' => 60]);
         foreach ($w['exercises'] as $b) {
-            foreach ($exById[$b['exercise_id']]['equipment'] as $need) {
-                if (!in_array($need, $gym['equipment'], true)) {
-                    $violations[] = "{$gym['name']}/$day: {$b['name']} needs $need";
-                }
+            if (!Catalog::supports($exById[$b['exercise_id']], $gym['equipment'])) {
+                $violations[] = "{$gym['name']}/$day: {$b['name']} needs different equipment";
             }
         }
         if (count($w['exercises']) < $min && !($gym['name'] === 'Hotel room' && $day === 'pull')) {
@@ -237,9 +235,45 @@ check('a locked exercise survives regenerate', $regen['exercises'][0]['exercise_
 check('regenerate swaps the unlocked ones', $regen['exercises'][1]['exercise_id'] !== $second['exercise_id']);
 $alts = $gen->alternatives($uid, $home, $bySlug['dumbbell-bench-press']);
 $altOk = $alts && !array_filter($alts, function ($x) use ($exById, $home) {
-    return array_diff($exById[$x['exercise_id']]['equipment'], $home['equipment']);
+    return !Catalog::supports($exById[$x['exercise_id']], $home['equipment']);
 });
 check('swap alternatives respect the gym too', (bool) $altOk);
+
+$exercise = fn(string $slug) => $exById[$bySlug[$slug]];
+check('one dumbbell unlocks goblet squats and floor presses, but a dumbbell bench press needs a pair',
+    Catalog::supports($exercise('goblet-squat'), ['single_dumbbell']) &&
+    Catalog::supports($exercise('one-arm-dumbbell-floor-press'), ['single_dumbbell']) &&
+    !Catalog::supports($exercise('dumbbell-bench-press'), ['single_dumbbell', 'bench']) &&
+    Catalog::supports($exercise('dumbbell-bench-press'), ['dumbbells', 'bench']));
+check('a legacy dumbbell pair also unlocks one-dumbbell exercises',
+    Catalog::supports($exercise('goblet-squat'), $home['equipment']));
+check('step-ups accept a box or a bench and require a dumbbell only for the weighted version',
+    Catalog::supports($exercise('bodyweight-step-up'), ['step_box']) &&
+    !Catalog::supports($exercise('dumbbell-step-up'), ['step_box']) &&
+    Catalog::supports($exercise('dumbbell-step-up'), ['single_dumbbell', 'step_box']) &&
+    Catalog::supports($exercise('dumbbell-step-up'), $home['equipment']) &&
+    !Catalog::supports($exercise('dumbbell-bench-press'), ['dumbbells', 'step_box']));
+$livingRoom = $mkGym($uid, 'Living room', ['single_dumbbell', 'step_box']);
+$stepUp = $gen->generate($user, $livingRoom, ['day_type' => 'legs', 'locked' => ['single' => $bySlug['dumbbell-step-up']]]);
+check('the generator can use a step-up in a gym with only one dumbbell and a box',
+    in_array($bySlug['dumbbell-step-up'], array_column($stepUp['exercises'], 'exercise_id'), true));
+$noGear = $gen->generate($user, $big, [
+    'day_type' => 'push',
+    'bodyweight_only' => true,
+    'locked' => ['press' => $bySlug['dumbbell-bench-press'], 'incline' => $bySlug['feet-elevated-push-up']],
+]);
+check('bodyweight-only workouts ignore gym equipment and incompatible locked exercises',
+    $noGear['bodyweight_only'] && count($noGear['exercises']) >= 3 &&
+    !array_filter($noGear['exercises'], function ($b) use ($exById) {
+        $ex = $exById[$b['exercise_id']];
+        return $ex['kind'] !== 'bodyweight' || $ex['equipment'] !== [] || $b['suggested_weight'] !== null;
+    }));
+$noGearPull = $gen->generate($user, $big, ['day_type' => 'pull', 'bodyweight_only' => true]);
+check('bodyweight-only workouts omit warnings about slots that need equipment',
+    $noGearPull['exercises'] && $noGearPull['skipped'] === []);
+$noGearSwaps = $gen->alternatives($uid, $big, $bySlug['dumbbell-bench-press'], [], true);
+check('bodyweight-only swap results also require no equipment',
+    $noGearSwaps && !array_filter($noGearSwaps, fn($a) => !Catalog::supports($exById[$a['exercise_id']], [], true)));
 
 echo "Logging, progression and sync\n";
 // Helper: build a workout document the way the phone does.
