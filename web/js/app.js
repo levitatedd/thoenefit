@@ -1309,7 +1309,7 @@ function viewTrends() {
           : h('p', { class: 'muted' }, 'No completed workouts in the last 8 weeks.')),
       h('section', { class: 'card stack' },
         h('h2', {}, 'Weekly workout time'),
-        h('p', { class: 'muted small' }, 'Elapsed time from workouts with a recorded duration.'),
+        h('p', { class: 'muted small' }, 'Start to finish, leaving out long idle stretches before the first set or after the last. A workout still over 4 hours is not counted.'),
         weeks.some((w) => w.seconds !== null)
           ? lineChart(points.map(({ label, seconds }) => ({ label, value: (seconds ?? 0) / 60 })), { unit: 'min' })
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),

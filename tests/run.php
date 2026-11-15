@@ -612,6 +612,7 @@ check('export cannot read a workout owned by another user', throws(fn() => $stra
 
 $exportDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8], [145, 7]]]], '2026-10-20T16:20:00Z');
 $exportDoc['completed_at'] = '2026-10-20T17:00:00Z';
+$exportDoc['exercises'][0]['sets'][0]['done_at'] = '2026-10-20T16:35:00Z'; // first and last set 15 and 25 minutes from the ends: not idle
 $exportDoc['exercises'][0]['sets'][1]['done'] = false;
 $wk->save($uid, $exportDoc);
 $exportId = $exportDoc['id'];
@@ -655,6 +656,9 @@ $strengthDoc = $doc($home, 'push', [
     [$customId, 5, 8, [[10, 5, true]]],
 ], '2026-10-20T16:20:00Z');
 $strengthDoc['completed_at'] = '2026-10-20T17:00:00Z';
+foreach ([[0, 0, '16:31'], [0, 2, '16:44'], [1, 0, '16:55']] as [$e, $n, $hm]) {
+    $strengthDoc['exercises'][$e]['sets'][$n]['done_at'] = "2026-10-20T$hm:00Z";
+}
 $wk->save($uid, $strengthDoc);
 $strengthId = $strengthDoc['id'];
 $pending = ['activity_id' => null, 'processing' => true];
@@ -721,14 +725,48 @@ $reply = [200, ['activity_id' => null, 'error' => 'Duplicate of activity 111']];
 check('a reported duplicate cannot be posted again',
     $strava->checkExport($uid, $failureId) === ['activity_id' => null] && $strava->export($uid, $failureId, true) === ['activity_id' => null]
     && count($requests) === 14);
+// #49: a workout left open overnight is sent with its idle time removed.
+$nightDoc = $doc($home, 'push', [[$bench, 5, 8, [[135, 8], [135, 8]]]], '2026-10-21T00:00:00Z');
+$nightDoc['exercises'][0]['sets'][0]['done_at'] = '2026-10-21T00:12:00Z';
+$nightDoc['exercises'][0]['sets'][1]['done_at'] = '2026-10-21T00:41:00Z';
+$nightDoc['completed_at'] = '2026-10-21T14:00:00Z'; // finished the next morning
+$wk->save($uid, $nightDoc);
+$reply = [201, ['id' => '91234567890123499']];
+$strava->export($uid, $nightDoc['id'], false);
+$nightBody = end($requests)[1];
+check('a workout left open overnight goes to Strava as the time actually trained (46 minutes, not 14 hours)',
+    $nightBody['start_date_local'] === '2026-10-21T00:00:00Z' && $nightBody['elapsed_time'] === 46 * 60, json_encode([$nightBody['start_date_local'] ?? null, $nightBody['elapsed_time'] ?? null]));
+
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
+
+echo "Idle time in workout durations\n";
+$span = fn(...$a) => TF\Workouts::activeSpan(...$a);
+$len = fn(?array $s) => $s === null ? null : $s['end'] - $s['start'];
+check('a normal workout keeps its full start-to-finish time', $len($span('2026-11-01 10:00:00', '2026-11-01 11:00:00', '2026-11-01 10:08:00', '2026-11-01 10:52:00')) === 3600);
+check('gaps of exactly 30 minutes are not treated as idle', $len($span('2026-11-01 10:00:00', '2026-11-01 11:30:00', '2026-11-01 10:30:00', '2026-11-01 11:00:00')) === 5400);
+$night = $span('2026-11-01 23:00:00', '2026-11-02 13:00:00', '2026-11-01 23:05:00', '2026-11-01 23:50:00');
+check('finished the next morning: counted to 5 minutes after the last set', $len($night) === 55 * 60 && $night['start'] === strtotime('2026-11-01 23:00:00 UTC'));
+$early = $span('2026-11-01 06:00:00', '2026-11-01 11:00:00', '2026-11-01 10:00:00', '2026-11-01 10:50:00');
+check('started hours before the first set: counted from 5 minutes before it', $len($early) === 65 * 60 && $early['start'] === strtotime('2026-11-01 09:55:00 UTC'));
+check('both ends idle: only the training in the middle counts', $len($span('2026-11-01 06:00:00', '2026-11-01 20:00:00', '2026-11-01 10:00:00', '2026-11-01 10:30:00')) === 40 * 60);
+check('one set logged long after starting and finished long after: about 10 minutes', $len($span('2026-11-01 06:00:00', '2026-11-01 20:00:00', '2026-11-01 10:00:00', '2026-11-01 10:00:00')) === 10 * 60);
+check('no set times (or start equal to finish, as in Fitbod imports) behave as before', $len($span('2026-11-01 10:00:00', '2026-11-01 10:40:00')) === 2400 && $span('2026-11-01 10:00:00', '2026-11-01 10:00:00', '2026-11-01 10:00:00', '2026-11-01 10:00:00') === null);
+check('ISO and stored UTC times read the same, whatever the server timezone', (function () use ($len, $span) {
+    $tz = date_default_timezone_get();
+    date_default_timezone_set('America/Chicago');
+    $a = $span('2026-11-01T23:00:00Z', '2026-11-02T13:00:00Z', '2026-11-01 23:05:00', '2026-11-01 23:50:00');
+    date_default_timezone_set($tz);
+    return $len($a) === 55 * 60 && $a['start'] === strtotime('2026-11-01T23:00:00Z');
+})());
 
 echo "Weekly training trends\n";
 $trendsUid = $auth->createUser('trends-user', 'trends-user-123');
 $trendsGym = $mkGym($trendsUid, 'Trends gym', ['barbell', 'bench']);
 $sunday = $doc($trendsGym, 'push', [[$bench, 6, 10, [[50, 3], [40, 10, true], [100, 10, false, false]]]], '2026-11-02T04:30:00Z');
 $sunday['completed_at'] = '2026-11-02T05:10:00Z';
+$sunday['exercises'][0]['sets'][0]['done_at'] = '2026-11-02T04:58:00Z';
+$sunday['exercises'][0]['sets'][1]['done_at'] = '2026-11-02T04:41:00Z';
 $wk->save($trendsUid, $sunday);
 $monday = $doc($trendsGym, 'push', [[$bench, 6, 10, [[10, 10]]]], '2026-11-02T06:30:00Z');
 $monday['unit'] = 'kg';
@@ -745,6 +783,21 @@ check('trends use local Monday boundaries and include eight weeks with empty wee
 check('weekly volume excludes warm-ups, unfinished sets, active workouts, and other accounts',
     $weeks[6]['volume'] === 150.0 && abs($weeks[7]['volume'] - 220.462262) < 0.00001 &&
     $weeks[6]['workouts'] === 1 && $weeks[7]['workouts'] === 2);
+$idleUid = $auth->createUser('idle-user', 'idle-user-12345');
+$idleGym = $mkGym($idleUid, 'Idle gym', ['barbell', 'bench']);
+$overnight = $doc($idleGym, 'push', [[$bench, 6, 10, [[100, 10], [100, 9]]]], '2026-11-03T00:00:00Z'); // Mon 6 pm Chicago
+$overnight['exercises'][0]['sets'][0]['done_at'] = '2026-11-03T00:10:00Z';
+$overnight['exercises'][0]['sets'][1]['done_at'] = '2026-11-03T00:40:00Z';
+$overnight['completed_at'] = '2026-11-03T14:00:00Z';
+$wk->save($idleUid, $overnight);
+$marathon = $doc($idleGym, 'push', [[$bench, 6, 10, [[100, 10], [100, 9]]]], '2026-11-04T12:00:00Z'); // sets really spread over 5 hours
+$marathon['exercises'][0]['sets'][0]['done_at'] = '2026-11-04T12:10:00Z';
+$marathon['exercises'][0]['sets'][1]['done_at'] = '2026-11-04T16:55:00Z';
+$marathon['completed_at'] = '2026-11-04T17:00:00Z';
+$wk->save($idleUid, $marathon);
+$idleWeeks = $wk->weeklyTrends($idleUid, 'lb', 'America/Chicago', strtotime('2026-11-05T12:00:00Z'));
+check('Trends counts a workout left open overnight as 45 minutes, not 14 hours', $idleWeeks[7]['workouts'] === 2 && $idleWeeks[7]['seconds'] === 45 * 60, json_encode($idleWeeks[7]));
+check('a workout still over 4 hours after removing idle time is left out of weekly time, but its volume counts', $idleWeeks[7]['volume'] === 3800.0);
 check('weekly elapsed time counts each recorded duration once and leaves untimed imports out',
     $weeks[6]['seconds'] === 2400 && $weeks[7]['seconds'] === 1500);
 

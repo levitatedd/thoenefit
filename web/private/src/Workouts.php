@@ -288,6 +288,66 @@ final class Workouts
         return $out;
     }
 
+    /** A gap longer than this before the first logged set or after the last counts as idle (#49). */
+    public const IDLE_GAP = 30 * 60;
+    /** What is kept of an idle gap: room for a warm-up before and a cool-down after. */
+    public const IDLE_EDGE = 5 * 60;
+    /** Trends leaves out a workout still longer than this after idle time is removed. */
+    public const MAX_COUNTED = 4 * 3600;
+
+    private static function ts(?string $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        // Stored times are UTC without a zone; strtotime would read them as server-local time.
+        $t = strtotime(preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/', $value) ? $value . ' UTC' : $value);
+        return $t === false ? null : $t;
+    }
+
+    /**
+     * The part of a workout that was actually training: from start to finish,
+     * minus idle time. A workout started long before its first logged set, or
+     * finished long after its last one (left open overnight, say), keeps only
+     * IDLE_EDGE of that gap. Gaps up to IDLE_GAP are left as they are.
+     *
+     * @param string|null $firstDone time the earliest completed set was logged
+     * @param string|null $lastDone  time the latest completed set was logged
+     * @return array{start: int, end: int}|null null when there is no positive duration
+     */
+    public static function activeSpan(?string $startedAt, ?string $completedAt, ?string $firstDone = null, ?string $lastDone = null): ?array
+    {
+        $start = self::ts($startedAt);
+        $end = self::ts($completedAt);
+        if ($start === null || $end === null || $end <= $start) {
+            return null;
+        }
+        $first = self::ts($firstDone);
+        $last = self::ts($lastDone);
+        if ($first !== null && $first - $start > self::IDLE_GAP) {
+            $start = min($end, $first - self::IDLE_EDGE);
+        }
+        if ($last !== null && $end - $last > self::IDLE_GAP) {
+            $end = max($start, $last + self::IDLE_EDGE);
+        }
+        return $end > $start ? ['start' => $start, 'end' => $end] : null;
+    }
+
+    /** activeSpan() for a workout as returned by get(). */
+    public static function workoutSpan(array $workout): ?array
+    {
+        $times = [];
+        foreach ($workout['exercises'] ?? [] as $e) {
+            foreach ($e['sets'] as $s) {
+                if (!empty($s['done']) && !empty($s['done_at']) && ($t = self::ts($s['done_at'])) !== null) {
+                    $times[] = $t;
+                }
+            }
+        }
+        $iso = static fn(?int $t) => $t === null ? null : gmdate('Y-m-d\TH:i:s\Z', $t);
+        return self::activeSpan($workout['started_at'] ?? null, $workout['completed_at'] ?? null, $iso($times ? min($times) : null), $iso($times ? max($times) : null));
+    }
+
     /** Eight Monday-start weeks in the user's timezone, grouped by workout start. */
     public function weeklyTrends(int $uid, string $unit, string $timezone, ?int $now = null): array
     {
@@ -305,9 +365,11 @@ final class Workouts
             $weeks[$start] = ['start' => $start, 'workouts' => 0, 'volume' => 0.0, 'seconds' => null];
         }
         $workouts = $this->db->all(
-            "SELECT w.id, w.started_at, w.completed_at, w.unit, SUM(s.weight * s.reps) AS volume
+            "SELECT w.id, w.started_at, w.completed_at, w.unit,
+                    SUM(CASE WHEN s.warmup=0 THEN s.weight * s.reps ELSE 0 END) AS volume,
+                    MIN(s.done_at) AS first_done, MAX(s.done_at) AS last_done
              FROM workouts w
-             LEFT JOIN workout_sets s ON s.workout_id=w.id AND s.done=1 AND s.warmup=0
+             LEFT JOIN workout_sets s ON s.workout_id=w.id AND s.done=1
              WHERE w.user_id=? AND w.status='completed' AND w.started_at BETWEEN ? AND ?
              GROUP BY w.id, w.started_at, w.completed_at, w.unit",
             [$uid, now_utc($first->getTimestamp()), now_utc($now)]
@@ -321,9 +383,11 @@ final class Workouts
             }
             $weeks[$key]['workouts']++;
             $weeks[$key]['volume'] += $volume;
-            $end = $w['completed_at'] ? strtotime(to_iso($w['completed_at'])) : false;
-            $elapsed = $end !== false ? $end - $start->getTimestamp() : 0;
-            if ($elapsed > 0) {
+            // Idle time before the first set or after the last is removed, and a
+            // workout still over MAX_COUNTED is left out, like one with no duration.
+            $span = self::activeSpan($w['started_at'], $w['completed_at'], $w['first_done'], $w['last_done']);
+            $elapsed = $span ? $span['end'] - $span['start'] : 0;
+            if ($elapsed > 0 && $elapsed <= self::MAX_COUNTED) {
                 $weeks[$key]['seconds'] = ($weeks[$key]['seconds'] ?? 0) + $elapsed;
             }
         }

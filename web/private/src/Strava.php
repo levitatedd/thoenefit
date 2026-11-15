@@ -195,7 +195,7 @@ final class Strava
         if ($details['sets']) {
             $file = json_encode([
                 'version' => '1.0',
-                'start_time' => $workout['started_at'],
+                'start_time' => $activity['start_date_local'],
                 'utc_offset' => abs($utcOffset) <= 14 * 3600 && $utcOffset % 60 === 0 ? $utcOffset : 0,
                 'elapsed_time' => $activity['elapsed_time'],
                 'sets' => $details['sets'],
@@ -309,17 +309,18 @@ final class Strava
 
     private static function activity(array $workout): array
     {
-        $started = strtotime($workout['started_at'] ?? '');
-        $finished = strtotime($workout['completed_at'] ?? '');
-        if ($started === false || $finished === false || $finished <= $started) {
+        // Idle time before the first set or after the last is left out, so a
+        // workout left open overnight is not sent as a 14-hour activity (#49).
+        $span = Workouts::workoutSpan($workout);
+        if ($span === null) {
             throw new HttpError(422, 'This workout has no recorded duration to send to Strava.');
         }
         $label = Generator::DAY_LABELS[$workout['day_type']] ?? 'Workout';
         return [
             'name' => $label . ' at ' . $workout['gym_name'],
             'sport_type' => 'WeightTraining',
-            'start_date_local' => $workout['started_at'],
-            'elapsed_time' => $finished - $started,
+            'start_date_local' => gmdate('Y-m-d\TH:i:s\Z', $span['start']),
+            'elapsed_time' => $span['end'] - $span['start'],
         ];
     }
 
