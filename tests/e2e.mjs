@@ -174,6 +174,36 @@ await page.locator('.lift').first().locator('button[aria-label^="Options"]').cli
 await page.click('.sheet button:has-text("Move later")');
 await page.waitForSelector('#sync.saved');
 
+// Swap mid-workout: one set logged on the third exercise, then the machine is "busy".
+const l3 = page.locator('.lift').nth(2);
+const l3name = await l3.locator('h2').textContent();
+const l3sets = await l3.locator('.set').count();
+const liftsBefore = await page.locator('.lift').count();
+await l3.locator('.set').first().locator('input').nth(0).fill('50');
+await l3.locator('.set').first().locator('input').nth(1).fill('9');
+await l3.locator('.set').first().locator('.plate').click();
+await page.waitForSelector('#rest:not([hidden])');
+await page.click('#rest button:has-text("Skip")');
+await l3.locator('button:has-text("Swap")').click();
+await page.waitForSelector('.sheet .pick');
+const offered = await page.$$eval('.sheet .pick .pick-name', (els) => els.map((x) => x.textContent));
+check('swap offers alternatives the gym has equipment for', offered.length > 0 && !offered.some((n) => /Cable|Machine|Pec Deck|Smith/.test(n)), offered.join(', '));
+const l3new = offered[0];
+await page.click('.sheet .pick');
+await page.waitForSelector('.sheet', { state: 'detached' });
+check('the logged set stays under the original exercise', (await page.locator('.lift').nth(2).locator('h2').textContent()) === l3name && (await page.locator('.lift').nth(2).locator('.set.done').count()) === 1 && (await page.locator('.lift').nth(2).locator('.set').count()) === 1);
+check('the alternative follows it with the sets that were left', (await page.locator('.lift').nth(3).locator('h2').textContent()) === l3new && (await page.locator('.lift').nth(3).locator('.set').count()) === l3sets - 1 && (await page.locator('.lift').count()) === liftsBefore + 1);
+check('a finished exercise no longer offers Swap', (await page.locator('.lift').nth(2).locator('.set-actions button:has-text("Swap")').count()) === 0);
+await page.locator('.lift').nth(3).locator('button:has-text("Swap")').click();
+await page.waitForSelector('.sheet .pick');
+const l3third = await page.textContent('.sheet .pick .pick-name');
+await page.click('.sheet .pick');
+await page.waitForSelector('.sheet', { state: 'detached' });
+check('swapping an exercise with nothing logged simply replaces it', (await page.locator('.lift').nth(3).locator('h2').textContent()) === l3third && (await page.locator('.lift').count()) === liftsBefore + 1);
+check('no sideways scrolling with the Swap button', (await overflow()) <= 0);
+await shot('05b-swap-mid-workout');
+await page.waitForSelector('#sync.saved');
+
 await page.reload();
 await page.waitForSelector('.lift');
 check('a refresh mid-workout comes straight back to it with the sets intact', (await page.locator('.lift').first().locator('.set.done').count()) === setRows);
@@ -212,7 +242,7 @@ check('back online, the queue drains to Saved', true);
 const api = async (q) => page.evaluate(async (u) => (await fetch(u, { credentials: 'same-origin' })).json(), `api.php?a=${q}`);
 const boot = await api('bootstrap');
 const serverSets = boot.active.exercises.flatMap((e) => e.sets);
-check('the server has each set exactly once', new Set(serverSets.map((s) => s.id)).size === serverSets.length && serverSets.filter((s) => s.done).length === setRows + l2rows, `${serverSets.length} sets`);
+check('the server has each set exactly once', new Set(serverSets.map((s) => s.id)).size === serverSets.length && serverSets.filter((s) => s.done).length === setRows + l2rows + 1, `${serverSets.length} sets`);
 
 console.log('Finish, history, next recommendation');
 await page.click('button:has-text("Finish workout")');
@@ -263,7 +293,7 @@ await page.waitForSelector('.chart');
 check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) === 2);
 await shot('10-exercise');
 const csv = await page.evaluate(async () => (await fetch('api.php?a=export', { credentials: 'same-origin' })).text());
-check('CSV export downloads every set', csv.split('\n').filter(Boolean).length === 1 + setRows + l2rows && csv.startsWith('date_utc'));
+check('CSV export downloads every set', csv.split('\n').filter(Boolean).length === 1 + setRows + l2rows + 1 && csv.startsWith('date_utc'));
 console.log('Admin and accounts');
 const post = (action, body, token) => page.evaluate(async ([a, b, t]) => {
   const r = await fetch(`api.php?a=${a}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify(b) });

@@ -920,6 +920,29 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
     );
   });
 
+  // Swap for an alternative the gym has equipment for. Sets already logged stay
+  // under the original exercise; the alternative takes over the sets still to do.
+  const swap = () => swapSheet(doc.gym_id, e.exercise_id, doc.exercises.map((x) => x.exercise_id), (block) => {
+    const logged = e.sets.filter((s) => s.done).length;
+    const remaining = Math.max(1, e.sets.length - logged);
+    edit((d) => {
+      const at = d.exercises.findIndex((x) => x.id === e.id);
+      if (at < 0) return;
+      const fresh = blockToEntry({ ...block, reason: `Swapped in for ${e.name}. ${block.reason}` });
+      if (!logged) {
+        d.exercises[at] = fresh;
+        return;
+      }
+      fresh.sets = fresh.sets.slice(0, remaining);
+      while (fresh.sets.length < remaining) fresh.sets.push({ ...fresh.sets[fresh.sets.length - 1], id: uuid() });
+      fresh.target_sets = remaining;
+      d.exercises[at].sets = d.exercises[at].sets.filter((s) => s.done);
+      d.exercises[at].target_sets = logged;
+      d.exercises.splice(at + 1, 0, fresh);
+    });
+    toast(logged ? `Kept your ${logged} logged set${logged === 1 ? '' : 's'} of ${e.name}. ${block.name} takes the rest.` : `Swapped to ${block.name}.`);
+  });
+
   const menu = () => {
     const close = sheet(e.name, h(
       'div',
@@ -929,9 +952,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('button', { type: 'button', class: 'btn block', disabled: idx === doc.exercises.length - 1, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx + 1)); } }, icon('down', 18), 'Move later'),
       h('button', { type: 'button', class: 'btn block', disabled: !doc.gym_id, onclick: () => {
         close();
-        swapSheet(doc.gym_id, e.exercise_id, doc.exercises.map((x) => x.exercise_id), (block) => edit((d) => {
-          d.exercises[idx] = blockToEntry({ ...block, reason: `You swapped this in. ${block.reason}` });
-        }));
+        swap();
       } }, icon('swap', 18), 'Swap for another exercise'),
       h('button', { type: 'button', class: 'btn danger block', onclick: async () => {
         close();
@@ -961,6 +982,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         if (last.done && !(await confirmSheet('Remove a completed set?', `The last set (${fmtW(last.weight)} × ${last.reps}) is deleted.`, 'Remove set', true))) return;
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
       } }, icon('minus', 18), 'Remove set'),
+      doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
     ),
   );
 }
