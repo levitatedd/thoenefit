@@ -28,6 +28,25 @@ const check = (name, ok, detail = '') => {
 };
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+// php -S ignores web/.htaccess, so send its Content-Security-Policy here too.
+// Otherwise anything the live site's policy blocks (like inline style
+// attributes, #81) works locally and breaks on the server.
+if (!process.env.TF_URL) {
+  const { readFileSync } = await import('node:fs');
+  const csp = readFileSync(new globalThis.URL('../web/.htaccess', import.meta.url), 'utf8').match(/Content-Security-Policy "([^"]+)"/)[1];
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (opts) => {
+    const ctx = await newContext(opts);
+    await ctx.route('**/*', async (route) => {
+      // The page itself, and the copy the service worker saves and serves later.
+      const req = route.request();
+      if (req.resourceType() !== 'document' && !/\/(index\.html)?(\?.*)?$/.test(new globalThis.URL(req.url()).pathname)) return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': csp } });
+    });
+    return ctx;
+  };
+}
 const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const page = await context.newPage();
 const errors = [];
@@ -353,18 +372,23 @@ check('exercise page shows form cues and a trend', (await page.locator('.cues').
     document.querySelector('.page').prepend(fig);
     const svg = fig.querySelector('svg');
     const at = () => Math.round(svg.getBoundingClientRect().top + window.scrollY);
+    const readout = fig.querySelector('.chart-readout');
     const out = [at()];
+    let fits = true;
     svg.focus();
     for (const key of ['Home', 'ArrowRight', 'ArrowRight', 'Home']) {
       svg.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
       out.push(at());
+      // #81: the details fit inside their box instead of spilling under the chart.
+      fits = fits && readout.querySelector('.chart-readout-text').offsetHeight <= readout.clientHeight;
     }
     const clipped = [...fig.querySelectorAll('.chart-readout-text > span[title]')].every((s) => s.title.length > 0);
     fig.remove();
-    return { out, clipped };
+    return { out, clipped, fits };
   });
   check(`the chart stays still between short and long sessions (${tops.out.join(', ')})`, new Set(tops.out).size === 1, tops.out.join(', '));
   check('cut-off detail lines keep their full text on hover', tops.clipped);
+  check('the date, value, sets and gym all fit above the chart', tops.fits);
   await chart.locator('.chart-readout a:has-text("Open workout")').click();
   await page.waitForSelector('.lift');
   check('Open workout goes to that session, with a way back to the exercise', /^#\/history\//.test(await page.evaluate(() => location.hash)) && (await page.textContent('.back')).trim() === liftName);
