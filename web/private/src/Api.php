@@ -117,6 +117,11 @@ final class Api
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
+            'trends' => fn() => [
+                'recovery' => $this->gen->muscleStats($uid),
+                'unit' => $user['unit'],
+                'weeks' => $this->workouts->weeklyTrends($uid, $user['unit'], is_string($_GET['timezone'] ?? null) ? $_GET['timezone'] : 'UTC'),
+            ],
             // Other people on this server, by display name only, for sharing a workout.
             'people' => fn() => ['people' => $this->people($uid)],
             'shares' => fn() => [
