@@ -33,7 +33,7 @@ After a deploy, confirm the run succeeded and report the version and build it st
 
 A production release is complete after the live deploy and the GitHub updates below. Authorization to release includes these updates.
 
-1. Confirm the production upload succeeded and `https://fit.mikethoene.com/version.json` reports the released build. Keep the backlog and issues open if the production upload is still pending, failed, or skipped.
+1. Confirm the production upload succeeded and `https://fit.mikethoene.com/version.json` reports the released build. Cloud sessions reach the site through the **thoenefit** environment, which allows `fit.mikethoene.com` and `fit-test.mikethoene.com`; if a session is on another environment and the request is refused, say so rather than skipping the check. Keep the backlog and issues open if the production upload is still pending, failed, or skipped.
 2. Check the release PR and the PRs it includes for issue numbers. Include each feature or fix fully delivered by the release. Track partially delivered issues until their remaining work ships. Use `Refs #N` in release PRs so GitHub leaves issues open until the live deploy is verified.
 3. Read the latest body of backlog issue #1. For each shipped issue, move its checkbox to the top of **Completed** and mark it `- [x]`. If the shipped issue has no backlog entry, add `- [x] #N — Title` there. Keep a single entry per issue and preserve unrelated backlog items.
 4. Close every corresponding GitHub issue as **completed** after updating #1. Check that each issue is closed and has a checked entry in **Completed**, then report the live version and the issues closed. If any update fails, retry the missing step without duplicating an entry. Report any step still pending.
@@ -45,6 +45,7 @@ PR bodies follow this shape: `Refs #N. Part of #1.`, then **What changed**, **Ch
 - `VERSION` holds the starting number (currently `0.1.100`). `.github/scripts/app-version.sh` adds one for each commit on `main`'s first-parent line since `VERSION` last changed, so each release counts once. Staging shows the next number with `-staging`.
 - Never hand-edit version numbers in code. Only change `VERSION` to start a new minor or major version (e.g. `0.2.0`).
 - What's new (`web/changelog.json`) is generated on deploy from PR titles and branch names by `.github/scripts/changelog.mjs`. Nothing to write by hand, which is why branch names and PR titles matter.
+- The notes come from merge commits, so they can't be edited after merging. A `feature/` or `fix/` PR that a later PR replaces before release (like #114, replaced by #115) still appears. When reworking something already on staging, say so in the release PR.
 
 ## Checks
 
@@ -54,6 +55,7 @@ Run before every PR:
 php tests/run.php
 node tests/sync.test.mjs
 node tests/search.test.mjs
+node tests/install.test.mjs
 node tests/version.test.mjs
 node tests/changelog.test.mjs
 ```
@@ -65,6 +67,8 @@ php web/private/bin/create-user.php e2e "E2E"   # password: gym-test-password
 php -S 127.0.0.1:8765 -t web
 NODE_PATH=$(npm root -g) node tests/e2e.mjs
 ```
+
+In Claude Code cloud sessions, there is no Chrome at the default path. Point the walk-through at the preinstalled Chromium with `CHROME=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` (check `ls /opt/pw-browsers` if the version differs).
 
 - Add a check for each new behaviour: server logic in `tests/run.php`, UI in `tests/e2e.mjs`. For a bug fix, confirm the new check fails on the old code.
 - Before calling a failure "known", re-run it on unchanged `staging`. These failed on unchanged `staging` in the cloud environment as of Nov 2026:
