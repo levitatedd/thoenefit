@@ -1,4 +1,4 @@
-import { Api, WorkoutSync, uuid } from './store.js';
+import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises } from './search.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
@@ -2161,7 +2161,34 @@ function viewSettings() {
           localStorage.removeItem('tf.boot');
           render();
         }, e.currentTarget);
-      } }, 'Sign out')),
+      } }, 'Sign out'),
+      // For a shared phone or computer (#23).
+      h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
+        const button = e.currentTarget;
+        const unsynced = sync.status() !== 'saved';
+        if (!(await confirmSheet(
+          unsynced ? 'Discard changes that have not synced?' : 'Sign out and clear this device?',
+          unsynced
+            ? 'Some workout changes are only on this device and have not reached the server. Clearing deletes them for good. To keep them, close this, connect, and wait until the status shows Saved.'
+            : 'Your workouts, profile and rest timer are removed from this device. Everything you have synced stays on the server, ready the next time you sign in.',
+          unsynced ? 'Discard changes, sign out and clear' : 'Sign out and clear',
+          unsynced,
+        ))) return;
+        await act(async () => {
+          await api.post('logout');
+          const uid = S.user.id;
+          sync.close();
+          sync = null;
+          stopRest();
+          clearLocalData(localStorage, uid);
+          S.user = null;
+          S.draft = null;
+          S.offlineBoot = false;
+          render();
+          toast('Signed out. Your workout data was removed from this device.');
+        }, button);
+      } }, 'Sign out and clear this device'),
+      h('p', { class: 'muted small' }, 'On a shared phone or computer, use Sign out and clear this device. It also removes your saved workouts, profile and rest timer from it.')),
     brandWide(),
     h('p', { class: 'muted small center app-version' }, h('a', { href: '#/settings/whats-new' }, `Version ${APP_VERSION}`)),
   );

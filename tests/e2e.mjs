@@ -1073,6 +1073,55 @@ for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'],
   }
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Sign out and clear local data');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  const myId = (await api('bootstrap')).user.id;
+  const keys = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tf.')).sort());
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('button:has-text("Sign out and clear this device")');
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.waitForSelector('.sheet');
+  check('with everything synced, it asks plainly and says synced workouts stay on the server', /Sign out and clear this device\?/.test(await page.textContent('.sheet h2')) && /stays on the server/.test(await page.textContent('.sheet')));
+  await page.click('.sheet button:has-text("Close")');
+
+  // A workout whose saves cannot reach the server, so it is only on this phone.
+  await page.route('**/api.php?a=save_workout*', (r) => r.abort());
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  await page.evaluate(() => localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: true })));
+  await page.waitForFunction(() => document.querySelector('#sync') && document.querySelector('#sync').textContent !== 'Saved');
+  const before = await keys();
+  check('the unsynced workout, profile and choices are on the device', [`tf.docs.${myId}`, 'tf.boot', 'tf.stravaOnFinish'].every((k) => before.includes(k)), before.join());
+  await page.goto(`${URL}#/settings`);
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.waitForSelector('.sheet');
+  check('with unsynced changes, it warns they will be discarded', /have not synced/.test(await page.textContent('.sheet h2')) && /deletes them for good/.test(await page.textContent('.sheet')));
+  await shot('24-sign-out-clear-unsynced');
+  await page.click('.sheet button:has-text("Close")');
+  check('cancelling keeps you signed in with the workout still on the device', (await page.locator('.tabs').count()) === 1 && (await keys()).includes(`tf.docs.${myId}`));
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.click('.sheet button:has-text("Discard changes, sign out and clear")');
+  await page.waitForSelector('input[name=username]');
+  await page.unroute('**/api.php?a=save_workout*');
+  await page.waitForTimeout(2500);
+  const after = await keys();
+  check('signing out cleared the workouts, profile, rest timer and Strava choice', ![`tf.docs.${myId}`, 'tf.boot', 'tf.rest', 'tf.stravaOnFinish'].some((k) => after.includes(k)), after.join());
+  check('device-wide choices like the install reminder are kept', after.includes('tf.install'));
+  check('the server session is ended too', (await page.evaluate(async () => (await fetch('api.php?a=history', { credentials: 'same-origin' })).status)) === 401);
+  await shot('25-signed-out-cleared');
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PASS);
+  await page.click('button[type=submit]');
+  await page.waitForSelector('.tabs');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout"), button:has-text("Resume workout"), a:has-text("Resume workout")');
+  check('signing back in works, and the discarded workout did not come back', (await page.locator(':text("Resume workout")').count()) === 0);
+  check('the synced history is still on the server', (await api('history')).workouts.length > 0);
+}
+
 check('no script errors during the run', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();
