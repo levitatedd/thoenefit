@@ -513,6 +513,8 @@ check('exercise page shows form cues and a trend', (await page.locator('.cues').
   const exId = Number(exHash.split('/').pop());
   const chart = page.locator('.chart').first();
   check('before a point is chosen, the chart says how to use it', /Tap a point/.test(await chart.locator('.chart-readout').textContent()));
+  await page.waitForFunction(() => !/Loading/.test(document.querySelector('[data-notes-list]')?.textContent || ''));
+  await chart.locator('svg').scrollIntoViewIfNeeded();
   const box = await chart.locator('svg').boundingBox();
   await page.touchscreen.tap(box.x + box.width - 12, box.y + box.height / 2);
   await page.waitForSelector('.chart-readout a:has-text("Open workout")');
@@ -1585,6 +1587,22 @@ console.log('Setup notes (#125)');
   await planRow.scrollIntoViewIfNeeded();
   await shot('40-setup-note-plan');
   check('no sideways scrolling with a note', (await overflow()) <= 0);
+  // The exercise page lists the note per gym and can change it.
+  const exHref = await planRow.locator('a.name-link').getAttribute('href');
+  await page.goto(`${URL}${exHref}`);
+  await page.waitForSelector('.note-row');
+  const gymRow = page.locator('.note-row').first();
+  check('the exercise page shows the note under its gym', (await page.locator('.section h2:has-text("Setup notes")').count()) === 1 && /My gym/.test(await gymRow.textContent()) && (await gymRow.locator('.setup-note').textContent()).trim() === 'Seat on 5, wide handle');
+  await gymRow.locator('button:has-text("Edit")').click();
+  await gymRow.locator('textarea[name=exercise_note]').fill('Seat on 6, wide handle');
+  await gymRow.locator('button:has-text("Save note")').click();
+  await waitForToast(page, /Note saved for My gym/);
+  check('a note can be edited on the exercise page', (await page.locator('.note-row').first().locator('.setup-note').textContent()).trim() === 'Seat on 6, wide handle');
+  await page.locator('.section', { hasText: 'Setup notes' }).scrollIntoViewIfNeeded();
+  await shot('41-exercise-page-notes');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  check("the change shows at once in Today's plan", (await page.locator('.plan-row', { hasText: name }).first().locator('.setup-note').textContent()).trim() === 'Seat on 6, wide handle');
   // Clear it from the next workout, so the rest of the walk-through starts clean.
   await page.click('button:has-text("Start workout")');
   await page.waitForSelector('.lift');
