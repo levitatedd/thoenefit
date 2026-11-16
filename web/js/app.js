@@ -333,7 +333,7 @@ function render() {
       ['settings', 'Settings', 'gear'],
     ].map(([key, label, ic]) => (key === 'today' && sync?.active
       // During a workout: Pause / Resume on the workout itself, and a plain way back to it from anywhere else.
-      ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: 'tab workout-tab' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
+      ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: `tab workout-tab ${sync.active.paused_at ? 'paused' : ''}`, 'aria-label': sync.active.paused_at ? 'Workout, paused' : 'Workout in progress' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
       : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24)), h('span', {}, label)))),
   );
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
