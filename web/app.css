@@ -1698,3 +1698,47 @@ ul.notes {
 .public-note {
   text-align: center;
 }
+
+/* ---- Workout recap (#123) ---------------------------------------------- */
+.recap-count {
+  font-size: 17px;
+}
+
+.recap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recap-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+
+.recap-name {
+  color: var(--mint);
+  font: 700 18px/1.25 var(--display);
+  text-decoration: underline;
+  text-decoration-color: rgba(58, 242, 156, 0.35);
+  text-underline-offset: 4px;
+}
+
+.recap-detail {
+  flex-basis: 100%;
+  color: var(--chalk);
+  font-variant-numeric: tabular-nums;
+}
+
+.recap-first .recap-detail {
+  color: var(--muted);
+}
+
+.badge.record {
+  margin-left: 0;
+  background: var(--mint);
+  color: var(--ink);
+  font-weight: 700;
+}

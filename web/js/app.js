@@ -1781,8 +1781,9 @@ function finishSheet(doc) {
           stopRest();
           S.draft = null;
           S.draftOpts.day_type = null;
-          toast(toStrava ? 'Workout saved. It goes to Strava once it syncs.' : 'Workout saved.');
+          if (toStrava) toast('Workout saved. It goes to Strava once it syncs.');
           go('today');
+          recapSheet(doc.id, workingSets(sync.docs.get(doc.id) || doc));
         } }, 'Finish and save'))
     : h('div', { class: 'stack' },
         h('p', { class: 'muted' }, 'No sets are marked done, so there is nothing to save.'),
@@ -1793,6 +1794,80 @@ function finishSheet(doc) {
           go('today');
         } }, 'Discard workout'));
   close = sheet('Finish workout', body);
+}
+
+// ---------------------------------------------------------------- recap (#123)
+
+/** Completed working sets of lifts: not warm-ups, cardio or stretches. */
+function workingSets(doc) {
+  return doc.exercises.filter((e) => !isTimed(e)).reduce((n, e) => n + e.sets.filter((s) => s.done && !s.warmup && s.reps > 0).length, 0);
+}
+
+/** "135 lb × 10", or "12 reps" for bodyweight. */
+function liftResult(weight, reps, unit) {
+  return weight > 0 ? `${fmtW(weight)} ${unit} × ${reps}` : `${reps} reps`;
+}
+
+function recordLine(r, unit) {
+  if (r.type === 'weight') return `${liftResult(r.weight, r.reps, unit)}, the heaviest yet (up from ${fmtW(r.previous_weight)} ${unit})`;
+  return r.weight > 0 ? `${liftResult(r.weight, r.reps, unit)}, up from ${r.previous_reps} reps at that weight` : `${r.reps} reps, up from ${r.previous_reps}`;
+}
+
+/**
+ * Working sets, new records and first results for a finished workout. Each
+ * lift links to its history, where the record shows on the chart.
+ */
+function recapBody(recap, path, label) {
+  const link = (x) => h('a', { class: 'recap-name', href: `#/exercises/${x.exercise_id}`, onclick: () => (S.backTo = { to: `exercises/${x.exercise_id}`, path, label, y: window.scrollY }) }, x.name);
+  return h('div', { class: 'stack recap' },
+    h('p', { class: 'recap-count' }, h('strong', {}, `${recap.working_sets} working set${recap.working_sets === 1 ? '' : 's'}`), ` across ${recap.exercises} exercise${recap.exercises === 1 ? '' : 's'}`),
+    recap.records.length > 0 && h('ul', { class: 'recap-list' }, recap.records.map((r) => h('li', { class: 'recap-record' },
+      h('span', { class: 'badge record' }, 'New record'), link(r), h('span', { class: 'recap-detail' }, recordLine(r, recap.unit))))),
+    !recap.records.length && !recap.firsts.length && h('p', { class: 'muted' }, 'No new records this time. Matching your best still counts.'),
+    recap.firsts.length > 0 && [h('h3', {}, 'First logged'), h('ul', { class: 'recap-list' }, recap.firsts.map((f) => h('li', { class: 'recap-first' },
+      link(f), h('span', { class: 'recap-detail' }, `${liftResult(f.weight, f.reps, recap.unit)}, the result to beat next time`))))]);
+}
+
+/**
+ * Shown on finishing. The working sets are counted on the phone, so they show
+ * straight away, even offline; records need the server, so they follow once
+ * the workout has synced.
+ */
+function recapSheet(id, sets) {
+  // Until the server's recap arrives (or if it cannot), the count from the phone.
+  const box = h('div', { class: 'stack' },
+    h('p', { class: 'recap-count' }, h('strong', {}, `${sets} working set${sets === 1 ? '' : 's'}`), ' logged.'),
+    h('p', { class: 'muted', 'data-recap-status': '' }, 'Checking for new records…'));
+  const close = sheet('Workout saved', h('div', { class: 'stack' },
+    box,
+    h('a', { class: 'btn block', href: `#/history/${id}`, onclick: () => close() }, 'Open in History')));
+  // A lift's name opens its history: close the sheet on the way.
+  box.addEventListener('click', (e) => e.target.closest('a') && close());
+  const started = Date.now();
+  const attempt = async () => {
+    if (!document.body.contains(box)) return; // closed
+    const pending = sync && sync.docs.has(id);
+    if (!pending) {
+      try {
+        const { recap } = await api.get('recap', `&id=${encodeURIComponent(id)}`);
+        box.replaceChildren(recapBody(recap, 'today', 'Workout'));
+        return;
+      } catch (e) {
+        if (!e.offline && e.status !== 404) {
+          box.replaceChildren(h('p', { class: 'recap-count' }, h('strong', {}, `${sets} working set${sets === 1 ? '' : 's'}`), ' logged.'), h('p', { class: 'muted' }, e.message));
+          return;
+        }
+      }
+    }
+    if (Date.now() - started > 15000) {
+      box.replaceChildren(
+        h('p', { class: 'recap-count' }, h('strong', {}, `${sets} working set${sets === 1 ? '' : 's'}`), ' logged.'),
+        h('p', { class: 'muted' }, 'Saved on this phone. Records show in History once this workout syncs.'));
+      return;
+    }
+    setTimeout(attempt, 600);
+  };
+  attempt();
 }
 
 // ---------------------------------------------------------------- history
@@ -1937,7 +2012,7 @@ function viewHistoryDetail(id) {
   return h('main', { class: 'page' }, backOr('history', 'History'),
     asyncSection(
       () => api.get('workout', `&id=${encodeURIComponent(id)}`),
-      ({ workout, calories, strava, strava_export: stravaExport }) => {
+      ({ workout, calories, strava, strava_export: stravaExport, recap }) => {
         let dirty = false;
         const save = h('button', { class: 'btn primary block', type: 'button', disabled: true }, 'Save changes');
         const touch = () => {
@@ -2018,6 +2093,7 @@ function viewHistoryDetail(id) {
         }, save);
         return [
           h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
+          recap && h('section', { class: 'card stack' }, h('h2', {}, 'Recap'), recapBody(recap, `history/${id}`, 'Workout History')),
           h('section', { class: 'card stack' }, caloriesLine, effortBox),
           box,
           save,

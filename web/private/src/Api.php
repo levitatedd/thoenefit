@@ -119,7 +119,16 @@ final class Api
                     'calories' => Calories::estimate($w, $user['body_weight_kg'] === null ? null : (float) $user['body_weight_kg']),
                     'strava' => $this->strava->connection($uid),
                     'strava_export' => $this->strava->exportStatus($uid, $w['id']),
+                    // Working sets and new records (#123), for finished workouts.
+                    'recap' => $this->workouts->recap($uid, $w['id']),
                 ];
+            },
+            'recap' => function () use ($uid) {
+                $r = $this->workouts->recap($uid, (string) ($_GET['id'] ?? ''));
+                if ($r === null) {
+                    throw new HttpError(404, 'Workout not found.');
+                }
+                return ['recap' => $r];
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
