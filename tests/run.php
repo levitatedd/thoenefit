@@ -912,6 +912,16 @@ check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 
 echo "Feedback as GitHub issues\n";
+$vf = sys_get_temp_dir() . '/tf-version-' . getmypid() . '.json';
+file_put_contents($vf, '{"build":"abc123","version":"0.1.110-staging"}');
+check('the app version comes from the version the deploy stamped', \TF\app_version($vf) === '0.1.110-staging');
+file_put_contents($vf, '{"build":"dev"}');
+check('a copy that was never deployed says dev, not a made-up number', \TF\app_version($vf) === 'dev' && \TF\app_version('/nonexistent/version.json') === 'dev');
+file_put_contents($vf, '{"version":"<script>"}');
+check('a garbled version file is not trusted', \TF\app_version($vf) === 'dev');
+@unlink($vf);
+check('the server no longer has a hard-coded app version', !defined('TF\\APP_VERSION') && !str_contains(file_get_contents(dirname(__DIR__) . '/web/private/src/Api.php'), 'APP_VERSION'));
+
 check('feedback is off without a GitHub token', !(new \TF\Feedback($db, []))->enabled() && !(new \TF\Feedback($db, ['github' => ['token' => '']]))->enabled());
 $ghCalls = [];
 $ghIssues = [];
