@@ -1000,6 +1000,12 @@ input.num::placeholder {
   text-decoration: none;
 }
 
+/* Manage users (#21): actions sit under each account. */
+.account-row .plan-actions {
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .log-date {
   font-size: 14px;
   font-weight: 600;

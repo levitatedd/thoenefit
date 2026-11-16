@@ -1062,6 +1062,69 @@ if (!process.env.TF_URL) {
   await shot('16-history-calories');
 }
 
+console.log('Admin password resets and deactivation');
+{
+  const csrf = (await api('bootstrap')).csrf;
+  const name = `crew${Date.now() % 100000}`;
+  await post('create_user', { username: name, display_name: 'Crew Member', password: 'crew-password-1' }, csrf);
+  const cctx = await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true });
+  const cp = await cctx.newPage();
+  const signIn = async (pw) => {
+    await cp.goto(URL);
+    await cp.waitForSelector('input[name=username]');
+    await cp.fill('input[name=username]', name);
+    await cp.fill('input[name=password]', pw);
+    await cp.click('button[type=submit]');
+  };
+  const status = () => cp.evaluate(async () => (await fetch('api.php?a=history', { credentials: 'same-origin' })).status);
+  await signIn('crew-password-1');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('the new account can sign in', (await status()) === 200);
+
+  await page.goto(`${URL}#/settings/users`);
+  const row = page.locator('.account-row', { hasText: name });
+  await row.waitFor();
+  check('the admin has no reset or deactivate buttons on their own row', (await page.locator('.account-row', { hasText: 'You' }).locator('button').count()) === 0);
+  await row.locator('button:has-text("Reset password")').click();
+  await page.waitForSelector('.sheet input[name=reset_password]');
+  await page.click('.sheet button:has-text("Make one up for me")');
+  const made = await page.inputValue('.sheet input[name=reset_password]');
+  await shot('20-admin-reset-password');
+  await page.fill('.sheet input[name=reset_password]', 'crew-password-2');
+  await page.click('.sheet button:has-text("Set new password")');
+  await waitForToast(page, /Password reset/);
+  check('Make one up fills in a long enough password', made.length >= 10, made);
+  check('a password reset signs the person out on their devices', (await status()) === 401);
+  await signIn('crew-password-1');
+  await cp.waitForSelector('.form-error:not(:empty)');
+  check('the old password no longer works', /Wrong username or password/.test(await cp.textContent('.form-error')));
+  await signIn('crew-password-2');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('the new password works', (await status()) === 200);
+
+  await row.locator('button:has-text("Deactivate")').click();
+  await page.click('.sheet button:has-text("Deactivate account")');
+  await waitForToast(page, /is deactivated/);
+  const off = page.locator('[data-list=inactive] .account-row', { hasText: name });
+  check('a deactivated account moves to Deactivated accounts', (await off.count()) === 1 && (await page.locator('.log:not([data-list]) .account-row', { hasText: name }).count()) === 0);
+  await off.scrollIntoViewIfNeeded();
+  await shot('21-admin-deactivated');
+  check('deactivating signs the person out', (await status()) === 401);
+  await signIn('crew-password-2');
+  await cp.waitForSelector('.form-error:not(:empty)');
+  check('a deactivated account cannot sign in and is told why', /deactivated/.test(await cp.textContent('.form-error')));
+  if (SHOTS) await cp.screenshot({ path: `${SHOTS}/22-deactivated-sign-in.png` });
+
+  await off.locator('button:has-text("Turn back on")').click();
+  await waitForToast(page, /can sign in again/);
+  check('turning it back on moves it back to Accounts', (await page.locator('.account-row', { hasText: name }).locator('button:has-text("Deactivate")').count()) === 1 && (await page.locator('[data-list=inactive] .account-row').count()) === 0);
+  await signIn('crew-password-2');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('a turned-back-on account signs in with the same password', (await status()) === 200);
+  check('no sideways scrolling on Manage users', (await overflow()) <= 0);
+  await cctx.close();
+}
+
 console.log("Seeing each other's history");
 {
   const csrf = (await api('bootstrap')).csrf;

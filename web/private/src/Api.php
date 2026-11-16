@@ -208,6 +208,18 @@ final class Api
                 $this->auth->declineRequest((int) ($in['id'] ?? 0));
                 self::json($this->accounts());
                 return;
+            case 'admin_reset_password':
+                $this->auth->adminResetPassword($user, (int) ($in['id'] ?? 0), (string) ($in['password'] ?? ''));
+                self::json($this->accounts());
+                return;
+            case 'deactivate_user':
+                $this->auth->deactivate($user, (int) ($in['id'] ?? 0));
+                self::json($this->accounts());
+                return;
+            case 'reactivate_user':
+                $this->auth->reactivate($user, (int) ($in['id'] ?? 0));
+                self::json($this->accounts());
+                return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
                     throw new HttpError(403, 'Current password is wrong.');
@@ -413,6 +425,7 @@ final class Api
         return [
             'users' => $this->auth->listUsers(),
             'requests' => $this->auth->pendingRequests(),
+            'inactive' => $this->auth->listUsers('inactive'),
             'invite' => $this->auth->inviteStatus(),
         ];
     }

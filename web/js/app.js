@@ -2372,6 +2372,8 @@ function viewUsers() {
   if (S.user.role !== 'admin') return page('Manage users', backLink('settings', 'Settings'), h('p', { class: 'muted' }, 'Only the admin can manage accounts.'));
   const when = (iso) => fmtDate(iso, { month: 'short', day: 'numeric', year: 'numeric' });
   const accounts = h('ul', { class: 'log' });
+  const inactive = h('ul', { class: 'log', 'data-list': 'inactive' });
+  const inactiveSection = section('Deactivated accounts', h('p', { class: 'muted' }, 'They cannot sign in. Their workouts are kept, and turning an account back on lets them sign in with the same password.'), inactive);
   const requests = h('div', { class: 'stack', 'data-list': 'requests' });
   const inviteState = h('p', { class: 'muted', 'data-invite': '' });
   const turnOff = h('button', { class: 'btn danger block', type: 'button' }, 'Stop taking requests');
@@ -2379,9 +2381,24 @@ function viewUsers() {
   // One painter for everything the server sends back, so every action leaves the page in step.
   const paint = (data) => {
     S.pendingRequests = data.requests.length;
-    fill(accounts, data.users.map((u) => h('li', { class: 'log-row' },
+    fill(accounts, data.users.map((u) => h('li', { class: 'log-row account-row' },
       h('span', { class: 'log-title' }, u.display_name, u.role === 'admin' && h('span', { class: 'badge' }, 'Admin'), u.id === S.user.id && h('span', { class: 'badge' }, 'You')),
-      h('span', { class: 'log-meta' }, `${u.username}, added ${when(u.created_at)}`))));
+      h('span', { class: 'log-meta' }, `${u.username}, added ${when(u.created_at)}`),
+      // The admin manages other people here (#21); their own account is under Settings.
+      u.id !== S.user.id && h('div', { class: 'plan-actions' },
+        h('button', { class: 'btn small', type: 'button', onclick: () => resetPassword(u) }, 'Reset password'),
+        u.role !== 'admin' && h('button', { class: 'btn small', type: 'button', onclick: async (e) => {
+          const btn = e.currentTarget;
+          if (await confirmSheet(`Deactivate ${u.username}?`, 'They are signed out on every device and cannot sign in. Their workouts are kept, and you can turn the account back on later.', 'Deactivate account', true)) decide('deactivate_user', u, `${u.username} is deactivated.`, btn);
+        } }, 'Deactivate')))));
+    const off = data.inactive || [];
+    inactiveSection.hidden = !off.length;
+    fill(inactive, off.map((u) => h('li', { class: 'log-row account-row' },
+      h('span', { class: 'log-title' }, u.display_name, h('span', { class: 'badge' }, 'Deactivated')),
+      h('span', { class: 'log-meta' }, `${u.username}, added ${when(u.created_at)}`),
+      h('div', { class: 'plan-actions' },
+        h('button', { class: 'btn small primary', type: 'button', onclick: (e) => decide('reactivate_user', u, `${u.username} can sign in again.`, e.currentTarget) }, 'Turn back on'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => resetPassword(u) }, 'Reset password')))));
     fill(requests,
       !data.requests.length && h('p', { class: 'muted' }, data.invite.set ? 'No requests waiting.' : 'No requests waiting. Set an invite token below to let people ask for an account.'),
       data.requests.map((r) => h('div', { class: 'card request' },
@@ -2401,6 +2418,36 @@ function viewUsers() {
     paint(await api.post(action, { id: r.id }));
     toast(done);
   }, btn);
+  const makeUp = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    const letters = 'abcdefghjkmnpqrstuvwxyz23456789';
+    return [...bytes].map((b, n) => (n && n % 4 === 0 ? '-' : '') + letters[b % letters.length]).join('');
+  };
+  // A new password the admin passes on (#21). It signs that person out everywhere.
+  const resetPassword = (u) => {
+    const input = h('input', { type: 'text', name: 'reset_password', minlength: 10, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+    const err = h('p', { class: 'form-error', role: 'alert' });
+    const go = h('button', { class: 'btn primary block', type: 'submit' }, 'Set new password');
+    const close = sheet(`Reset ${u.username}'s password`, h('form', { class: 'stack', onsubmit: async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      go.disabled = true;
+      try {
+        paint(await api.post('admin_reset_password', { id: u.id, password: input.value }));
+        close();
+        toast(`Password reset. ${u.username} is signed out everywhere.`);
+      } catch (ex) {
+        err.textContent = ex.offline ? 'No connection to the server.' : ex.message;
+      }
+      go.disabled = false;
+    } },
+      h('p', { class: 'muted' }, 'They are signed out on every device and sign in again with the new password. Pass it on to them; they can change it under Settings.'),
+      field('New password', input, 'At least 10 characters.'),
+      h('button', { class: 'btn block', type: 'button', onclick: () => { input.value = makeUp(); input.focus(); input.select(); } }, 'Make one up for me'),
+      err,
+      go));
+    input.focus();
+  };
 
   // Invite token
   const token = h('input', { type: 'text', name: 'invite_token', minlength: 8, maxlength: 100, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
@@ -2467,6 +2514,7 @@ function viewUsers() {
     return [
       section('Requests waiting', requests),
       section('Accounts', accounts),
+      inactiveSection,
       section('Invite token', h('p', { class: 'muted' }, 'With the token, someone can ask for an account from the sign-in screen, choosing their own username and password. Nobody gets in until you approve them here.'), inviteState, tokenForm),
       section('Add a person yourself', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form),
     ];
