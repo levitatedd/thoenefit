@@ -3,7 +3,26 @@ declare(strict_types=1);
 
 namespace TF;
 
-const APP_VERSION = '1.0.0';
+/**
+ * The version this copy of the app was deployed as, e.g. "0.1.109" or
+ * "0.1.110-staging". The deploy stamps it into web/version.json (see
+ * .github/workflows/deploy.yml); a local copy has none and says "dev".
+ * Used for the version on feedback issues (#20, #112).
+ */
+function app_version(?string $file = null): string
+{
+    static $cached = null;
+    if ($file === null && $cached !== null) {
+        return $cached;
+    }
+    $json = @file_get_contents($file ?? dirname(__DIR__, 2) . '/version.json');
+    $data = $json === false ? null : json_decode($json, true);
+    $version = is_array($data) && is_string($data['version'] ?? null) && preg_match('/^[0-9A-Za-z.+-]{1,40}$/', $data['version']) ? $data['version'] : 'dev';
+    if ($file === null) {
+        $cached = $version;
+    }
+    return $version;
+}
 
 require_once __DIR__ . '/Db.php';
 require_once __DIR__ . '/Migrator.php';
