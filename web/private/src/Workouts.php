@@ -64,6 +64,7 @@ final class Workouts
 
         $exRows = [];
         $setRows = [];
+        $notes = []; // note key => setup note, for entries that carry one (#125)
         $exercises = is_array($d['exercises'] ?? null) ? array_values($d['exercises']) : [];
         if (count($exercises) > 40) {
             throw new HttpError(422, 'A workout can hold at most 40 exercises.');
@@ -83,6 +84,9 @@ final class Workouts
             $repMax = max($repMin, min(100, (int) ($e['rep_max'] ?? 12)));
             $sugg = $e['suggested_weight'] ?? null;
             $targetSeconds = $e['target_seconds'] ?? null;
+            if (array_key_exists('setup_note', $e)) {
+                $notes[self::noteKey($exId, $gymId)] = self::cleanNote((string) $e['setup_note']);
+            }
             $exRows[] = [
                 'id' => $weId,
                 'workout_id' => $id,
@@ -153,7 +157,11 @@ final class Workouts
             'updated_at' => now_utc(),
         ];
 
-        $this->db->tx(function (Db $db) use ($id, $uid, $existing, $row, $exRows, $setRows, $status) {
+        $this->db->tx(function (Db $db) use ($id, $uid, $existing, $row, $exRows, $setRows, $status, $notes) {
+            // Setup notes ride on the workout so they can be written offline (#125). Empty clears.
+            foreach ($notes as $key => $note) {
+                self::putNote($db, $uid, (string) $key, $note);
+            }
             if ($existing) {
                 $db->update('workouts', $row, 'id=?', [$id]);
             } else {
@@ -465,6 +473,72 @@ final class Workouts
     }
 
     private const LB_PER_KG = 2.20462262;
+
+    /** Tidies a note: one line of single spaces, at most 200 characters. */
+    public static function cleanNote(string $note): string
+    {
+        return mb_substr(trim(preg_replace('/\s+/u', ' ', $note)), 0, 200);
+    }
+
+    private static function putNote(Db $db, int $uid, string $key, string $note): void
+    {
+        $db->run('DELETE FROM exercise_notes WHERE user_id=? AND variant_key=?', [$uid, $key]);
+        if ($note !== '') {
+            $db->insert('exercise_notes', ['user_id' => $uid, 'variant_key' => $key, 'note' => $note, 'updated_at' => now_utc()]);
+        }
+    }
+
+    /**
+     * Setup notes are kept per exercise and gym (#125): a seat height or grip at
+     * one gym rarely applies at another. A workout with no gym has its own key.
+     */
+    public static function noteKey(int $exerciseId, ?int $gymId): string
+    {
+        return $exerciseId . '@' . ($gymId ?: 0);
+    }
+
+    /**
+     * The setup notes an exercise page shows: one per gym.
+     *
+     * @param array $gyms this account's gyms, as from Generator::gymShape()
+     */
+    public function exerciseNotes(int $uid, int $exerciseId, array $gyms): array
+    {
+        $notes = $this->notes($uid);
+        $out = [];
+        foreach ($gyms as $g) {
+            $out[] = ['gym_id' => (int) $g['id'], 'gym_name' => $g['name'], 'note' => $notes[self::noteKey($exerciseId, (int) $g['id'])] ?? null];
+        }
+        return $out;
+    }
+
+    /** Saves (or, when empty, clears) one setup note from the exercise page. */
+    public function setNote(int $uid, string $key, string $note): void
+    {
+        $note = self::cleanNote($note);
+        $this->db->tx(fn(Db $db) => self::putNote($db, $uid, $key, $note));
+    }
+
+    /** Setup notes (#125) by note key (the column is named variant_key, but holds noteKey()). */
+    public function notes(int $uid): array
+    {
+        $out = [];
+        foreach ($this->db->all('SELECT variant_key, note FROM exercise_notes WHERE user_id=?', [$uid]) as $r) {
+            $out[(string) $r['variant_key']] = $r['note'];
+        }
+        return $out;
+    }
+
+    /** Adds each exercise's setup note at this gym (or null) to a plan or workout's exercises. */
+    public function withNotes(int $uid, array $exercises, ?int $gymId): array
+    {
+        $notes = $this->notes($uid);
+        foreach ($exercises as &$e) {
+            $e['note'] = isset($e['exercise_id']) ? ($notes[self::noteKey((int) $e['exercise_id'], $gymId)] ?? null) : null;
+        }
+        unset($e);
+        return $exercises;
+    }
 
     /**
      * A finished workout's recap (#123): its working sets, and for each lift

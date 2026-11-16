@@ -1742,3 +1742,97 @@ ul.notes {
   color: var(--ink);
   font-weight: 700;
 }
+
+/* ---- Setup notes (#125) ------------------------------------------------ */
+.setup-note {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(245, 198, 60, 0.12);
+  color: var(--chalk);
+  font: 600 14px/1.35 var(--body);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.setup-note .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--yellow);
+}
+
+button.setup-note {
+  cursor: pointer;
+}
+
+.note-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 2px;
+}
+
+.note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- Muscle illustrations (#150) ---------------------------------------
+   The exercise's first primary muscle, faint behind the text on the right
+   and fading out toward the left: a low-opacity slate body with the muscle
+   in muted mint. The text sits above it and stays fully legible. */
+.has-art {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.has-art > :not(.muscle-art) {
+  position: relative;
+  z-index: 1;
+}
+
+.muscle-art {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  right: 4%;
+  height: min(92%, 230px);
+  width: auto;
+  max-width: 58%;
+  object-fit: contain;
+  transform: translateY(-50%);
+  opacity: 0.2;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to left, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 55%, transparent 100%);
+}
+
+/* Exercise page: in the open space beside the name and details. */
+.exercise-head {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.exercise-head .muscle-art {
+  right: 0;
+  height: 100%;
+  max-height: 260px;
+  max-width: 50%;
+  opacity: 0.24;
+}

@@ -612,6 +612,7 @@ function blockToEntry(b) {
     suggested_weight: b.suggested_weight,
     reason: b.reason,
     previous: b.previous || null,
+    note: b.note || null,
     target_seconds: b.target_seconds ?? null,
     per_side: perSideStretch(b),
     sets: isStretch(b)
@@ -1121,11 +1122,122 @@ function lastLine(previous) {
   return `Last: ${fmtSets(previous.sets, previous.unit)} on ${fmtDate(previous.date, thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
+/** A saved setup note (#125), shown under Last. onEdit makes it tappable. */
+function noteLine(note, onEdit) {
+  if (!note) return null;
+  const body = [icon('pencil', 16), h('span', {}, note)];
+  return onEdit
+    ? h('button', { type: 'button', class: 'setup-note', 'aria-label': `Setup note: ${note}. Tap to edit`, onclick: onEdit }, ...body)
+    : h('p', { class: 'setup-note' }, ...body);
+}
+
+/** Add, change or clear an exercise's setup note during a workout. It rides on the workout, so it saves offline. */
+function noteSheet(e, edit, gymName) {
+  const input = h('textarea', { name: 'setup_note', rows: 3, maxlength: 200, placeholder: 'For example: seat on 4, wide handle' }, e.note || '');
+  const save = (value) => {
+    close();
+    edit((d) => {
+      const t = d.exercises.find((x) => x.id === e.id);
+      t.note = value || null;
+      t.setup_note = value;
+    });
+    toast(value ? 'Setup note saved.' : 'Setup note cleared.');
+  };
+  const close = sheet(e.note ? 'Edit setup note' : 'Add setup note', h('form', { class: 'stack', onsubmit: (ev) => { ev.preventDefault(); save(input.value.trim()); } },
+    field(e.name, input, `Shown next time ${e.name} comes up ${gymName ? `at ${gymName}` : 'in a workout with no gym'}. Each gym keeps its own note. Only you can see it.`),
+    h('button', { class: 'btn primary block', type: 'submit' }, 'Save note'),
+    e.note && h('button', { class: 'btn block', type: 'button', onclick: () => save('') }, 'Clear note')));
+  input.focus();
+}
+
+/** A note saved on the exercise page also shows at once in today's plan and a workout in progress at that gym. */
+function applyNoteLocally(exerciseId, gymId, note) {
+  if (S.draft && S.draft.gym_id === gymId) {
+    for (const b of S.draft.exercises) if (b.exercise_id === exerciseId) b.note = note;
+  }
+  const doc = sync && sync.active;
+  if (doc && doc.gym_id === gymId) {
+    for (const e of doc.exercises) {
+      if (e.exercise_id !== exerciseId) continue;
+      e.note = note;
+      if ('setup_note' in e) e.setup_note = note || ''; // so an unsynced edit from the workout cannot undo this one
+    }
+    sync.persist();
+  }
+}
+
+/** Setup notes on the exercise page (#125): one per gym, each can be added, changed or cleared. */
+function exerciseNotesSection(ex) {
+  const box = h('div', { class: 'stack', 'data-notes-list': '' }, h('p', { class: 'muted' }, 'Loading'));
+  const paint = (notes) => {
+    if (!notes.length) {
+      fill(box, h('p', { class: 'muted' }, 'Add a gym in Settings to keep setup notes for it.'));
+      return;
+    }
+    fill(box, h('p', { class: 'muted small' }, 'Settings like a seat height or grip, shown under Last whenever this exercise comes up at that gym. Only you can see them.'),
+      h('ul', { class: 'log note-list' }, notes.map((n) => {
+        const li = h('li', { class: 'note-row', 'data-gym': n.gym_name });
+        const show = () => fill(li,
+          h('div', { class: 'note-head' }, h('span', { class: 'log-title' }, n.gym_name),
+            h('button', { type: 'button', class: 'btn small', onclick: editNote }, icon('pencil', 16), n.note ? 'Edit' : 'Add note')),
+          n.note ? noteLine(n.note) : h('p', { class: 'muted small' }, n.note === undefined ? 'Loading' : 'No note yet.'));
+        const editNote = () => {
+          const input = h('textarea', { name: 'exercise_note', rows: 2, maxlength: 200, placeholder: 'For example: seat on 4, wide handle' }, n.note || '');
+          const error = h('p', { class: 'form-error', role: 'alert' });
+          const save = async (value, btn) => {
+            btn.disabled = true;
+            error.textContent = '';
+            try {
+              const res = await api.post('save_note', { exercise_id: ex.id, gym_id: n.gym_id, note: value });
+              applyNoteLocally(ex.id, n.gym_id, (res.notes.find((x) => x.gym_id === n.gym_id) || {}).note || null);
+              paint(res.notes);
+              toast(value.trim() ? `Note saved for ${n.gym_name}.` : `Note cleared for ${n.gym_name}.`);
+            } catch (err) {
+              error.textContent = err.offline ? 'No connection. Try again when you are back online.' : err.message;
+              btn.disabled = false;
+            }
+          };
+          fill(li, h('form', { class: 'stack', onsubmit: (ev) => { ev.preventDefault(); save(input.value, ev.submitter || ev.target.querySelector('[type=submit]')); } },
+            field(n.gym_name, input),
+            error,
+            h('div', { class: 'plan-actions' },
+              h('button', { class: 'btn small primary', type: 'submit' }, 'Save note'),
+              h('button', { class: 'btn small', type: 'button', onclick: show }, 'Cancel'),
+              n.note && h('button', { class: 'btn small', type: 'button', onclick: (ev) => save('', ev.currentTarget) }, 'Clear'))));
+          input.focus();
+        };
+        show();
+        return li;
+      })));
+  };
+  // Rows for each gym straight away, so the page below does not shift when the notes arrive.
+  paint(S.gyms.map((g) => ({ gym_id: g.id, gym_name: g.name, note: undefined })));
+  api.get('exercise_notes', `&id=${ex.id}`).then(({ notes }) => paint(notes), (e) => fill(box, h('p', { class: 'muted' }, e.offline ? 'Setup notes need a connection.' : e.message)));
+  return box;
+}
+
+/** Muscle groups with artwork in icons/muscles (#150): all thirteen. */
+const MUSCLE_ART = ['chest', 'shoulders', 'triceps', 'biceps', 'forearms', 'lats', 'upper_back', 'lower_back', 'abs', 'glutes', 'quads', 'hamstrings', 'calves'];
+
+/**
+ * A faint muted-mint illustration of an exercise's first primary muscle, drawn
+ * behind the text (#150). Decorative, so screen readers skip it. Cardio and
+ * stretches, and anything without a matching muscle, get none.
+ */
+function muscleArt(exerciseId) {
+  const ex = S.exById.get(exerciseId);
+  const muscle = ex && !['cardio', 'stretch'].includes(ex.kind) ? ex.muscles_main[0] : null;
+  if (!MUSCLE_ART.includes(muscle)) return null;
+  return h('img', { class: 'muscle-art', src: `icons/muscles/${muscle}.png`, alt: '', 'aria-hidden': 'true', 'data-muscle': muscle, decoding: 'async' });
+}
+
 function planRow(b, gym) {
+  const art = muscleArt(b.exercise_id);
   return h(
     'li',
-    { class: 'plan-row' },
-    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
+    { class: `plan-row${art ? ' has-art' : ''}` },
+    art,
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
     !S.draft.share_id && !S.draft.routine_id && h(
       'div',
       { class: 'plan-actions' },
@@ -1617,6 +1729,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       'div',
       { class: 'stack' },
       ex && ex.cues && h('p', { class: 'cues' }, ex.cues),
+      h('button', { type: 'button', class: 'btn block', onclick: () => { close(); noteSheet(e, edit, doc.gym_id && doc.gym_name); } }, icon('pencil', 18), e.note ? 'Edit setup note' : 'Add setup note'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === 0, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx - 1)); } }, icon('up', 18), 'Move earlier'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === doc.exercises.length - 1, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx + 1)); } }, icon('down', 18), 'Move later'),
       h('button', { type: 'button', class: 'btn block', disabled: !doc.gym_id, onclick: () => {
@@ -1634,7 +1747,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
     'section',
     { class: `card lift ${e.sets.length && e.sets.every((s) => s.done) ? 'complete' : ''}` },
     h('header', { class: 'lift-head' },
-      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), !stretch && h('p', { class: 'last' }, lastLine(e.previous))),
+      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), !stretch && h('p', { class: 'last' }, lastLine(e.previous)), noteLine(e.note, () => noteSheet(e, edit, doc.gym_id && doc.gym_name))),
       h('button', { type: 'button', class: 'btn square ghost', 'aria-label': `Options for ${e.name}`, onclick: menu }, icon('more')),
     ),
     e.reason && h('details', { class: 'why-fold' }, h('summary', {}, 'Why this'), h('p', { class: 'why' }, e.reason)),
@@ -2344,10 +2457,14 @@ function viewExercise(id) {
       return [field('Machine history is kept per gym', picker), rangeHere, box];
     },
   );
+  const art = muscleArt(ex.id);
   return h('main', { class: 'page' }, backOr('exercises', 'Exercises'),
-    h('h1', {}, ex.name),
-    h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
+    h('div', { class: `exercise-head${art ? ' has-art' : ''}` },
+      art,
+      h('h1', {}, ex.name),
+      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
+    section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),
     ex.shared && h('p', { class: 'muted small' }, S.user.role === 'admin' ? 'This is in the default library for everyone. As the admin you can still edit or archive it; archiving hides it from suggestions for all accounts.' : 'Added to the default library by the admin.'),
     (ex.custom || (ex.shared && S.user.role === 'admin')) && h('div', { class: 'stack' },

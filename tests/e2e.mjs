@@ -513,6 +513,8 @@ check('exercise page shows form cues and a trend', (await page.locator('.cues').
   const exId = Number(exHash.split('/').pop());
   const chart = page.locator('.chart').first();
   check('before a point is chosen, the chart says how to use it', /Tap a point/.test(await chart.locator('.chart-readout').textContent()));
+  await page.waitForFunction(() => !/Loading/.test(document.querySelector('[data-notes-list]')?.textContent || ''));
+  await chart.locator('svg').scrollIntoViewIfNeeded();
   const box = await chart.locator('svg').boundingBox();
   await page.touchscreen.tap(box.x + box.width - 12, box.y + box.height / 2);
   await page.waitForSelector('.chart-readout a:has-text("Open workout")');
@@ -1536,6 +1538,128 @@ console.log('Workout recap and records (#123)');
     const b = await (await fetch('api.php?a=bootstrap')).json();
     for (const id of ids) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, [hist.id, earlier]);
+}
+
+console.log('Setup notes (#125)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  const day = await page.inputValue('select[aria-label="Workout type"]');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const card = page.locator('.lift', { has: page.locator('.set:not(.cardio):not(.stretch)') }).first();
+  const name = (await card.locator('h2').textContent()).trim();
+  check('a lift with no note shows none', (await card.locator('.setup-note').count()) === 0);
+  // Write it with no signal: the note rides on the workout and syncs later.
+  await context.setOffline(true);
+  await card.locator('button[aria-label^="Options for"]').click();
+  await page.click('.sheet button:has-text("Add setup note")');
+  await page.fill('.sheet textarea[name=setup_note]', 'Seat on 4, wide handle');
+  await shot('38-setup-note-sheet');
+  await page.click('.sheet button:has-text("Save note")');
+  check('the note shows under Last on the workout card straight away, even offline', (await card.locator('.setup-note').textContent()).trim() === 'Seat on 4, wide handle');
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForSelector('#sync.saved', { timeout: 20000 }).catch(() => {});
+  // Tap the note to change it.
+  await card.locator('.setup-note').click();
+  await page.fill('.sheet textarea[name=setup_note]', 'Seat on 5, wide handle');
+  await page.click('.sheet button:has-text("Save note")');
+  const row = card.locator('.set').first();
+  if (!(await row.locator('input').nth(0).inputValue())) await row.locator('input').nth(0).fill('50');
+  if (!(await row.locator('input').nth(1).inputValue())) await row.locator('input').nth(1).fill('8');
+  await row.locator('.plate').click();
+  await card.scrollIntoViewIfNeeded();
+  await shot('39-setup-note-card');
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
+  // The next matching workout shows it without opening History.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', day);
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const planRow = page.locator('.plan-row', { hasText: name }).first();
+  check(`the next ${day} plan shows the updated note under ${name}`, (await planRow.count()) === 1 && (await planRow.locator('.setup-note').textContent()).trim() === 'Seat on 5, wide handle', name);
+  await planRow.scrollIntoViewIfNeeded();
+  await shot('40-setup-note-plan');
+  check('no sideways scrolling with a note', (await overflow()) <= 0);
+  // The exercise page lists the note per gym and can change it.
+  const exHref = await planRow.locator('a.name-link').getAttribute('href');
+  await page.goto(`${URL}${exHref}`);
+  await page.waitForSelector('.note-row');
+  const gymRow = page.locator('.note-row').first();
+  check('the exercise page shows the note under its gym', (await page.locator('.section h2:has-text("Setup notes")').count()) === 1 && /My gym/.test(await gymRow.textContent()) && (await gymRow.locator('.setup-note').textContent()).trim() === 'Seat on 5, wide handle');
+  await gymRow.locator('button:has-text("Edit")').click();
+  await gymRow.locator('textarea[name=exercise_note]').fill('Seat on 6, wide handle');
+  await gymRow.locator('button:has-text("Save note")').click();
+  await waitForToast(page, /Note saved for My gym/);
+  check('a note can be edited on the exercise page', (await page.locator('.note-row').first().locator('.setup-note').textContent()).trim() === 'Seat on 6, wide handle');
+  await page.locator('.section', { hasText: 'Setup notes' }).scrollIntoViewIfNeeded();
+  await shot('41-exercise-page-notes');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  check("the change shows at once in Today's plan", (await page.locator('.plan-row', { hasText: name }).first().locator('.setup-note').textContent()).trim() === 'Seat on 6, wide handle');
+  // Clear it from the next workout, so the rest of the walk-through starts clean.
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  await page.locator('.lift', { hasText: name }).first().locator('.setup-note').click();
+  await page.click('.sheet button:has-text("Clear note")');
+  check('a note can be cleared', (await page.locator('.lift', { hasText: name }).first().locator('.setup-note').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+  const hist = (await api('history&limit=1')).workouts[0];
+  await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, hist.id);
+}
+
+console.log('Muscle illustrations (#150)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', 'pull');
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const arts = await page.$$eval('.plan-row', (rows) => rows.map((r) => {
+    const img = r.querySelector('img.muscle-art');
+    return { name: r.querySelector('h3').textContent, target: r.querySelector('.target').textContent, muscle: img?.dataset.muscle || null, loaded: img ? img.complete && img.naturalWidth > 0 : null, alt: img?.getAttribute('alt'), hidden: img?.getAttribute('aria-hidden') };
+  }));
+  const lifts = arts.filter((a) => !/warm-up|moving|^Hold/.test(a.target));
+  check('each planned lift shows its first primary muscle behind the text', lifts.length > 0 && lifts.every((a) => a.muscle && a.loaded), JSON.stringify(arts));
+  check('the pull-day lats illustration appears for a lats exercise', arts.some((a) => a.muscle === 'lats'));
+  check('the illustration is decorative for screen readers', lifts.every((a) => a.alt === '' && a.hidden === 'true'));
+  check('cardio warm-ups and stretches keep a plain card', arts.filter((a) => /warm-up|moving|^Hold/.test(a.target)).every((a) => a.muscle === null));
+  const row = page.locator('.plan-row.has-art').first();
+  const z = await row.evaluate((r) => [getComputedStyle(r.querySelector('.muscle-art')).zIndex, getComputedStyle(r.querySelector('.plan-main')).zIndex, getComputedStyle(r.querySelector('.muscle-art')).opacity]);
+  check('the text and buttons sit above the faint illustration', z[0] === '0' && z[1] === '1' && Number(z[2]) <= 0.3, z.join());
+  check('no sideways scrolling with the illustrations', (await overflow()) <= 0);
+  await row.scrollIntoViewIfNeeded();
+  if (SHOTS) await row.screenshot({ path: `${SHOTS}/42-muscle-art-plan.png` });
+  // The exercise page shows it in the space beside the details.
+  const crunch = await page.evaluate(async () => (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((e) => e.name === 'Ab Crunch Machine').id);
+  await page.goto(`${URL}#/exercises/${crunch}`);
+  await page.waitForSelector('.exercise-head');
+  await page.waitForFunction(() => document.querySelector('.exercise-head img.muscle-art')?.complete);
+  check('the exercise page shows the abs illustration beside the details', (await page.getAttribute('.exercise-head img.muscle-art', 'data-muscle')) === 'abs' && (await page.$eval('.exercise-head img.muscle-art', (i) => i.naturalWidth)) > 0);
+  await shot('43-muscle-art-exercise');
+  // Started workouts keep their cards as they were.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  check('workout cards after Start have no illustration', (await page.locator('.lift .muscle-art').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
 }
 
 console.log('Send feedback');
