@@ -1237,6 +1237,38 @@ for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'],
   if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Tab bar while a tab loads (#112)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.evaluate(() => scrollTo(0, 99999));
+  await page.waitForTimeout(200);
+  // Hold History's data back, and note the scroll position at the moment its page goes in.
+  let release;
+  const held = new Promise((r) => (release = r));
+  await page.route(/a=(history|people_history)\b/, async (r) => { await held; await r.continue().catch(() => {}); });
+  await page.evaluate(() => {
+    window.__swapY = null;
+    const app = document.getElementById('app');
+    const swap = app.replaceChildren.bind(app);
+    app.replaceChildren = (...kids) => {
+      if (kids[0]?.querySelector?.('h1')?.textContent === 'History') window.__swapY = window.scrollY;
+      return swap(...kids);
+    };
+  });
+  check('Today was scrolled down before switching', (await page.evaluate(() => scrollY)) > 300);
+  await page.click('.tab:has-text("History")');
+  await page.waitForSelector('.tab-home');
+  const m = await page.evaluate(() => ({ swapY: window.__swapY, doc: document.documentElement.scrollHeight, vh: innerHeight, bottom: Math.round(document.querySelector('.tabs').getBoundingClientRect().bottom) }));
+  check('switching tabs scrolls to the top before the loading page goes in', m.swapY === 0, JSON.stringify(m));
+  check('while loading, the page still fills the screen and the tab bar sits at the bottom', m.doc >= m.vh && m.bottom === m.vh, JSON.stringify(m));
+  release();
+  await page.waitForSelector('.log-row, .card h2');
+  await page.unroute(/a=(history|people_history)\b/);
+  await page.evaluate(() => { delete document.getElementById('app').replaceChildren; });
+}
+
 console.log('Pause and resume a workout');
 {
   await page.setViewportSize({ width: 402, height: 874 });

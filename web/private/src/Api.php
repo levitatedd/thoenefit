@@ -98,7 +98,7 @@ final class Api
             return;
         }
         if ($action === 'bootstrap' && $method === 'GET') {
-            self::json($user ? $this->bootstrap($user) : ['user' => null, 'version' => APP_VERSION]);
+            self::json($user ? $this->bootstrap($user) : ['user' => null, 'version' => app_version()]);
             return;
         }
         if (!$user) {
@@ -229,7 +229,7 @@ final class Api
                 self::json($this->accounts());
                 return;
             case 'send_feedback':
-                $sent = $this->feedback->send($uid, (string) ($in['kind'] ?? ''), (string) ($in['title'] ?? ''), (string) ($in['body'] ?? ''), APP_VERSION);
+                $sent = $this->feedback->send($uid, (string) ($in['kind'] ?? ''), (string) ($in['title'] ?? ''), (string) ($in['body'] ?? ''), app_version());
                 self::json(['sent' => $sent, 'feedback' => $this->feedback->mine($uid)]);
                 return;
             case 'change_password':
@@ -453,7 +453,7 @@ final class Api
             unset($e);
         }
         return [
-            'version' => APP_VERSION,
+            'version' => app_version(),
             'csrf' => $this->auth->session['csrf'],
             'user' => self::userShape($user),
             'pending_requests' => Auth::isAdmin($user) ? count($this->auth->pendingRequests()) : 0,

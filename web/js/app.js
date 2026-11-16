@@ -338,6 +338,12 @@ function render() {
   );
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
   if (sync?.active && tab !== 'workout') view.prepend(backToWorkoutBar());
+  // Going to the top of a different screen: scroll there before swapping the
+  // content in. Swapping a long page for a short one (History and Trends while
+  // they load) while still scrolled down lets iPhones lift the tab bar off the
+  // bottom of the screen (#112).
+  const toTop = restoreY === null && !(tab === S.lastTab && !S.backTo);
+  if (toTop) window.scrollTo(0, 0);
   root.replaceChildren(view, restDock(), nav);
   if (tab === 'settings' && ['strava-connected', 'strava-denied', 'strava-error'].includes(arg)) {
     history.replaceState(null, '', '#/settings');
