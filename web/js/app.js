@@ -332,7 +332,8 @@ function render() {
       ['exercises', 'Exercises', 'list'],
       ['settings', 'Settings', 'gear'],
     ].map(([key, label, ic]) => (key === 'today' && sync?.active
-      ? pauseTab(tab === 'workout')
+      // During a workout: Pause / Resume on the workout itself, and a plain way back to it from anywhere else.
+      ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: 'tab workout-tab' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
       : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24)), h('span', {}, label)))),
   );
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
@@ -1274,27 +1275,24 @@ function endPause(d) {
   d.paused_at = null;
 }
 
-/**
- * Pause or resume the workout in progress. It is saved on the phone first, like
- * every other change. Tapped from another tab, it also goes back to the workout.
- */
+/** Pause or resume the workout in progress. It is saved on the phone first, like every other change. */
 function togglePause() {
   const doc = sync.active;
   if (!doc) return;
   const pausing = !doc.paused_at;
   if (pausing) stopRest();
   sync.edit(doc.id, (d) => (pausing ? (d.paused_at = new Date().toISOString()) : endPause(d)), 0);
-  go('workout');
+  render();
   toast(pausing ? 'Workout paused. The clock is stopped.' : 'Workout resumed.');
 }
 
-/** The Today spot in the tab bar while a workout is in progress: Pause or Play. */
-function pauseTab(onWorkout) {
+/** The Today spot in the tab bar on the workout screen: Pause or Play. */
+function pauseTab() {
   const paused = !!sync.active.paused_at;
   return h('button', {
     type: 'button',
     class: `tab pause-tab ${paused ? 'paused' : ''}`,
-    'aria-current': onWorkout ? 'page' : null,
+    'aria-current': 'page',
     'aria-label': paused ? 'Resume workout' : 'Pause workout',
     onclick: togglePause,
   }, h('span', { class: 'tab-icon' }, icon(paused ? 'play' : 'pause', 24)), h('span', {}, paused ? 'Resume' : 'Pause'));
