@@ -520,6 +520,23 @@ check('one account cannot delete another\'s workout', throws(fn() => $wk->delete
 $wk->delete($uid, $d2['id']);
 check('deleting a workout removes its sets', (int) $db->val('SELECT COUNT(*) FROM workout_sets WHERE workout_id=?', [$d2['id']]) === 0);
 
+echo "Seeing each other's history\n";
+$mikeRow = $db->one('SELECT * FROM users WHERE id=?', [$uid]);
+$samRow = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+check('history starts private for every account', $db->val('SELECT history_visibility FROM users WHERE id=?', [$uid]) === 'private' && $db->val('SELECT history_visibility FROM users WHERE id=?', [$uid2]) === 'private');
+check('nobody is listed while everyone keeps their history private', $auth->historyPeople($samRow) === []);
+check('asking for a private history is refused', throws(fn() => $auth->historyOwner($samRow, $uid), 404));
+$db->run("UPDATE users SET history_visibility='members' WHERE id=?", [$uid]);
+$people = $auth->historyPeople($samRow);
+check('once shared, others see the account by display name only', $people === [['id' => $uid, 'name' => 'Mike']], json_encode($people));
+check('the account is not listed to itself', $auth->historyPeople($mikeRow) === []);
+check('a shared history can be opened', $auth->historyOwner($samRow, $uid)['id'] === $uid);
+check('sharing goes one way: the other account stays private', throws(fn() => $auth->historyOwner($mikeRow, $uid2), 404));
+$db->run("UPDATE users SET status='pending' WHERE id=?", [$uid]);
+check('an account that cannot sign in is not listed', $auth->historyPeople($samRow) === []);
+$db->run("UPDATE users SET status='active', history_visibility='private' WHERE id=?", [$uid]);
+check('switching back to Only me hides it again', $auth->historyPeople($samRow) === [] && throws(fn() => $auth->historyOwner($samRow, $uid), 404));
+
 echo "Fitbod import\n";
 $imp = new FitbodImport($db);
 $uid3 = $auth->createUser('importer', 'another long password');
