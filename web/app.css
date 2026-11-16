@@ -1372,3 +1372,71 @@ ul.notes {
     transition: none !important;
   }
 }
+
+/* ---- Settings (#103) ----------------------------------------------------
+   Mint headings so each section is easy to find while scrolling on a phone,
+   and setup or maintenance tucked behind one-line links to their own screens. */
+.settings-main > h1,
+.settings-main .section > h2 {
+  color: var(--mint);
+}
+
+.settings-main .section {
+  gap: 12px;
+  padding-top: 22px;
+}
+
+.settings-main .section > h2 {
+  font-size: 22px;
+}
+
+/* A group of links reads as one card, with a chevron on every row. */
+.link-list {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 0 14px;
+}
+
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.link-row .log-title {
+  font-size: 18px;
+}
+
+.link-row .log-meta {
+  grid-column: 1;
+}
+
+.link-row .chevron {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  color: var(--muted);
+  transform: rotate(180deg);
+}
+
+.link-row:active {
+  opacity: 0.7;
+}
+
+.install-help > h3 {
+  margin-top: 6px;
+}
+
+.add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mint);
+}
+
+.link-row .badge.alert {
+  background: var(--yellow);
+}

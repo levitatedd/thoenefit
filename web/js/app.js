@@ -313,7 +313,10 @@ function render() {
   else if (tab === 'people') view = arg2 ? viewPersonWorkout(Number(arg), arg2) : viewPersonHistory(Number(arg));
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
-  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : arg === 'whats-new' ? viewWhatsNew() : viewSettings();
+  else if (tab === 'settings') {
+    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword }[arg];
+    view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : sub ? sub() : viewSettings();
+  }
   else view = viewToday();
   const current = tab === 'workout' ? 'today' : tab === 'people' ? 'history' : tab;
   const nav = h(
@@ -2152,33 +2155,66 @@ function bodyWeightField() {
 
 const EFFORTS = [['light', 'Light'], ['moderate', 'Moderate'], ['hard', 'Hard']];
 
-function viewSettings() {
-  const saveProfile = (key, value) => act(async () => {
-    const r = await api.post('save_profile', { [key]: value });
-    S.user = r.user;
-    S.draft = null;
-    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
-  });
+/** Rows that each open another screen: [href, title, meta, extra attributes]. */
+function linkList(...rows) {
+  return h('ul', { class: 'log link-list' }, rows.map(([href, title, meta, extra]) => h('li', {},
+    h('a', { class: 'log-row link-row', href, ...(extra || {}) },
+      h('span', { class: 'log-title' }, ...[title].flat()),
+      meta && h('span', { class: 'log-meta' }, meta),
+      h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('back', 20))))));
+}
+
+/** Saved routines: view, rename and delete (#103 moved them here from the main Settings page). */
+function viewRoutines() {
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Routines'),
+    h('p', { class: 'muted' }, 'Start a routine from the workout picker on Today.'),
+    routinesList());
+}
+
+function viewStrava() {
+  const head = [backLink('settings', 'Settings'), h('h1', {}, 'Strava')];
+  if (!S.strava?.enabled) return h('main', { class: 'page' }, ...head, h('p', { class: 'muted' }, 'Strava is not set up on this server.'));
+  return h('main', { class: 'page' }, ...head,
+    h('p', {}, S.strava.connected ? 'Connected. Send a finished workout from History, or tick Send to Strava when you finish one.' : 'Connect to send finished workouts to Strava, with their exercises, sets, reps and weights if you like.'),
+    S.strava.connected
+      ? h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
+        const button = e.currentTarget;
+        if (!(await confirmSheet('Disconnect Strava?', 'Workouts you already sent stay on Strava.', 'Disconnect'))) return;
+        await act(async () => {
+          const result = await api.post('strava_disconnect');
+          S.strava = result.strava;
+          render();
+          toast('Strava disconnected.');
+        }, button);
+      } }, 'Disconnect Strava')
+      : h('button', { class: 'btn primary block', type: 'button', onclick: (e) => act(async () => {
+        const { url } = await api.post('strava_authorize');
+        location.assign(url);
+      }, e.currentTarget) }, 'Connect to Strava'));
+}
+
+function viewPassword() {
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });
-  const pwBtn = h('button', { class: 'btn block', type: 'submit' }, 'Change password');
-  return page('Settings',
-    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
-    section('Routines', routinesList()),
-    section('Gyms',
-      h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
-      h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),
-    section('Who can see your history',
-      choices([
-        ['private', 'Only me', 'Nobody else can see your workouts'],
-        ['members', 'All signed-in users', 'Anyone with an account here can see your finished workouts, read-only'],
-      ], S.user.history_visibility || 'private', (v) => saveProfile('history_visibility', v).then((ok) => ok !== null && toast(v === 'members' ? 'Your history is now visible to signed-in users.' : 'Your history is now private.'))),
-      h('p', { class: 'muted small' }, 'Workouts in progress are never shown. Others see what you logged, not your gyms, routines or settings.')),
-    section('Your data',
-      h('a', { class: 'btn block', href: 'api.php?a=export', download: '' }, 'Export all sets as CSV'),
-      h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.'),
-      h('a', { class: 'btn block', href: '#/settings/import' }, 'Import from Fitbod')),
-    section('Add to your Home Screen',
+  const pwBtn = h('button', { class: 'btn primary block', type: 'submit' }, 'Change password');
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Change password'),
+    h('p', { class: 'muted' }, 'Your other phones and computers are signed out. This one stays signed in.'),
+      h('form', { class: 'stack', onsubmit: async (e) => {
+        e.preventDefault();
+        await act(async () => {
+          const result = await api.post('change_password', { current: current.value, next: next.value });
+          // The server signed out every other device and gave this one a new session and token.
+          if (result.csrf) api.csrf = result.csrf;
+          current.value = '';
+          next.value = '';
+          toast('Password changed. Other devices are signed out.');
+        }, pwBtn);
+      } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn));
+}
+
+function viewInstallHelp() {
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Add to your Home Screen'),
+    h('div', { class: 'stack install-help' },
       h('p', {}, install.isInstalled() ? 'You are using the installed app.' : 'Installed, ThoeneFit opens full screen like an app and keeps working when the gym has no signal.'),
       (() => {
         // This browser's steps first, then everyone else's (#89).
@@ -2191,38 +2227,43 @@ function viewSettings() {
             install.GUIDES.filter((g) => g.key !== mine.key && g.key !== 'other').map((g) => [h('h3', {}, g.name), installSteps(g)])),
         ];
       })(),
-      h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')),
-    S.user.role === 'admin' && section('Users',
-      h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
-      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
+      h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')));
+}
+
+function viewSettings() {
+  const saveProfile = (key, value) => act(async () => {
+    const r = await api.post('save_profile', { [key]: value });
+    S.user = r.user;
+    S.draft = null;
+    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
+  });
+  const routineCount = (S.routines || []).length;
+  // Headings are mint so the sections are easy to pick out (#103). What affects
+  // the next workout comes first; setup and maintenance are one-line links.
+  return h('main', { class: 'page settings-main' }, h('h1', {}, 'Settings'),
+    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
+    section('Gyms', linkList(
+      ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),
+      ['#/settings/gym/new', h('span', { class: 'add-row' }, icon('plus', 18), 'Add a gym')])),
+    section('Routines', linkList(['#/settings/routines', 'Manage routines', routineCount ? `${routineCount} saved` : 'None saved yet'])),
+    section('Who can see your history',
+      choices([
+        ['private', 'Only me', 'Nobody else can see your workouts'],
+        ['members', 'All signed-in users', 'Anyone with an account here can see your finished workouts, read-only'],
+      ], S.user.history_visibility || 'private', (v) => saveProfile('history_visibility', v).then((ok) => ok !== null && toast(v === 'members' ? 'Your history is now visible to signed-in users.' : 'Your history is now private.'))),
+      h('p', { class: 'muted small' }, 'Workouts in progress are never shown. Others see what you logged, not your gyms, routines or settings.')),
+    section('Your data', linkList(
+      ['api.php?a=export', 'Export all sets as CSV', 'One row per set, including warm-ups, with dates in UTC', { download: '' }],
+      ['#/settings/import', 'Import from Fitbod', 'Bring in workouts from a Fitbod CSV'])),
+    S.strava?.enabled && section('Integrations', linkList(['#/settings/strava', 'Strava', S.strava.connected ? 'Connected' : 'Not connected'])),
+    section('Help', linkList(
+      ['#/settings/install', 'Add to your Home Screen', install.isInstalled() ? 'You are using the installed app' : 'Open full screen and keep working with no signal'],
+      ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
+    S.user.role === 'admin' && section('Users', linkList(
+      ['#/settings/users', ['Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`)], 'Create accounts, approve requests, reset passwords'])),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
-      S.strava?.enabled && (S.strava.connected
-        ? h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
-          const button = e.currentTarget;
-          if (!(await confirmSheet('Disconnect Strava?', 'Workouts you already sent stay on Strava.', 'Disconnect'))) return;
-          await act(async () => {
-            const result = await api.post('strava_disconnect');
-            S.strava = result.strava;
-            render();
-            toast('Strava disconnected.');
-          }, button);
-        } }, 'Disconnect Strava')
-        : h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
-          const { url } = await api.post('strava_authorize');
-          location.assign(url);
-        }, e.currentTarget) }, 'Connect to Strava')),
-      h('form', { class: 'stack', onsubmit: async (e) => {
-        e.preventDefault();
-        await act(async () => {
-          const result = await api.post('change_password', { current: current.value, next: next.value });
-          // The server signed out every other device and gave this one a new session and token.
-          if (result.csrf) api.csrf = result.csrf;
-          current.value = '';
-          next.value = '';
-          toast('Password changed. Other devices are signed out.');
-        }, pwBtn);
-      } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn),
+      linkList(['#/settings/password', 'Change password', 'Signs you out on your other devices']),
       h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
         if (sync.status() !== 'saved' && !(await confirmSheet('Sign out with unsynced changes?', 'Some workout changes are still only on this phone. They stay here and upload the next time you sign in on it.', 'Sign out anyway'))) return;
         await act(async () => {

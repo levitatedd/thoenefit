@@ -323,6 +323,14 @@ page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
 check('the finished workout carries the Strava request to the server',
   finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
+// #103: Strava lives under Settings → Integrations.
+await page.goto(`${URL}#/settings`);
+await page.waitForSelector('.settings-main');
+check('a connected Strava shows under Integrations', /Connected/.test(await page.textContent('.link-row:has-text("Strava")')));
+await page.click('.link-row:has-text("Strava")');
+await page.waitForSelector('button:has-text("Disconnect Strava")');
+check('the Strava screen offers Disconnect', true);
+await page.goto(`${URL}#/today`);
 check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
@@ -402,9 +410,9 @@ console.log('Install reminder');
   await ip.reload();
   await ip.waitForSelector('.plan-row');
   check('and it stays hidden after reopening', (await ip.locator('.install-card').count()) === 0);
-  await ip.goto(`${URL}#/settings`);
-  await ip.waitForSelector('text=Add to your Home Screen');
-  const firstGuide = await ip.locator('.section', { hasText: 'Add to your Home Screen' }).locator('h3').first().textContent();
+  await ip.goto(`${URL}#/settings/install`);
+  await ip.waitForSelector('.install-help h3');
+  const firstGuide = await ip.locator('.install-help h3').first().textContent();
   check(`Settings lists this browser's steps first (${firstGuide})`, firstGuide === 'iPhone or iPad, Safari' && (await ip.locator('details.fold summary:has-text("Other browsers and phones")').count()) === 1);
   await ic.close();
 
@@ -795,10 +803,23 @@ await partner.close();
 
 await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
-check('settings include Home Screen instructions for Safari', (await page.textContent('.page')).includes('Tap the Share button'));
 await shot('11-settings');
-check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
+// #103: one heading colour, Training and Gyms first, the rest behind links.
+{
+  const heads = await page.$$eval('.settings-main > h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
+  const order = heads.slice(1).map(([t]) => t);
+  check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
+  check("Settings links to Routines, data, help and What's new instead of showing them inline", ['Manage routines', 'Export all sets as CSV', 'Import from Fitbod', 'Add to your Home Screen', "What's new"].every((t) => links.includes(t)) && (await page.locator('[data-list=routines]').count()) === 0 && !(await page.textContent('.page')).includes('Tap the Share button'), links.join());
+  await page.click('.link-row:has-text("Add to your Home Screen")');
+  await page.waitForSelector('.install-help');
+  check('the Home Screen link opens the install steps', (await page.textContent('.page')).includes('Tap the Share button') && /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
+  await shot('11b-settings-install');
+  await page.click('.back:has-text("Settings")');
+  await page.waitForSelector('.settings-main');
+}
 
 console.log("What's new");
 await page.click('.app-version a');
@@ -871,8 +892,10 @@ console.log('Saved routines');
   await page.waitForSelector('.plan-row');
   check('afterwards Today goes back to a suggested workout', (await page.locator('.routine-note').count()) === 0);
 
-  // Rename and delete in Settings.
+  // Rename and delete, from Settings → Manage routines (#103).
   await page.goto(`${URL}#/settings`);
+  check('Settings shows how many routines are saved', /1 saved/.test(await page.textContent('.link-row:has-text("Manage routines")')));
+  await page.click('.link-row:has-text("Manage routines")');
   await page.waitForSelector('[data-list=routines] .routine-row');
   await page.locator('.routine-row', { hasText: 'Monday Push' }).locator('button:has-text("Rename")').click();
   await page.fill('.sheet input[name=routine_name]', 'Push A');
@@ -968,9 +991,11 @@ if (!process.env.TF_URL) {
   const phone = await signIn(phoneCtx);
   const laptop = await signIn(laptopCtx);
   await phone.goto(`${URL}#/settings`);
+  await phone.click('.link-row:has-text("Change password")');
+  await phone.waitForSelector('input[autocomplete=current-password]');
   await phone.fill('input[autocomplete=current-password]', 'buddy-password-1');
   await phone.fill('input[autocomplete=new-password]', 'buddy-password-3');
-  await phone.click('button:has-text("Change password")');
+  await phone.click('button[type=submit]:has-text("Change password")');
   await waitForToast(phone, /Password changed/).catch(() => {});
   check('changing the password says other devices are signed out', /Other devices are signed out/.test(await phone.textContent('.toast')));
   // The device that made the change keeps working: a write needs its new session and security token.
