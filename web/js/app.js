@@ -1274,14 +1274,17 @@ function endPause(d) {
   d.paused_at = null;
 }
 
-/** Pause or resume the workout in progress. It is saved on the phone first, like every other change. */
+/**
+ * Pause or resume the workout in progress. It is saved on the phone first, like
+ * every other change. Tapped from another tab, it also goes back to the workout.
+ */
 function togglePause() {
   const doc = sync.active;
   if (!doc) return;
   const pausing = !doc.paused_at;
   if (pausing) stopRest();
   sync.edit(doc.id, (d) => (pausing ? (d.paused_at = new Date().toISOString()) : endPause(d)), 0);
-  render();
+  go('workout');
   toast(pausing ? 'Workout paused. The clock is stopped.' : 'Workout resumed.');
 }
 
