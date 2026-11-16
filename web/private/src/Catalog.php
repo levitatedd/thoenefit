@@ -21,10 +21,28 @@ final class Catalog
         'band' => 'Band',
         'bodyweight' => 'Bodyweight',
         'cardio' => 'Cardio machine',
+        'stretch' => 'Stretch',
     ];
 
-    /** Kinds logged as time (with optional distance and level) instead of weight and reps. */
-    public const TIMED_KINDS = ['cardio'];
+    /**
+     * Kinds logged as time instead of weight and reps: cardio (with optional
+     * distance and level) and stretches (seconds per hold, #138). They never
+     * count toward lifting volume, recovery or weight progression.
+     */
+    public const TIMED_KINDS = ['cardio', 'stretch'];
+
+    /** Stretch patterns (#138): dynamic ones warm up before lifting, static ones cool down after. */
+    public const STRETCH_PATTERNS = ['dynamic_stretch', 'static_stretch'];
+
+    /** Seconds per hold for a planned stretch. */
+    public const STRETCH_SECONDS = 30;
+
+    /** Built-in stretches done once on each side: planned as two holds, left then right. */
+    public const PER_SIDE = [
+        'leg-swings', 'worlds-greatest-stretch', 'walking-knee-hug',
+        'cross-body-shoulder-stretch', 'overhead-triceps-stretch', 'wall-biceps-stretch', 'standing-quad-stretch',
+        'kneeling-hip-flexor-stretch', 'seated-hamstring-stretch', 'figure-four-glute-stretch', 'wall-calf-stretch', 'doorway-chest-stretch',
+    ];
 
     public static function isTimed(string $kind): bool
     {
@@ -67,6 +85,8 @@ final class Catalog
         'calf' => 'Calf raise',
         'core' => 'Core',
         'cardio' => 'Cardio warm-up',
+        'dynamic_stretch' => 'Dynamic stretch',
+        'static_stretch' => 'Static stretch',
         'other' => 'Other (never suggested automatically)',
     ];
 
@@ -138,7 +158,7 @@ final class Catalog
     public static function supports(array $exercise, array $equipment, bool $bodyweightOnly = false): bool
     {
         if ($bodyweightOnly) {
-            return $exercise['kind'] === 'bodyweight' && $exercise['equipment'] === [];
+            return in_array($exercise['kind'], ['bodyweight', 'stretch'], true) && $exercise['equipment'] === [];
         }
         foreach ($exercise['equipment'] as $required) {
             if (!in_array($required, $equipment, true) && !array_intersect(self::EQUIPMENT_ALTERNATIVES[$required] ?? [], $equipment)) {
@@ -171,8 +191,8 @@ final class Catalog
     public static function defaultIncrements(string $unit): array
     {
         return $unit === 'kg'
-            ? ['barbell' => 2.5, 'dumbbell' => 2, 'kettlebell' => 4, 'cable' => 2.5, 'machine' => 5, 'band' => 0, 'bodyweight' => 2.5, 'cardio' => 0]
-            : ['barbell' => 5, 'dumbbell' => 5, 'kettlebell' => 5, 'cable' => 5, 'machine' => 10, 'band' => 0, 'bodyweight' => 5, 'cardio' => 0];
+            ? ['barbell' => 2.5, 'dumbbell' => 2, 'kettlebell' => 4, 'cable' => 2.5, 'machine' => 5, 'band' => 0, 'bodyweight' => 2.5, 'cardio' => 0, 'stretch' => 0]
+            : ['barbell' => 5, 'dumbbell' => 5, 'kettlebell' => 5, 'cable' => 5, 'machine' => 10, 'band' => 0, 'bodyweight' => 5, 'cardio' => 0, 'stretch' => 0];
     }
 
     /**
@@ -320,6 +340,28 @@ final class Catalog
             ['treadmill', 'Treadmill', 'cardio', ['treadmill'], 'cardio', [], [], 3, 'Start with a brisk walk, then raise the speed or incline until you are breathing harder but can still talk. Avoid holding the rails.'],
             ['rowing-machine', 'Rowing Machine', 'cardio', ['rowing_machine'], 'cardio', [], [], 4, 'Push with your legs first, then lean back slightly and pull the handle to your lower ribs. Return in the reverse order: arms, body, then legs.'],
             ['stair-climber', 'Stair Climber', 'cardio', ['stair_climber'], 'cardio', [], [], 5, 'Step with your whole foot and stand tall without leaning on the rails. Start slow and build to a steady pace.'],
+
+            // Stretches (#138): no equipment, logged as seconds per hold. Dynamic ones
+            // follow the cardio warm-up; static ones are the cooldown. Their muscles
+            // pick which ones suit the workout; they never count toward recovery.
+            ['arm-circles', 'Arm Circles', 'stretch', [], 'dynamic_stretch', ['shoulders'], ['chest', 'upper_back'], 1, 'Stand tall with arms out to the sides. Draw small circles and let them grow bigger, then reverse direction halfway through.'],
+            ['leg-swings', 'Leg Swings', 'stretch', [], 'dynamic_stretch', ['hamstrings', 'glutes'], ['quads'], 1, 'Hold a wall or rack for balance and swing one straight leg forward and back, a little higher each time. Keep your torso tall. Then switch legs.'],
+            ['worlds-greatest-stretch', "World's Greatest Stretch", 'stretch', [], 'dynamic_stretch', ['glutes', 'hamstrings', 'upper_back'], ['quads', 'shoulders'], 2, 'Step into a long lunge and put both hands inside your front foot. Drop your back knee if needed, rotate your inside arm toward the ceiling, then return and repeat slowly. Then switch sides.'],
+            ['cat-cow', 'Cat-Cow', 'stretch', [], 'dynamic_stretch', ['lower_back', 'upper_back'], ['abs'], 2, 'On hands and knees, round your back toward the ceiling, then let your belly drop and lift your chest. Move slowly with your breath.'],
+            ['inchworm', 'Inchworm', 'stretch', [], 'dynamic_stretch', ['hamstrings', 'shoulders'], ['chest', 'abs'], 3, 'From standing, fold forward and walk your hands out to a push-up position, then walk your feet up to your hands. Keep your knees as straight as is comfortable.'],
+            ['torso-twists', 'Torso Twists', 'stretch', [], 'dynamic_stretch', ['abs', 'lower_back'], [], 3, 'Stand with feet hip-width apart and arms relaxed. Rotate your shoulders side to side and let your arms swing, keeping your hips mostly still.'],
+            ['walking-knee-hug', 'Walking Knee Hug', 'stretch', [], 'dynamic_stretch', ['glutes'], ['hamstrings'], 3, 'Step forward and pull one knee toward your chest with both hands, rising onto the toes of your standing foot. Release, step, and repeat. Then switch legs.'],
+            ['doorway-chest-stretch', 'Doorway Chest Stretch', 'stretch', [], 'static_stretch', ['chest'], ['shoulders'], 1, 'Put your forearm on a door frame or upright with your elbow at shoulder height. Step through until you feel a stretch across your chest. Then switch sides.'],
+            ['cross-body-shoulder-stretch', 'Cross-Body Shoulder Stretch', 'stretch', [], 'static_stretch', ['shoulders'], ['upper_back'], 1, 'Bring one straight arm across your chest and hug it in with the other arm, keeping the shoulder down. Then switch sides.'],
+            ['overhead-triceps-stretch', 'Overhead Triceps Stretch', 'stretch', [], 'static_stretch', ['triceps'], ['lats'], 1, 'Reach one arm overhead and bend the elbow so your hand drops behind your head. Gently press the elbow back with your other hand. Then switch sides.'],
+            ['wall-biceps-stretch', 'Wall Biceps Stretch', 'stretch', [], 'static_stretch', ['biceps', 'forearms'], ['chest'], 2, 'Place your palm on a wall behind you at shoulder height, arm straight. Turn your body away until you feel the front of the arm stretch. Then switch sides.'],
+            ['childs-pose', "Child's Pose", 'stretch', [], 'static_stretch', ['lats', 'lower_back'], ['upper_back', 'shoulders'], 1, 'Kneel and sit back toward your heels, then walk your hands forward and rest your chest toward the floor. Breathe slowly into your back.'],
+            ['standing-quad-stretch', 'Standing Quad Stretch', 'stretch', [], 'static_stretch', ['quads'], [], 1, 'Stand tall, hold something for balance, and pull one heel toward your glutes with your knees together. Then switch legs.'],
+            ['kneeling-hip-flexor-stretch', 'Kneeling Hip Flexor Stretch', 'stretch', [], 'static_stretch', ['quads'], ['glutes', 'abs'], 2, 'Kneel on one knee with the other foot in front. Squeeze the back glute and shift your hips forward until the front of the back hip stretches. Then switch sides.'],
+            ['seated-hamstring-stretch', 'Seated Hamstring Stretch', 'stretch', [], 'static_stretch', ['hamstrings'], ['lower_back', 'calves'], 1, 'Sit with one leg straight and the other foot against its inner thigh. Hinge forward from your hips toward the straight leg with a long back. Then switch legs.'],
+            ['figure-four-glute-stretch', 'Figure-Four Glute Stretch', 'stretch', [], 'static_stretch', ['glutes'], ['lower_back'], 1, 'Lie on your back and cross one ankle over the opposite knee. Pull the bottom thigh toward your chest until you feel it in the crossed hip. Then switch sides.'],
+            ['wall-calf-stretch', 'Wall Calf Stretch', 'stretch', [], 'static_stretch', ['calves'], [], 1, 'Hands on a wall, step one foot back with the heel down and the knee straight. Lean in until you feel the calf stretch. Then switch legs.'],
+            ['cobra-stretch', 'Cobra Stretch', 'stretch', [], 'static_stretch', ['abs'], ['lower_back'], 2, 'Lie face down with hands under your shoulders. Press up gently, keeping your hips on the floor, until you feel a stretch through your stomach.'],
 
             // Added so a first Fitbod import matches most exercises (#65). Priority 9
             // keeps the generator preferring the exercises above; "other" ones are
@@ -582,6 +624,8 @@ final class Catalog
             'priority' => (int) $r['priority'],
             'compound' => in_array($r['pattern'], self::COMPOUND, true),
             'archived' => (int) $r['archived'] === 1,
+            // A built-in stretch done on each side (#138).
+            'per_side' => $r['user_id'] === null && in_array($r['slug'] ?? '', self::PER_SIDE, true),
         ];
     }
 

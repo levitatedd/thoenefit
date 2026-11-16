@@ -266,6 +266,10 @@ final class Api
                 return;
             case 'generate':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                if (isset($in['stretches']) && is_bool($in['stretches']) && (int) ($user['stretches'] ?? 0) !== (int) $in['stretches']) {
+                    // Remember the choice for next time (#138).
+                    $this->db->run('UPDATE users SET stretches=? WHERE id=?', [$in['stretches'] ? 1 : 0, $uid]);
+                }
                 if (isset($in['warm_up']) && is_bool($in['warm_up']) && (int) $user['warm_up'] !== (int) $in['warm_up']) {
                     // Remember the choice for next time (#18).
                     $this->db->run('UPDATE users SET warm_up=? WHERE id=?', [$in['warm_up'] ? 1 : 0, $uid]);
@@ -403,6 +407,7 @@ final class Api
             'active_gym_id' => $u['active_gym_id'] === null ? null : (int) $u['active_gym_id'],
             'onboarded' => (int) $u['onboarded'] === 1,
             'warm_up' => (int) ($u['warm_up'] ?? 0) === 1,
+            'stretches' => (int) ($u['stretches'] ?? 0) === 1,
             // In the account's unit, to one decimal (#38).
             'body_weight' => ($u['body_weight_kg'] ?? null) === null ? null
                 : round($u['unit'] === 'kg' ? (float) $u['body_weight_kg'] : (float) $u['body_weight_kg'] * 2.20462262, 1),

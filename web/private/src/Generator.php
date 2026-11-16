@@ -155,8 +155,9 @@ final class Generator
              JOIN workout_exercises we ON we.id=s.workout_exercise_id
              JOIN workouts w ON w.id=s.workout_id
              JOIN exercises e ON e.id=we.exercise_id
-             WHERE w.user_id=? AND w.status='completed' AND w.started_at>? AND s.done=1 AND s.warmup=0",
-            [$uid, now_utc($now - 7 * 86400)]
+             WHERE w.user_id=? AND w.status='completed' AND w.started_at>? AND s.done=1 AND s.warmup=0
+               AND e.kind NOT IN (" . Db::marks(Catalog::TIMED_KINDS) . ')',
+            array_merge([$uid, now_utc($now - 7 * 86400)], Catalog::TIMED_KINDS)
         );
         $weekly = array_fill_keys(array_keys(Catalog::MUSCLES), 0.0);
         $perWorkout = [];
@@ -331,6 +332,9 @@ final class Generator
      */
     public function block(array $user, array $gym, array $ex, bool $reduceSets = false, ?array $plan = null, bool $bodyweightOnly = false): array
     {
+        if ($ex['kind'] === 'stretch') {
+            return $this->stretchBlock($gym, $ex);
+        }
         if (Catalog::isTimed($ex['kind'])) {
             return $this->cardioBlock((int) $user['id'], $gym, $ex);
         }
@@ -444,6 +448,77 @@ final class Generator
     }
 
     /**
+     * A stretch (#138) as timed holds: one, or two (left then right) for a
+     * stretch done on each side. No weights and no progression.
+     */
+    public function stretchBlock(array $gym, array $ex): array
+    {
+        $perSide = !empty($ex['per_side']);
+        $holds = $perSide ? 2 : 1;
+        $sec = Catalog::STRETCH_SECONDS;
+        $dynamic = $ex['pattern'] === 'dynamic_stretch';
+        return [
+            'exercise_id' => $ex['id'],
+            'name' => $ex['name'],
+            'kind' => $ex['kind'],
+            'pattern' => $ex['pattern'],
+            'variant_key' => Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']),
+            'target_sets' => $holds,
+            'rep_min' => 1,
+            'rep_max' => 1,
+            'rest_seconds' => 0,
+            'target_seconds' => $sec,
+            'per_side' => $perSide,
+            'suggested_weight' => null,
+            'suggested_reps' => null,
+            'action' => 'stretch',
+            'reason' => $dynamic
+                ? "$sec seconds of easy, controlled movement" . ($perSide ? ' on each side' : '') . ', to loosen up before lifting.'
+                : "Hold $sec seconds" . ($perSide ? ' on each side' : '') . ', breathing slowly. A gentle stretch, never painful.',
+            'previous' => null,
+            // Holds plus a little time to get into position.
+            'minutes' => round($holds * ($sec + 15) / 60, 2),
+        ];
+    }
+
+    /**
+     * Stretches for a planned workout (#138): the ones that best cover the
+     * muscles its lifts work, each a different area. With no lifts planned,
+     * the usual first choices.
+     *
+     * @param array<string, float> $worked muscle => planned sets
+     */
+    private function pickStretches(array $gym, array $cands, array $worked, int $count): array
+    {
+        $picked = [];
+        $weight = $worked;
+        while (count($picked) < $count && $cands) {
+            usort($cands, static function ($a, $b) use ($weight) {
+                $score = static function ($ex) use ($weight) {
+                    $s = 0.0;
+                    foreach ($ex['muscles_main'] as $m) {
+                        $s += $weight[$m] ?? 0;
+                    }
+                    foreach ($ex['muscles_assist'] as $m) {
+                        $s += 0.25 * ($weight[$m] ?? 0);
+                    }
+                    return $s;
+                };
+                return [-$score($a), $a['priority'], $a['name']] <=> [-$score($b), $b['priority'], $b['name']];
+            });
+            $ex = array_shift($cands);
+            // Spread the stretches out: an area already covered counts for little now.
+            foreach ($ex['muscles_main'] as $m) {
+                if (isset($weight[$m])) {
+                    $weight[$m] *= 0.15;
+                }
+            }
+            $picked[] = $this->stretchBlock($gym, $ex);
+        }
+        return $picked;
+    }
+
+    /**
      * The warm-up for a generated workout: a cardio machine the gym has,
      * preferring the one used most recently for a warm-up. Null when the gym
      * has none.
@@ -486,7 +561,9 @@ final class Generator
     /**
      * @param array $opts day_type, minutes, locked (slot key => exercise id),
      *                    avoid (exercise ids to steer away from), bodyweight_only,
-     *                    warm_up (start with a cardio warm-up), now (unix time)
+     *                    warm_up (start with a cardio warm-up), stretches (#138:
+     *                    cooldown stretches after lifting, and dynamic stretches
+     *                    after the warm-up when warm_up is on too), now (unix time)
      */
     public function generate(array $user, array $gym, array $opts = []): array
     {
@@ -534,6 +611,14 @@ final class Generator
         $skipped = [];
         $total = 0.0;
         $warm = null;
+        $stretches = ($opts['stretches'] ?? false) === true;
+        $warmUpAsked = ($opts['warm_up'] ?? false) === true;
+        $dynamicCount = $stretches && $warmUpAsked ? 3 : 0;
+        $cooldownCount = $stretches ? ($minutes <= 30 ? 3 : 4) : 0;
+        // Leave room for the stretches while choosing lifts; the real time is added below.
+        $stretchReserve = ($dynamicCount + $cooldownCount) * 1.0;
+        $total += $stretchReserve;
+        $worked = [];
         if (($opts['warm_up'] ?? false) === true && !$bodyweightOnly) {
             // Regenerate is for different lifts, so it does not rotate the warm-up machine.
             $warm = $this->warmUp($user, $gym, $by, isset($locked['warmup']) ? (int) $locked['warmup'] : 0, []);
@@ -619,6 +704,33 @@ final class Generator
             $blocks[] = $block;
             $chosen[$pick['id']] = true;
             $total += $block['minutes'];
+            foreach ($pick['muscles_main'] as $m) {
+                $worked[$m] = ($worked[$m] ?? 0) + $block['target_sets'];
+            }
+            foreach ($pick['muscles_assist'] as $m) {
+                $worked[$m] = ($worked[$m] ?? 0) + 0.5 * $block['target_sets'];
+            }
+        }
+
+        // Stretches (#138): cardio warm-up → dynamic stretches → lifting → cooldown stretches.
+        $total -= $stretchReserve;
+        if ($dynamicCount) {
+            $dynamic = $this->pickStretches($gym, $by['dynamic_stretch'] ?? [], $worked, $dynamicCount);
+            foreach ($dynamic as $i => &$d) {
+                $d['slot'] = 'dynamic' . ($i + 1);
+                $d['locked'] = false;
+                $total += $d['minutes'];
+            }
+            unset($d);
+            array_splice($blocks, $warm ? 1 : 0, 0, $dynamic);
+        }
+        if ($cooldownCount) {
+            foreach ($this->pickStretches($gym, $by['static_stretch'] ?? [], $worked, $cooldownCount) as $i => $c) {
+                $c['slot'] = 'cooldown' . ($i + 1);
+                $c['locked'] = false;
+                $blocks[] = $c;
+                $total += $c['minutes'];
+            }
         }
 
         return [
@@ -629,6 +741,7 @@ final class Generator
             'bodyweight_only' => $bodyweightOnly,
             'warm_up' => $warm !== null,
             'warm_up_available' => !$bodyweightOnly && !empty($by['cardio']),
+            'stretches' => $stretches,
             'unit' => $user['unit'],
             'minutes' => $minutes,
             'est_minutes' => (int) round($total),
@@ -663,6 +776,8 @@ final class Generator
                 }
                 if ($pattern === $target['pattern'] && $pattern !== 'other') {
                     $same[] = $ex;
+                } elseif (Catalog::isTimed($target['kind']) || Catalog::isTimed($ex['kind'])) {
+                    continue; // a stretch or cardio only swaps for its own kind
                 } elseif ($ex['compound'] === $target['compound'] && array_intersect($ex['muscles_main'], $target['muscles_main'])) {
                     $related[] = $ex;
                 }

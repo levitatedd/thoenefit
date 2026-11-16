@@ -738,6 +738,23 @@ textarea:focus {
   border-radius: 14px;
 }
 
+/* Stretches (#138): seconds per hold, then done. */
+.set-head.stretch,
+.set.stretch {
+  grid-template-columns: 44px minmax(0, 1fr) 60px;
+}
+
+.set.stretch .set-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.set.stretch.done input.num {
+  color: var(--green);
+}
+
 /* Cardio (#18): minutes, distance and level instead of weight × reps. */
 .set-head.cardio,
 .set.cardio {
