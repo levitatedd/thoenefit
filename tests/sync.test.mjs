@@ -1,7 +1,7 @@
 // Offline queue checks for the phone-side workout store:
 //   node tests/sync.test.mjs
 
-import { WorkoutSync, uuid } from '../web/js/store.js';
+import { WorkoutSync, uuid, clearLocalData } from '../web/js/store.js';
 
 let pass = 0;
 let fail = 0;
@@ -42,7 +42,7 @@ function fakeServer() {
 
 function memoryStorage() {
   const m = new Map();
-  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v), _m: m };
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k), _m: m };
 }
 
 function make(server, storage) {
@@ -160,6 +160,32 @@ console.log('Offline queue');
   server.online = true;
   await sync.flush();
   check('and removes the workout from the server on reconnect', !server.workouts.has(doc.id) && sync.status() === 'saved');
+}
+
+console.log('Sign out and clear local data (#23)');
+{
+  const server = fakeServer();
+  const storage = memoryStorage();
+  const sync = make(server, storage);
+  server.online = false;
+  const doc = newDoc();
+  sync.start(doc);
+  await sync.settle();
+  storage.setItem('tf.boot', '{"user":{"id":1}}');
+  storage.setItem('tf.rest', '{"endsAt":1}');
+  storage.setItem('tf.stravaOnFinish', '{"send":true}');
+  storage.setItem('tf.docs.2', '{"docs":[]}');
+  storage.setItem('tf.install', '{"never":true}');
+  check('an offline workout is waiting on the device', sync.status() === 'pending' && storage.getItem('tf.docs.1') !== null);
+  sync.close();
+  const removed = clearLocalData(storage, 1);
+  check("clearing removes this account's workouts, cached profile, rest timer and Strava choice", ['tf.docs.1', 'tf.boot', 'tf.rest', 'tf.stravaOnFinish'].every((k) => storage.getItem(k) === null) && removed.length === 4, removed.join());
+  check("another account's unsynced workouts and device-wide choices are kept", storage.getItem('tf.docs.2') !== null && storage.getItem('tf.install') !== null);
+  sync.edit(doc.id, (d) => { d.notes = 'after sign-out'; });
+  server.online = true;
+  await sync.flush();
+  check('a closed store writes nothing back and sends nothing', storage.getItem('tf.docs.1') === null && !server.workouts.has(doc.id));
+  check('clearing twice is harmless', clearLocalData(storage, 1).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

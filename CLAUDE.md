@@ -68,7 +68,7 @@ NODE_PATH=$(npm root -g) node tests/e2e.mjs
 - **Offline-first workouts.** Workouts are saved on the phone and synced as whole documents with a revision number (`web/js/store.js`, `Workouts::save()`). Anything that should happen "when a workout is finished" must ride along on the workout document and run on the server when the finished workout arrives (see `strava_send` / `completed_now`, #87). Never assume the phone is online at the moment of finishing.
 - **Service worker.** `web/sw.js` caches the app shell under the build id. A new JS module must be added to its `SHELL` list. The deploy stamps the build id and version, so don't hard-code either.
 - **Strava.** Use `Strava::export()`, which already guards against duplicate activities via `strava_exports`. A Strava failure must never stop a workout from saving.
-- **Database changes** go in a new numbered migration in `web/private/migrations/` (next is `012_...`). Migrations run on the first request after a deploy and must be safe to run on production data. Never create duplicates of rows that already exist there.
+- **Database changes** go in a new numbered migration in `web/private/migrations/` (use the next number after the highest one already in that folder). Migrations run on the first request after a deploy and must be safe to run on production data. Never create duplicates of rows that already exist there.
 - The checks run on both SQLite and MySQL in CI. Avoid SQL that only works on one.
 
 ## How Mike likes to work

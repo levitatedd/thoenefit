@@ -1062,6 +1062,137 @@ if (!process.env.TF_URL) {
   await shot('16-history-calories');
 }
 
+console.log('Admin password resets and deactivation');
+{
+  const csrf = (await api('bootstrap')).csrf;
+  const name = `crew${Date.now() % 100000}`;
+  await post('create_user', { username: name, display_name: 'Crew Member', password: 'crew-password-1' }, csrf);
+  const cctx = await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true });
+  const cp = await cctx.newPage();
+  const signIn = async (pw) => {
+    await cp.goto(URL);
+    await cp.waitForSelector('input[name=username]');
+    await cp.fill('input[name=username]', name);
+    await cp.fill('input[name=password]', pw);
+    await cp.click('button[type=submit]');
+  };
+  const status = () => cp.evaluate(async () => (await fetch('api.php?a=history', { credentials: 'same-origin' })).status);
+  await signIn('crew-password-1');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('the new account can sign in', (await status()) === 200);
+
+  await page.goto(`${URL}#/settings/users`);
+  const row = page.locator('.account-row', { hasText: name });
+  await row.waitFor();
+  check('the admin has no reset or deactivate buttons on their own row', (await page.locator('.account-row', { hasText: 'You' }).locator('button').count()) === 0);
+  await row.locator('button:has-text("Reset password")').click();
+  await page.waitForSelector('.sheet input[name=reset_password]');
+  await page.click('.sheet button:has-text("Make one up for me")');
+  const made = await page.inputValue('.sheet input[name=reset_password]');
+  await shot('20-admin-reset-password');
+  await page.fill('.sheet input[name=reset_password]', 'crew-password-2');
+  await page.click('.sheet button:has-text("Set new password")');
+  await waitForToast(page, /Password reset/);
+  check('Make one up fills in a long enough password', made.length >= 10, made);
+  check('a password reset signs the person out on their devices', (await status()) === 401);
+  await signIn('crew-password-1');
+  await cp.waitForSelector('.form-error:not(:empty)');
+  check('the old password no longer works', /Wrong username or password/.test(await cp.textContent('.form-error')));
+  await signIn('crew-password-2');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('the new password works', (await status()) === 200);
+
+  await row.locator('button:has-text("Deactivate")').click();
+  await page.click('.sheet button:has-text("Deactivate account")');
+  await waitForToast(page, /is deactivated/);
+  const off = page.locator('[data-list=inactive] .account-row', { hasText: name });
+  check('a deactivated account moves to Deactivated accounts', (await off.count()) === 1 && (await page.locator('.log:not([data-list]) .account-row', { hasText: name }).count()) === 0);
+  await off.scrollIntoViewIfNeeded();
+  await shot('21-admin-deactivated');
+  check('deactivating signs the person out', (await status()) === 401);
+  await signIn('crew-password-2');
+  await cp.waitForSelector('.form-error:not(:empty)');
+  check('a deactivated account cannot sign in and is told why', /deactivated/.test(await cp.textContent('.form-error')));
+  if (SHOTS) await cp.screenshot({ path: `${SHOTS}/22-deactivated-sign-in.png` });
+
+  await off.locator('button:has-text("Turn back on")').click();
+  await waitForToast(page, /can sign in again/);
+  check('turning it back on moves it back to Accounts', (await page.locator('.account-row', { hasText: name }).locator('button:has-text("Deactivate")').count()) === 1 && (await page.locator('[data-list=inactive] .account-row').count()) === 0);
+  await signIn('crew-password-2');
+  await cp.waitForSelector('h1:has-text("Welcome")');
+  check('a turned-back-on account signs in with the same password', (await status()) === 200);
+  check('no sideways scrolling on Manage users', (await overflow()) <= 0);
+  await cctx.close();
+}
+
+console.log("Seeing each other's history");
+{
+  const csrf = (await api('bootstrap')).csrf;
+  const viewerName = `viewer${Date.now() % 100000}`;
+  await post('create_user', { username: viewerName, display_name: 'Viewer', password: 'viewer-password-1' }, csrf);
+  const vctx = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await vctx.addInitScript(() => { try { localStorage.setItem('tf.install', JSON.stringify({ never: true })); } catch (e) { /* about:blank */ } });
+  const vp = await vctx.newPage();
+  vp.on('pageerror', (e) => errors.push(String(e)));
+  await vp.goto(URL);
+  await vp.fill('input[name=username]', viewerName);
+  await vp.fill('input[name=password]', 'viewer-password-1');
+  await vp.click('button[type=submit]');
+  await vp.waitForSelector('h1:has-text("Welcome")');
+  await vp.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json();
+    await fetch('api.php?a=save_profile', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ onboarded: true }) });
+  });
+  const myId = (await api('bootstrap')).user.id;
+  const viewerGet = (q) => vp.evaluate(async (u) => (await fetch(u, { credentials: 'same-origin' })).status, `api.php?a=${q}`);
+  await vp.goto(`${URL}#/history`);
+  await vp.reload();
+  await vp.waitForSelector('.tabs');
+  await vp.waitForTimeout(400);
+  check('history starts private: nobody else is listed on History', (await vp.locator('.people-card').count()) === 0);
+  check('a private history cannot be fetched by another account', (await viewerGet(`member_history&user=${myId}`)) === 404);
+
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Who can see your history');
+  check('Settings offers Only me and All signed-in users, starting at Only me', (await page.locator('.choice[aria-pressed="true"]:has-text("Only me")').count()) === 1 && (await page.locator('.choice:has-text("All signed-in users")').count()) === 1);
+  await page.click('.choice:has-text("All signed-in users")');
+  await waitForToast(page, /visible to signed-in users/);
+  await page.locator('.section', { hasText: 'Who can see your history' }).scrollIntoViewIfNeeded();
+  await shot('17-history-visibility');
+
+  await vp.goto(`${URL}#/today`);
+  await vp.goto(`${URL}#/history`);
+  await vp.waitForSelector('.people-card');
+  check('once shared, the other person sees them under Other people on History', /E2E/.test(await vp.textContent('.people-card')));
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18-history-other-people.png` });
+  await vp.click('.people-card .log-row');
+  await vp.waitForFunction(() => /'s workouts/.test(document.querySelector('h1')?.textContent || '') && document.querySelectorAll('.log-row').length > 0);
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18b-history-their-list.png` });
+  check("their list opens with the person's name and their workouts", /E2E's workouts/.test(await vp.textContent('h1')) && (await vp.locator('.log-row').count()) > 0);
+  await vp.click('.log-row:has-text("Push")');
+  await vp.waitForSelector('.lift.read-only');
+  check('no stray text from the page builder', !/object HTMLElement|undefined|null/.test(await vp.textContent('main')));
+  check('one of their workouts shows the sets they logged', (await vp.locator('.set-line').count()) > 0 && / × \d/.test(await vp.textContent('.set-line:not(.warm)')));
+  check('it is read-only: nothing to type in, no Save or Delete', (await vp.locator('.page input').count()) === 0 && (await vp.locator('button:has-text("Save changes"), button:has-text("Delete workout"), button:has-text("Send to Strava")').count()) === 0);
+  check('the History tab stays selected', (await vp.getAttribute('.tab:has-text("History")', 'aria-current')) === 'page');
+  check('no sideways scrolling on their workout', (await vp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/19-history-other-workout.png`, fullPage: true });
+  const wid = (await vp.evaluate(() => location.hash)).split('/').pop();
+  const save = await vp.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json();
+    const r = await fetch('api.php?a=save_workout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, rev: 999, status: 'completed', exercises: [] } }) });
+    return r.status;
+  }, wid);
+  check("the server refuses edits to someone else's workout", save === 403, String(save));
+
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Who can see your history');
+  await page.click('.choice:has-text("Only me")');
+  await waitForToast(page, /now private/);
+  check('switching back to Only me hides it again', (await viewerGet(`member_history&user=${myId}`)) === 404 && (await viewerGet(`member_workout&user=${myId}&id=${wid}`)) === 404);
+  await vctx.close();
+}
+
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;
@@ -1073,6 +1204,55 @@ for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'],
   }
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Sign out and clear local data');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  const myId = (await api('bootstrap')).user.id;
+  const keys = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tf.')).sort());
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('button:has-text("Sign out and clear this device")');
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.waitForSelector('.sheet');
+  check('with everything synced, it asks plainly and says synced workouts stay on the server', /Sign out and clear this device\?/.test(await page.textContent('.sheet h2')) && /stays on the server/.test(await page.textContent('.sheet')));
+  await page.click('.sheet button:has-text("Close")');
+
+  // A workout whose saves cannot reach the server, so it is only on this phone.
+  await page.route('**/api.php?a=save_workout*', (r) => r.abort());
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  await page.evaluate(() => localStorage.setItem('tf.stravaOnFinish', JSON.stringify({ send: true })));
+  await page.waitForFunction(() => document.querySelector('#sync') && document.querySelector('#sync').textContent !== 'Saved');
+  const before = await keys();
+  check('the unsynced workout, profile and choices are on the device', [`tf.docs.${myId}`, 'tf.boot', 'tf.stravaOnFinish'].every((k) => before.includes(k)), before.join());
+  await page.goto(`${URL}#/settings`);
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.waitForSelector('.sheet');
+  check('with unsynced changes, it warns they will be discarded', /have not synced/.test(await page.textContent('.sheet h2')) && /deletes them for good/.test(await page.textContent('.sheet')));
+  await shot('24-sign-out-clear-unsynced');
+  await page.click('.sheet button:has-text("Close")');
+  check('cancelling keeps you signed in with the workout still on the device', (await page.locator('.tabs').count()) === 1 && (await keys()).includes(`tf.docs.${myId}`));
+  await page.click('button:has-text("Sign out and clear this device")');
+  await page.click('.sheet button:has-text("Discard changes, sign out and clear")');
+  await page.waitForSelector('input[name=username]');
+  await page.unroute('**/api.php?a=save_workout*');
+  await page.waitForTimeout(2500);
+  const after = await keys();
+  check('signing out cleared the workouts, profile, rest timer and Strava choice', ![`tf.docs.${myId}`, 'tf.boot', 'tf.rest', 'tf.stravaOnFinish'].some((k) => after.includes(k)), after.join());
+  check('device-wide choices like the install reminder are kept', after.includes('tf.install'));
+  check('the server session is ended too', (await page.evaluate(async () => (await fetch('api.php?a=history', { credentials: 'same-origin' })).status)) === 401);
+  await shot('25-signed-out-cleared');
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PASS);
+  await page.click('button[type=submit]');
+  await page.waitForSelector('.tabs');
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout"), button:has-text("Resume workout"), a:has-text("Resume workout")');
+  check('signing back in works, and the discarded workout did not come back', (await page.locator(':text("Resume workout")').count()) === 0);
+  check('the synced history is still on the server', (await api('history')).workouts.length > 0);
+}
+
 check('no script errors during the run', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();
