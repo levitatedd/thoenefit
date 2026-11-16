@@ -17,6 +17,7 @@ require_once __DIR__ . '/Shares.php';
 require_once __DIR__ . '/Routines.php';
 require_once __DIR__ . '/Strava.php';
 require_once __DIR__ . '/StravaStrength.php';
+require_once __DIR__ . '/Feedback.php';
 require_once __DIR__ . '/Api.php';
 
 final class HttpError extends \RuntimeException

@@ -1229,6 +1229,73 @@ for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'],
   }
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Send feedback');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('.settings-main');
+  check('without a GitHub token there is no Send feedback option', (await page.locator('.link-row:has-text("Send feedback")').count()) === 0);
+  // The test server has no token, so stand in for GitHub at the API's edge.
+  const fctx = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await fctx.addInitScript(() => { try { localStorage.setItem('tf.install', JSON.stringify({ never: true })); } catch (e) { /* about:blank */ } });
+  const sentList = [{ id: 1, kind: 'problem', title: 'Rest timer stops when the screen locks', issue_number: 41, issue_url: 'https://github.com/levitatedd/thoenefit/issues/41', status: 'done', created_at: '2026-11-10T12:00:00Z' }];
+  let failNext = true;
+  let lastSent = null;
+  await fctx.route('**/api.php?a=*', async (route) => {
+    const action = new globalThis.URL(route.request().url()).searchParams.get('a');
+    if (action === 'bootstrap') {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (json.user) json.feedback_enabled = true;
+      return route.fulfill({ response, json });
+    }
+    if (action === 'feedback') return route.fulfill({ json: { feedback: sentList } });
+    if (action === 'all_feedback') return route.fulfill({ json: { feedback: sentList.map((f) => ({ ...f, from: 'E2E', username: 'e2e' })) } });
+    if (action === 'send_feedback') {
+      lastSent = route.request().postDataJSON();
+      if (failNext) {
+        failNext = false;
+        return route.fulfill({ status: 502, json: { error: 'Your feedback could not be sent right now. Try again in a few minutes.' } });
+      }
+      sentList.unshift({ id: 2, kind: lastSent.kind, title: lastSent.title, issue_number: 42, issue_url: 'https://github.com/levitatedd/thoenefit/issues/42', status: 'sent', created_at: new Date().toISOString() });
+      return route.fulfill({ json: { sent: sentList[0], feedback: sentList } });
+    }
+    return route.continue();
+  });
+  const fp = await fctx.newPage();
+  fp.on('pageerror', (e) => errors.push(String(e)));
+  await fp.goto(URL);
+  await fp.fill('input[name=username]', USER);
+  await fp.fill('input[name=password]', PASS);
+  await fp.click('button[type=submit]');
+  await fp.waitForSelector('.tabs');
+  await fp.goto(`${URL}#/settings`);
+  await fp.waitForSelector('.link-row:has-text("Send feedback")');
+  check('with a token, Settings → Help offers Send feedback', true);
+  await fp.click('.link-row:has-text("Send feedback")');
+  await fp.waitForSelector('.feedback-row');
+  check('it warns that feedback is public, under the button', /posted publicly on GitHub\. Don't include personal details\./.test(await fp.textContent('.public-note')));
+  check('what you sent is listed with its status', /Rest timer stops/.test(await fp.textContent('.feedback-row')) && (await fp.textContent('.status-pill.done')) === 'Done');
+  await fp.click('.choice:has-text("Problem")');
+  await fp.fill('input[name=feedback_title]', 'Swap button is hard to hit');
+  await fp.fill('textarea[name=feedback_body]', 'On a small phone I keep tapping Lock instead.');
+  await fp.click('button[type=submit]:has-text("Send feedback")');
+  await fp.waitForSelector('.form-error:not(:empty)');
+  check('if it cannot be sent, it says so and keeps what was typed', /could not be sent/.test(await fp.textContent('.form-error')) && (await fp.inputValue('input[name=feedback_title]')) === 'Swap button is hard to hit' && /Lock instead/.test(await fp.inputValue('textarea[name=feedback_body]')));
+  await fp.click('button[type=submit]:has-text("Send feedback")');
+  await waitForToast(fp, /Thanks, your feedback was sent/);
+  check('sending it thanks you, clears the form and lists it as Sent', (await fp.inputValue('input[name=feedback_title]')) === '' && /Swap button/.test(await fp.textContent('.feedback-row')) && (await fp.textContent('.feedback-row .status-pill')) === 'Sent');
+  check('the app sends the type, title and details', lastSent?.kind === 'problem' && lastSent?.title === 'Swap button is hard to hit' && /Lock instead/.test(lastSent?.body), JSON.stringify(lastSent));
+  check('no sideways scrolling on Send feedback', (await fp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await fp.screenshot({ path: `${SHOTS}/26-send-feedback.png`, fullPage: true });
+  await fp.goto(`${URL}#/settings/users`);
+  await fp.waitForSelector('.feedback-list .feedback-row');
+  check("the admin's Manage users lists feedback with who sent it", /E2E/.test(await fp.textContent('.feedback-list')));
+  await fp.locator('.feedback-list').scrollIntoViewIfNeeded();
+  if (SHOTS) await fp.screenshot({ path: `${SHOTS}/27-admin-feedback.png` });
+  await fctx.close();
+}
+
 console.log('Sign out and clear local data');
 {
   await page.setViewportSize({ width: 402, height: 874 });
