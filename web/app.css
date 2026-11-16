@@ -46,6 +46,9 @@ body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   padding-bottom: calc(var(--tabs-h) + var(--safe-b));
+  /* Never shorter than the screen, even while a tab is still loading (#112). */
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body.resting {
