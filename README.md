@@ -1,4 +1,4 @@
-<img src="web/icons/logo-wide.png" width="450" alt="ThoeneFit logo">
+<center><img src="web/icons/logo-wide.png" width="80%" alt="ThoeneFit logo"></center>
 
 ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym and it suggests a strength workout based on the equipment you have and what you lifted last time. Log sets at the gym, even without a signal, then review your progress in History and Trends.
 
