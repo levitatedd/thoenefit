@@ -537,6 +537,19 @@ textarea:focus {
   color: var(--blue);
 }
 
+/* Today in mint, like Settings: the heading and the planned exercise names.
+   The in-progress workout keeps white names, so green stays "done" there. */
+.tab-home > h1,
+.today-head h1,
+.plan-row .name-link,
+.plan-row .name-link .icon {
+  color: var(--mint);
+}
+
+.plan-row .name-link {
+  text-decoration-color: rgba(58, 242, 156, 0.35);
+}
+
 .target {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1371,4 +1384,120 @@ ul.notes {
   * {
     transition: none !important;
   }
+}
+
+/* ---- Settings (#103) ----------------------------------------------------
+   Mint headings so each section is easy to find while scrolling on a phone,
+   and setup or maintenance tucked behind one-line links to their own screens. */
+.settings-main > h1,
+.settings-main .section > h2 {
+  color: var(--mint);
+}
+
+.settings-main .section {
+  gap: 12px;
+  padding-top: 22px;
+}
+
+.settings-main .section > h2 {
+  font-size: 22px;
+}
+
+/* A group of links reads as one card, with a chevron on every row. */
+.link-list {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 0 14px;
+}
+
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.link-row .log-title {
+  font-size: 18px;
+}
+
+.link-row .log-meta {
+  grid-column: 1;
+}
+
+.link-row .chevron {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  color: var(--muted);
+  transform: rotate(180deg);
+}
+
+.link-row:active {
+  opacity: 0.7;
+}
+
+.install-help > h3 {
+  margin-top: 6px;
+}
+
+.add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mint);
+}
+
+.link-row .badge.alert {
+  background: var(--yellow);
+}
+
+/* ---- Feedback (#20) ---------------------------------------------------- */
+.feedback-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 2px;
+}
+
+.feedback-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feedback-head .log-title {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.feedback-row .log-meta a {
+  color: var(--muted);
+}
+
+.status-pill {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--chalk);
+  font: 600 13px/1.4 var(--body);
+}
+
+.status-pill.done {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.status-pill.closed {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.public-note {
+  text-align: center;
 }

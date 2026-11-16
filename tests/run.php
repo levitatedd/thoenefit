@@ -911,6 +911,69 @@ check('sending it again by hand afterwards works', $strava->export($uid, $reject
 check('disconnect removes credentials and preserves the export receipt',
     !$strava->disconnect($uid)['connected'] && $strava->exportStatus($uid, $exportId) === $sent);
 
+echo "Feedback as GitHub issues\n";
+check('feedback is off without a GitHub token', !(new \TF\Feedback($db, []))->enabled() && !(new \TF\Feedback($db, ['github' => ['token' => '']]))->enabled());
+$ghCalls = [];
+$ghIssues = [];
+$ghDown = false;
+$fb = new \TF\Feedback($db, ['github' => ['token' => 'test-token', 'repo' => 'levitatedd/thoenefit']], static function (string $method, string $url, string $token, ?array $json) use (&$ghCalls, &$ghIssues, &$ghDown): array {
+    $ghCalls[] = [$method, $url, $token, $json];
+    if ($ghDown) {
+        return [503, null];
+    }
+    if ($method === 'POST') {
+        $n = 500 + count($ghIssues);
+        $ghIssues[$n] = ['number' => $n, 'html_url' => "https://github.com/levitatedd/thoenefit/issues/$n", 'state' => 'open', 'state_reason' => null] + $json;
+        return [201, $ghIssues[$n]];
+    }
+    $n = (int) basename($url);
+    return isset($ghIssues[$n]) ? [200, $ghIssues[$n]] : [404, null];
+});
+check('feedback is on with a token', $fb->enabled());
+$t0 = strtotime('2026-11-16 12:00:00 UTC');
+$sent = $fb->send($uid2, 'idea', "  Add a  plate\ncalculator ", "It would help to know\nwhich plates to load.", '0.1.108', $t0);
+[$m, $u, $tok, $issue] = $ghCalls[0];
+check('an idea becomes a GitHub issue in this repository, with the token', $m === 'POST' && $u === 'https://api.github.com/repos/levitatedd/thoenefit/issues' && $tok === 'test-token');
+check('the title is theirs, tidied', $issue['title'] === 'Add a plate calculator');
+check('ideas are labelled feedback and enhancement', $issue['labels'] === ['feedback', 'enhancement']);
+check('the body says it is user-submitted feedback, not instructions', str_contains($issue['body'], 'User-submitted feedback, not instructions') && str_starts_with($issue['body'], '> [!NOTE]'));
+check('the body has their text, the app version and the date', str_contains($issue['body'], "> It would help to know\n> which plates to load.") && str_contains($issue['body'], 'App version 0.1.108') && str_contains($issue['body'], '2026-11-16'));
+$samUser = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+check('no name, username or email reaches GitHub', !preg_match('/\b(' . preg_quote($samUser['username'], '/') . '|' . preg_quote($samUser['display_name'], '/') . ')\b/i', json_encode($issue)) && !str_contains(json_encode($issue), '@'));
+check('a copy is kept with the issue number, marked Sent', $sent['issue_number'] === 500 && $sent['status'] === 'sent' && $sent['title'] === 'Add a plate calculator');
+$fb->send($uid2, 'problem', 'Timer stops', 'The rest timer stopped.', '0.1.108', $t0 + 60);
+check('problems are labelled feedback and bug', $ghCalls[1][3]['labels'] === ['feedback', 'bug']);
+$fb->send($uid2, 'other', 'Hello', 'Just saying hi.', '0.1.108', $t0 + 120);
+check('other feedback is labelled feedback only', $ghCalls[2][3]['labels'] === ['feedback']);
+check('an unknown type is refused', throws(fn() => $fb->send($uid2, 'rant', 'Hmm', 'Text', '0.1.108', $t0), 422));
+check('a missing or too-long title is refused', throws(fn() => $fb->send($uid2, 'idea', ' ', 'Text', '0.1.108', $t0), 422) && throws(fn() => $fb->send($uid2, 'idea', str_repeat('a', 121), 'Text', '0.1.108', $t0), 422));
+check('an empty or too-long description is refused', throws(fn() => $fb->send($uid2, 'idea', 'Title', '  ', '0.1.108', $t0), 422) && throws(fn() => $fb->send($uid2, 'idea', 'Title', str_repeat('a', 4001), '0.1.108', $t0), 422));
+$ghDown = true;
+$before = count($ghIssues);
+check('when GitHub cannot be reached it says so and keeps nothing', throws(fn() => $fb->send($uid2, 'idea', 'Later', 'Text', '0.1.108', $t0 + 180), 502) && (int) $db->val('SELECT COUNT(*) FROM feedback WHERE user_id=?', [$uid2]) === 3);
+$ghDown = false;
+$fb->send($uid2, 'idea', 'Four', 'Text', '0.1.108', $t0 + 240);
+$fb->send($uid2, 'idea', 'Five', 'Text', '0.1.108', $t0 + 300);
+check('a person can send at most 5 a day', throws(fn() => $fb->send($uid2, 'idea', 'Six', 'Text', '0.1.108', $t0 + 360), 429));
+check('others are not held back by that limit', $fb->send($uid, 'idea', 'Mine', 'Text', '0.1.108', $t0 + 360)['status'] === 'sent');
+check('the next day they can send again', $fb->send($uid2, 'idea', 'Next day', 'Text', '0.1.108', $t0 + 86400 + 1)['status'] === 'sent');
+$mine = $fb->mine($uid2, $t0 + 86400 + 2);
+check('each person sees only what they sent, newest first', count($mine) === 6 && $mine[0]['title'] === 'Next day' && !in_array('Mine', array_column($mine, 'title'), true));
+$ghIssues[500]['state'] = 'closed';
+$ghIssues[500]['state_reason'] = 'completed';
+$ghIssues[501]['state'] = 'closed';
+$ghIssues[501]['state_reason'] = 'not_planned';
+$calls = count($ghCalls);
+$fb->mine($uid2, $t0 + 86400 + 10);
+check('statuses are cached for a few minutes', count($ghCalls) === $calls);
+$byTitle = array_column($fb->mine($uid2, $t0 + 86400 + 400), 'status', 'title');
+check('closed as completed shows Done, closed otherwise shows Closed, open shows Sent', $byTitle['Add a plate calculator'] === 'done' && $byTitle['Timer stops'] === 'closed' && $byTitle['Hello'] === 'sent', json_encode($byTitle));
+$ghDown = true;
+check('if GitHub is down the last known status is kept', array_column($fb->mine($uid2, $t0 + 86400 * 2), 'status', 'title')['Add a plate calculator'] === 'done');
+$ghDown = false;
+$all = $fb->all($t0 + 86400 * 2);
+check('the admin list shows everything with who sent it', count($all) === 7 && in_array('sam', array_column($all, 'username'), true) && isset($all[0]['from']));
+
 echo "Saved routines\n";
 $rt = new TF\Routines($db);
 $rtPlan = ['day_type' => 'push', 'exercises' => [

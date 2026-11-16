@@ -29,4 +29,13 @@ return [
         'client_secret' => '',
         'callback_url' => 'https://fit.example.com/api.php?a=strava_callback',
     ],
+
+    // Optional. Lets people send feedback from Settings; each one becomes a
+    // public issue in this repository. Without a token the option is hidden.
+    // Use a fine-grained personal access token limited to this one repository
+    // with "Issues: Read and write" and no other permissions.
+    'github' => [
+        'token' => '',
+        'repo' => 'levitatedd/thoenefit',
+    ],
 ];

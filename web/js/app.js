@@ -108,6 +108,7 @@ async function boot() {
 function applyBoot(data) {
   S.user = data.user;
   S.strava = data.strava;
+  S.feedbackEnabled = !!data.feedback_enabled;
   S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
   S.shares = data.shares || [];
@@ -313,8 +314,13 @@ function render() {
   else if (tab === 'people') view = arg2 ? viewPersonWorkout(Number(arg), arg2) : viewPersonHistory(Number(arg));
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
-  else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : arg === 'whats-new' ? viewWhatsNew() : viewSettings();
+  else if (tab === 'settings') {
+    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword, feedback: viewFeedback }[arg];
+    view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : sub ? sub() : viewSettings();
+  }
   else view = viewToday();
+  // The main page of each tab has a mint heading, like Today and Settings (#103).
+  if (!arg && ['history', 'trends', 'exercises'].includes(tab)) view.classList.add('tab-home');
   const current = tab === 'workout' ? 'today' : tab === 'people' ? 'history' : tab;
   const nav = h(
     'nav',
@@ -835,7 +841,7 @@ function viewToday() {
   const gym = activeGym();
   const active = sync.active;
   refreshShares();
-  const head = h('header', { class: 'page-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
+  const head = h('header', { class: 'page-head today-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {
@@ -2152,33 +2158,123 @@ function bodyWeightField() {
 
 const EFFORTS = [['light', 'Light'], ['moderate', 'Moderate'], ['hard', 'Hard']];
 
-function viewSettings() {
-  const saveProfile = (key, value) => act(async () => {
-    const r = await api.post('save_profile', { [key]: value });
-    S.user = r.user;
-    S.draft = null;
-    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
-  });
+/** Rows that each open another screen: [href, title, meta, extra attributes]. */
+function linkList(...rows) {
+  return h('ul', { class: 'log link-list' }, rows.filter(Boolean).map(([href, title, meta, extra]) => h('li', {},
+    h('a', { class: 'log-row link-row', href, ...(extra || {}) },
+      h('span', { class: 'log-title' }, ...[title].flat()),
+      meta && h('span', { class: 'log-meta' }, meta),
+      h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('back', 20))))));
+}
+
+/** Saved routines: view, rename and delete (#103 moved them here from the main Settings page). */
+function viewRoutines() {
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Routines'),
+    h('p', { class: 'muted' }, 'Start a routine from the workout picker on Today.'),
+    routinesList());
+}
+
+function viewStrava() {
+  const head = [backLink('settings', 'Settings'), h('h1', {}, 'Strava')];
+  if (!S.strava?.enabled) return h('main', { class: 'page' }, ...head, h('p', { class: 'muted' }, 'Strava is not set up on this server.'));
+  return h('main', { class: 'page' }, ...head,
+    h('p', {}, S.strava.connected ? 'Connected. Send a finished workout from History, or tick Send to Strava when you finish one.' : 'Connect to send finished workouts to Strava, with their exercises, sets, reps and weights if you like.'),
+    S.strava.connected
+      ? h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
+        const button = e.currentTarget;
+        if (!(await confirmSheet('Disconnect Strava?', 'Workouts you already sent stay on Strava.', 'Disconnect'))) return;
+        await act(async () => {
+          const result = await api.post('strava_disconnect');
+          S.strava = result.strava;
+          render();
+          toast('Strava disconnected.');
+        }, button);
+      } }, 'Disconnect Strava')
+      : h('button', { class: 'btn primary block', type: 'button', onclick: (e) => act(async () => {
+        const { url } = await api.post('strava_authorize');
+        location.assign(url);
+      }, e.currentTarget) }, 'Connect to Strava'));
+}
+
+function viewPassword() {
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });
-  const pwBtn = h('button', { class: 'btn block', type: 'submit' }, 'Change password');
-  return page('Settings',
-    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
-    section('Routines', routinesList()),
-    section('Gyms',
-      h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
-      h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),
-    section('Who can see your history',
-      choices([
-        ['private', 'Only me', 'Nobody else can see your workouts'],
-        ['members', 'All signed-in users', 'Anyone with an account here can see your finished workouts, read-only'],
-      ], S.user.history_visibility || 'private', (v) => saveProfile('history_visibility', v).then((ok) => ok !== null && toast(v === 'members' ? 'Your history is now visible to signed-in users.' : 'Your history is now private.'))),
-      h('p', { class: 'muted small' }, 'Workouts in progress are never shown. Others see what you logged, not your gyms, routines or settings.')),
-    section('Your data',
-      h('a', { class: 'btn block', href: 'api.php?a=export', download: '' }, 'Export all sets as CSV'),
-      h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.'),
-      h('a', { class: 'btn block', href: '#/settings/import' }, 'Import from Fitbod')),
-    section('Add to your Home Screen',
+  const pwBtn = h('button', { class: 'btn primary block', type: 'submit' }, 'Change password');
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Change password'),
+    h('p', { class: 'muted' }, 'Your other phones and computers are signed out. This one stays signed in.'),
+      h('form', { class: 'stack', onsubmit: async (e) => {
+        e.preventDefault();
+        await act(async () => {
+          const result = await api.post('change_password', { current: current.value, next: next.value });
+          // The server signed out every other device and gave this one a new session and token.
+          if (result.csrf) api.csrf = result.csrf;
+          current.value = '';
+          next.value = '';
+          toast('Password changed. Other devices are signed out.');
+        }, pwBtn);
+      } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn));
+}
+
+const FEEDBACK_KINDS = [['idea', 'Idea'], ['problem', 'Problem'], ['other', 'Other']];
+const FEEDBACK_STATUS = { sent: 'Sent', done: 'Done', closed: 'Closed' };
+
+/** Sent feedback with its GitHub status. withNames is for the admin's list only. */
+function feedbackList(items, withNames = false) {
+  const kindLabel = Object.fromEntries(FEEDBACK_KINDS);
+  return h('ul', { class: 'log feedback-list' }, items.map((f) => h('li', { class: 'feedback-row' },
+    h('div', { class: 'feedback-head' },
+      h('span', { class: 'log-title' }, f.title),
+      h('span', { class: `status-pill ${f.status}` }, FEEDBACK_STATUS[f.status] || f.status)),
+    h('span', { class: 'log-meta' },
+      [kindLabel[f.kind] || f.kind, withNames && f.from, fmtDate(f.created_at, { month: 'short', day: 'numeric', year: 'numeric' })].filter(Boolean).join(' · '),
+      f.issue_url && [' · ', h('a', { href: f.issue_url, target: '_blank', rel: 'noopener' }, `#${f.issue_number}`)]))));
+}
+
+/** Send feedback (#20): it becomes a public GitHub issue, without the sender's name. */
+function viewFeedback() {
+  const head = [backLink('settings', 'Settings'), h('h1', {}, 'Send feedback')];
+  if (!S.feedbackEnabled) return h('main', { class: 'page' }, ...head, h('p', { class: 'muted' }, 'Feedback is not set up on this server.'));
+  let kind = 'idea';
+  const title = h('input', { type: 'text', name: 'feedback_title', maxlength: 120, required: true, autocomplete: 'off', placeholder: 'For example: Add a plate calculator' });
+  const body = h('textarea', { name: 'feedback_body', rows: 6, maxlength: 4000, required: true, placeholder: 'What would help, or what went wrong and what you expected instead.' });
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Send feedback');
+  const sent = h('div', { class: 'stack' });
+  const showSent = (items) => fill(sent, items.length ? feedbackList(items) : h('p', { class: 'muted' }, 'Nothing yet. What you send shows up here, with whether it has been done.'));
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    btn.disabled = true;
+    try {
+      const res = await api.post('send_feedback', { kind, title: title.value, body: body.value });
+      // Clear only once it is sent; on an error everything typed stays put.
+      title.value = '';
+      body.value = '';
+      showSent(res.feedback);
+      toast('Thanks, your feedback was sent.');
+    } catch (err) {
+      error.textContent = err.offline ? 'No connection. Your feedback was not sent; try again when you are back online.' : err.message;
+    }
+    btn.disabled = false;
+  } },
+    field('Type', choices(FEEDBACK_KINDS, kind, (v) => (kind = v), { columns: 3 })),
+    field('Title', title),
+    field('Details', body),
+    error,
+    btn,
+    h('p', { class: 'muted small public-note' }, "Feedback is posted publicly on GitHub. Don't include personal details."));
+  showSent([]);
+  sent.replaceChildren(h('p', { class: 'muted' }, 'Loading'));
+  api.get('feedback').then(({ feedback }) => showSent(feedback), (e) => fill(sent, h('p', { class: 'muted' }, e.offline ? 'This needs a connection.' : e.message)));
+  return h('main', { class: 'page' }, ...head,
+    h('p', { class: 'muted' }, 'Ideas and problems go straight onto the ThoeneFit to-do list.'),
+    form,
+    section('What you have sent', sent));
+}
+
+function viewInstallHelp() {
+  return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Add to your Home Screen'),
+    h('div', { class: 'stack install-help' },
       h('p', {}, install.isInstalled() ? 'You are using the installed app.' : 'Installed, ThoeneFit opens full screen like an app and keeps working when the gym has no signal.'),
       (() => {
         // This browser's steps first, then everyone else's (#89).
@@ -2191,38 +2287,44 @@ function viewSettings() {
             install.GUIDES.filter((g) => g.key !== mine.key && g.key !== 'other').map((g) => [h('h3', {}, g.name), installSteps(g)])),
         ];
       })(),
-      h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')),
-    S.user.role === 'admin' && section('Users',
-      h('p', { class: 'muted' }, 'You are the admin. There is no public sign-up, so you create accounts for the people you train with.'),
-      h('a', { class: 'btn block', href: '#/settings/users' }, 'Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`))),
+      h('p', { class: 'muted small' }, 'The app updates itself when you open it. The Home Screen icon does not: the phone keeps the picture from when the app was added. To get a new icon, remove ThoeneFit from the Home Screen and add it again. Your workouts are kept on the server.')));
+}
+
+function viewSettings() {
+  const saveProfile = (key, value) => act(async () => {
+    const r = await api.post('save_profile', { [key]: value });
+    S.user = r.user;
+    S.draft = null;
+    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
+  });
+  const routineCount = (S.routines || []).length;
+  // Headings are mint so the sections are easy to pick out (#103). What affects
+  // the next workout comes first; setup and maintenance are one-line links.
+  return h('main', { class: 'page settings-main' }, h('h1', {}, 'Settings'),
+    section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
+    section('Gyms', linkList(
+      ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),
+      ['#/settings/gym/new', h('span', { class: 'add-row' }, icon('plus', 18), 'Add a gym')])),
+    section('Routines', linkList(['#/settings/routines', 'Manage routines', routineCount ? `${routineCount} saved` : 'None saved yet'])),
+    section('Who can see your history',
+      choices([
+        ['private', 'Only me', 'Nobody else can see your workouts'],
+        ['members', 'All signed-in users', 'Anyone with an account here can see your finished workouts, read-only'],
+      ], S.user.history_visibility || 'private', (v) => saveProfile('history_visibility', v).then((ok) => ok !== null && toast(v === 'members' ? 'Your history is now visible to signed-in users.' : 'Your history is now private.'))),
+      h('p', { class: 'muted small' }, 'Workouts in progress are never shown. Others see what you logged, not your gyms, routines or settings.')),
+    section('Your data', linkList(
+      ['api.php?a=export', 'Export all sets as CSV', 'One row per set, including warm-ups, with dates in UTC', { download: '' }],
+      ['#/settings/import', 'Import from Fitbod', 'Bring in workouts from a Fitbod CSV'])),
+    S.strava?.enabled && section('Integrations', linkList(['#/settings/strava', 'Strava', S.strava.connected ? 'Connected' : 'Not connected'])),
+    section('Help', linkList(
+      ['#/settings/install', 'Add to your Home Screen', install.isInstalled() ? 'You are using the installed app' : 'Open full screen and keep working with no signal'],
+      S.feedbackEnabled && ['#/settings/feedback', 'Send feedback', 'Ideas, problems or anything else'],
+      ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
+    S.user.role === 'admin' && section('Users', linkList(
+      ['#/settings/users', ['Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`)], 'Create accounts, approve requests, reset passwords'])),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
-      S.strava?.enabled && (S.strava.connected
-        ? h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
-          const button = e.currentTarget;
-          if (!(await confirmSheet('Disconnect Strava?', 'Workouts you already sent stay on Strava.', 'Disconnect'))) return;
-          await act(async () => {
-            const result = await api.post('strava_disconnect');
-            S.strava = result.strava;
-            render();
-            toast('Strava disconnected.');
-          }, button);
-        } }, 'Disconnect Strava')
-        : h('button', { class: 'btn block', type: 'button', onclick: (e) => act(async () => {
-          const { url } = await api.post('strava_authorize');
-          location.assign(url);
-        }, e.currentTarget) }, 'Connect to Strava')),
-      h('form', { class: 'stack', onsubmit: async (e) => {
-        e.preventDefault();
-        await act(async () => {
-          const result = await api.post('change_password', { current: current.value, next: next.value });
-          // The server signed out every other device and gave this one a new session and token.
-          if (result.csrf) api.csrf = result.csrf;
-          current.value = '';
-          next.value = '';
-          toast('Password changed. Other devices are signed out.');
-        }, pwBtn);
-      } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn),
+      linkList(['#/settings/password', 'Change password', 'Signs you out on your other devices']),
       h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
         if (sync.status() !== 'saved' && !(await confirmSheet('Sign out with unsynced changes?', 'Some workout changes are still only on this phone. They stay here and upload the next time you sign in on it.', 'Sign out anyway'))) return;
         await act(async () => {
@@ -2544,6 +2646,11 @@ function viewUsers() {
       inactiveSection,
       section('Invite token', h('p', { class: 'muted' }, 'With the token, someone can ask for an account from the sign-in screen, choosing their own username and password. Nobody gets in until you approve them here.'), inviteState, tokenForm),
       section('Add a person yourself', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form),
+      // Who sent which feedback (#20). Only shown here; names never go to GitHub.
+      S.feedbackEnabled && section('Feedback', h('p', { class: 'muted' }, 'Everything people have sent from the app, with who sent it. The GitHub issues themselves have no names.'),
+        asyncSection(() => api.get('all_feedback'), ({ feedback }) => (feedback.length
+          ? feedbackList(feedback, true)
+          : h('p', { class: 'muted' }, 'Nothing sent yet.')))),
     ];
   });
   return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Manage users'), loaded);

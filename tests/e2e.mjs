@@ -108,6 +108,10 @@ check('nothing needs a cable or machine at a garage gym', !first.some((n) => /Ca
 check('each exercise explains why', (await page.$$eval('.plan-row .why', (els) => els.every((e) => e.textContent.length > 20))) === true);
 check('no sideways scrolling at iPhone width', (await overflow()) <= 0);
 await shot('03-today');
+{
+  const colour = (sel) => page.$eval(sel, (el) => getComputedStyle(el).color);
+  check('Today\'s heading and planned exercise names are mint', (await colour('.today-head h1')) === 'rgb(58, 242, 156)' && (await colour('.plan-row .name-link')) === 'rgb(58, 242, 156)');
+}
 
 // Recovery estimate lives on the Trends tab (#26), so Today ends with the plan and the logo.
 const order = await page.evaluate(() => {
@@ -165,6 +169,7 @@ for (let i = 0; i < setRows; i++) {
     await page.waitForSelector('#rest:not([hidden])');
     check('finishing a set starts the rest timer', /\d:\d\d/.test(await page.textContent('#rest-time')));
     await shot('05-workout');
+check('during a workout the exercise names stay white, so green still means done', (await page.$eval('.lift .name-link', (el) => getComputedStyle(el).color)) === 'rgb(244, 242, 236)');
     await page.click('#rest button:has-text("Skip")');
   }
 }
@@ -323,6 +328,14 @@ page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
 check('the finished workout carries the Strava request to the server',
   finishSave?.strava_send?.include_summary === true && Number.isInteger(finishSave?.strava_send?.utc_offset), JSON.stringify(finishSave?.strava_send));
+// #103: Strava lives under Settings → Integrations.
+await page.goto(`${URL}#/settings`);
+await page.waitForSelector('.settings-main');
+check('a connected Strava shows under Integrations', /Connected/.test(await page.textContent('.link-row:has-text("Strava")')));
+await page.click('.link-row:has-text("Strava")');
+await page.waitForSelector('button:has-text("Disconnect Strava")');
+check('the Strava screen offers Disconnect', true);
+await page.goto(`${URL}#/today`);
 check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
 check('after finishing, the next day in the split comes up (Pull)', (await page.$eval('select[aria-label="Workout type"]', (s) => s.value)) === 'pull');
@@ -402,9 +415,9 @@ console.log('Install reminder');
   await ip.reload();
   await ip.waitForSelector('.plan-row');
   check('and it stays hidden after reopening', (await ip.locator('.install-card').count()) === 0);
-  await ip.goto(`${URL}#/settings`);
-  await ip.waitForSelector('text=Add to your Home Screen');
-  const firstGuide = await ip.locator('.section', { hasText: 'Add to your Home Screen' }).locator('h3').first().textContent();
+  await ip.goto(`${URL}#/settings/install`);
+  await ip.waitForSelector('.install-help h3');
+  const firstGuide = await ip.locator('.install-help h3').first().textContent();
   check(`Settings lists this browser's steps first (${firstGuide})`, firstGuide === 'iPhone or iPad, Safari' && (await ip.locator('details.fold summary:has-text("Other browsers and phones")').count()) === 1);
   await ic.close();
 
@@ -795,10 +808,23 @@ await partner.close();
 
 await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
-check('settings include Home Screen instructions for Safari', (await page.textContent('.page')).includes('Tap the Share button'));
 await shot('11-settings');
-check('settings explain that the Home Screen icon only changes when the app is added again', /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
+// #103: one heading colour, Training and Gyms first, the rest behind links.
+{
+  const heads = await page.$$eval('.settings-main > h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
+  const order = heads.slice(1).map(([t]) => t);
+  check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
+  check("Settings links to Routines, data, help and What's new instead of showing them inline", ['Manage routines', 'Export all sets as CSV', 'Import from Fitbod', 'Add to your Home Screen', "What's new"].every((t) => links.includes(t)) && (await page.locator('[data-list=routines]').count()) === 0 && !(await page.textContent('.page')).includes('Tap the Share button'), links.join());
+  await page.click('.link-row:has-text("Add to your Home Screen")');
+  await page.waitForSelector('.install-help');
+  check('the Home Screen link opens the install steps', (await page.textContent('.page')).includes('Tap the Share button') && /remove ThoeneFit from the Home Screen and add it again/.test(await page.textContent('.page')));
+  await shot('11b-settings-install');
+  await page.click('.back:has-text("Settings")');
+  await page.waitForSelector('.settings-main');
+}
 
 console.log("What's new");
 await page.click('.app-version a');
@@ -871,8 +897,10 @@ console.log('Saved routines');
   await page.waitForSelector('.plan-row');
   check('afterwards Today goes back to a suggested workout', (await page.locator('.routine-note').count()) === 0);
 
-  // Rename and delete in Settings.
+  // Rename and delete, from Settings → Manage routines (#103).
   await page.goto(`${URL}#/settings`);
+  check('Settings shows how many routines are saved', /1 saved/.test(await page.textContent('.link-row:has-text("Manage routines")')));
+  await page.click('.link-row:has-text("Manage routines")');
   await page.waitForSelector('[data-list=routines] .routine-row');
   await page.locator('.routine-row', { hasText: 'Monday Push' }).locator('button:has-text("Rename")').click();
   await page.fill('.sheet input[name=routine_name]', 'Push A');
@@ -968,9 +996,11 @@ if (!process.env.TF_URL) {
   const phone = await signIn(phoneCtx);
   const laptop = await signIn(laptopCtx);
   await phone.goto(`${URL}#/settings`);
+  await phone.click('.link-row:has-text("Change password")');
+  await phone.waitForSelector('input[autocomplete=current-password]');
   await phone.fill('input[autocomplete=current-password]', 'buddy-password-1');
   await phone.fill('input[autocomplete=new-password]', 'buddy-password-3');
-  await phone.click('button:has-text("Change password")');
+  await phone.click('button[type=submit]:has-text("Change password")');
   await waitForToast(phone, /Password changed/).catch(() => {});
   check('changing the password says other devices are signed out', /Other devices are signed out/.test(await phone.textContent('.toast')));
   // The device that made the change keeps working: a write needs its new session and security token.
@@ -1196,14 +1226,84 @@ console.log("Seeing each other's history");
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;
+  const plain = [];
   for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
     await page.goto(`${URL}#/${tab}`);
     await page.waitForSelector('.tabs');
     await page.waitForTimeout(250);
     worst = Math.max(worst, await overflow());
+    if ((await page.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
   }
+  if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Send feedback');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('.settings-main');
+  check('without a GitHub token there is no Send feedback option', (await page.locator('.link-row:has-text("Send feedback")').count()) === 0);
+  // The test server has no token, so stand in for GitHub at the API's edge.
+  const fctx = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await fctx.addInitScript(() => { try { localStorage.setItem('tf.install', JSON.stringify({ never: true })); } catch (e) { /* about:blank */ } });
+  const sentList = [{ id: 1, kind: 'problem', title: 'Rest timer stops when the screen locks', issue_number: 41, issue_url: 'https://github.com/levitatedd/thoenefit/issues/41', status: 'done', created_at: '2026-11-10T12:00:00Z' }];
+  let failNext = true;
+  let lastSent = null;
+  await fctx.route('**/api.php?a=*', async (route) => {
+    const action = new globalThis.URL(route.request().url()).searchParams.get('a');
+    if (action === 'bootstrap') {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (json.user) json.feedback_enabled = true;
+      return route.fulfill({ response, json });
+    }
+    if (action === 'feedback') return route.fulfill({ json: { feedback: sentList } });
+    if (action === 'all_feedback') return route.fulfill({ json: { feedback: sentList.map((f) => ({ ...f, from: 'E2E', username: 'e2e' })) } });
+    if (action === 'send_feedback') {
+      lastSent = route.request().postDataJSON();
+      if (failNext) {
+        failNext = false;
+        return route.fulfill({ status: 502, json: { error: 'Your feedback could not be sent right now. Try again in a few minutes.' } });
+      }
+      sentList.unshift({ id: 2, kind: lastSent.kind, title: lastSent.title, issue_number: 42, issue_url: 'https://github.com/levitatedd/thoenefit/issues/42', status: 'sent', created_at: new Date().toISOString() });
+      return route.fulfill({ json: { sent: sentList[0], feedback: sentList } });
+    }
+    return route.continue();
+  });
+  const fp = await fctx.newPage();
+  fp.on('pageerror', (e) => errors.push(String(e)));
+  await fp.goto(URL);
+  await fp.fill('input[name=username]', USER);
+  await fp.fill('input[name=password]', PASS);
+  await fp.click('button[type=submit]');
+  await fp.waitForSelector('.tabs');
+  await fp.goto(`${URL}#/settings`);
+  await fp.waitForSelector('.link-row:has-text("Send feedback")');
+  check('with a token, Settings → Help offers Send feedback', true);
+  await fp.click('.link-row:has-text("Send feedback")');
+  await fp.waitForSelector('.feedback-row');
+  check('it warns that feedback is public, under the button', /posted publicly on GitHub\. Don't include personal details\./.test(await fp.textContent('.public-note')));
+  check('what you sent is listed with its status', /Rest timer stops/.test(await fp.textContent('.feedback-row')) && (await fp.textContent('.status-pill.done')) === 'Done');
+  await fp.click('.choice:has-text("Problem")');
+  await fp.fill('input[name=feedback_title]', 'Swap button is hard to hit');
+  await fp.fill('textarea[name=feedback_body]', 'On a small phone I keep tapping Lock instead.');
+  await fp.click('button[type=submit]:has-text("Send feedback")');
+  await fp.waitForSelector('.form-error:not(:empty)');
+  check('if it cannot be sent, it says so and keeps what was typed', /could not be sent/.test(await fp.textContent('.form-error')) && (await fp.inputValue('input[name=feedback_title]')) === 'Swap button is hard to hit' && /Lock instead/.test(await fp.inputValue('textarea[name=feedback_body]')));
+  await fp.click('button[type=submit]:has-text("Send feedback")');
+  await waitForToast(fp, /Thanks, your feedback was sent/);
+  check('sending it thanks you, clears the form and lists it as Sent', (await fp.inputValue('input[name=feedback_title]')) === '' && /Swap button/.test(await fp.textContent('.feedback-row')) && (await fp.textContent('.feedback-row .status-pill')) === 'Sent');
+  check('the app sends the type, title and details', lastSent?.kind === 'problem' && lastSent?.title === 'Swap button is hard to hit' && /Lock instead/.test(lastSent?.body), JSON.stringify(lastSent));
+  check('no sideways scrolling on Send feedback', (await fp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await fp.screenshot({ path: `${SHOTS}/26-send-feedback.png`, fullPage: true });
+  await fp.goto(`${URL}#/settings/users`);
+  await fp.waitForSelector('.feedback-list .feedback-row');
+  check("the admin's Manage users lists feedback with who sent it", /E2E/.test(await fp.textContent('.feedback-list')));
+  await fp.locator('.feedback-list').scrollIntoViewIfNeeded();
+  if (SHOTS) await fp.screenshot({ path: `${SHOTS}/27-admin-feedback.png` });
+  await fctx.close();
+}
+
 console.log('Sign out and clear local data');
 {
   await page.setViewportSize({ width: 402, height: 874 });

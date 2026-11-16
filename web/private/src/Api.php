@@ -14,6 +14,7 @@ final class Api
     private Shares $shares;
     private Routines $routines;
     private Strava $strava;
+    private Feedback $feedback;
 
     public static function handle(): void
     {
@@ -42,6 +43,7 @@ final class Api
         $this->shares = new Shares($app->db);
         $this->routines = new Routines($app->db);
         $this->strava = new Strava($app->db, $app->config);
+        $this->feedback = new Feedback($app->db, $app->config);
     }
 
     private static function json($data, int $status = 200): void
@@ -147,6 +149,12 @@ final class Api
                 'incoming' => $this->shares->incoming($uid),
                 'outgoing' => $this->shares->outgoing($uid, (string) ($_GET['key'] ?? '')),
             ],
+            // Feedback sent as GitHub issues (#20): your own, and everyone's for the admin.
+            'feedback' => fn() => ['feedback' => $this->feedback->mine($uid)],
+            'all_feedback' => function () use ($user) {
+                Auth::requireAdmin($user);
+                return ['feedback' => $this->feedback->all()];
+            },
             'users' => function () use ($user) {
                 Auth::requireAdmin($user);
                 return $this->accounts();
@@ -219,6 +227,10 @@ final class Api
             case 'reactivate_user':
                 $this->auth->reactivate($user, (int) ($in['id'] ?? 0));
                 self::json($this->accounts());
+                return;
+            case 'send_feedback':
+                $sent = $this->feedback->send($uid, (string) ($in['kind'] ?? ''), (string) ($in['title'] ?? ''), (string) ($in['body'] ?? ''), APP_VERSION);
+                self::json(['sent' => $sent, 'feedback' => $this->feedback->mine($uid)]);
                 return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
@@ -451,6 +463,7 @@ final class Api
             'shares' => $this->shares->incoming($uid),
             'routines' => $this->routines->all($uid),
             'strava' => $this->strava->connection($uid),
+            'feedback_enabled' => $this->feedback->enabled(),
             'vocab' => [
                 'equipment' => Catalog::equipment(),
                 'equipment_alternatives' => Catalog::EQUIPMENT_ALTERNATIVES,
