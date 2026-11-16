@@ -1275,6 +1275,17 @@ console.log('Pause and resume a workout');
   await page.click('.back-to-workout');
   await page.waitForSelector('.paused-banner');
   check('the bar goes back to the workout, with the logged set kept', (await page.locator('.set.done').count()) === 1);
+  // From another tab, the Resume / Pause button also goes back to the workout.
+  await page.click('.tab:has-text("Trends")');
+  await page.waitForSelector('.back-to-workout');
+  await page.locator('.pause-tab').click();
+  await waitForToast(page, /Workout resumed/);
+  check('tapping Resume on another tab resumes and goes back to the workout', (await page.evaluate(() => location.hash)) === '#/workout' && (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.set.done').count()) === 1);
+  await page.click('.tab:has-text("Exercises")');
+  await page.waitForSelector('.back-to-workout');
+  await page.locator('.pause-tab').click();
+  await waitForToast(page, /Workout paused/);
+  check('tapping Pause on another tab pauses and goes back to the workout', (await page.evaluate(() => location.hash)) === '#/workout' && (await page.locator('.paused-banner').count()) === 1);
   await page.click('.paused-banner button:has-text("Resume")');
   await waitForToast(page, /Workout resumed/);
   check('Resume clears the pause', (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Pause workout');
