@@ -10,9 +10,15 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 ## Screenshots
 
-| Workout planner | Set logging | Exercise history |
+| Workout planner | Workout in progress | Exercise progress |
 | :---: | :---: | :---: |
-| <a href="docs/screenshots/workout-planner.jpg"><img src="docs/screenshots/workout-planner.jpg" width="250" alt="Push workout with suggested weights and exercises"></a> | <a href="docs/screenshots/set-logging.jpg"><img src="docs/screenshots/set-logging.jpg" width="250" alt="Completed sets and the active rest timer"></a> | <a href="docs/screenshots/exercise-history.jpg"><img src="docs/screenshots/exercise-history.jpg" width="250" alt="Leg Extension history and top-weight trend chart"></a> |
+| <a href="docs/screenshots/workout-planner.jpg"><img src="docs/screenshots/workout-planner.jpg" width="250" alt="Today screen at Downtown Gym: a Push workout of 7 exercises, about 43 minutes, with Barbell Bench Press suggested at 120 lb after 115 lb × 10, 10, 10 last time"></a> | <a href="docs/screenshots/workout-in-progress.jpg"><img src="docs/screenshots/workout-in-progress.jpg" width="250" alt="Push workout in progress: two Barbell Bench Press sets done at 120 lb, the first Overhead Press set up next, and the rest timer counting down"></a> | <a href="docs/screenshots/exercise-progress.jpg"><img src="docs/screenshots/exercise-progress.jpg" width="250" alt="Barbell Bench Press history: top weight rising from 95 to 115 lb, with the Oct 31 session selected showing 110 lb × 10, 10, 10"></a> |
+
+| Trends | Saved routines | Shared workout |
+| :---: | :---: | :---: |
+| <a href="docs/screenshots/trends.jpg"><img src="docs/screenshots/trends.jpg" width="250" alt="Trends: weekly lifting volume and workout time over eight weeks, and the recovery estimate for each muscle group"></a> | <a href="docs/screenshots/saved-routines.jpg"><img src="docs/screenshots/saved-routines.jpg" width="250" alt="The Workout picker open on Your routines: Back and Biceps, Heavy Legs and Monday Push"></a> | <a href="docs/screenshots/shared-workout.jpg"><img src="docs/screenshots/shared-workout.jpg" width="250" alt="Sam's Today screen after accepting Alex Rivera's workout: Shared by Alex Rivera, with weights suggested from Sam's own history"></a> |
+
+Sample data: Alex Rivera and Sam Lee are made-up people at a made-up gym. Tap a preview to open it at full size. To refresh these, see the steps at the top of [`docs/screenshots/capture.mjs`](docs/screenshots/capture.mjs).
 
 ## Plan and log
 
