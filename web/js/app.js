@@ -612,6 +612,7 @@ function blockToEntry(b) {
     suggested_weight: b.suggested_weight,
     reason: b.reason,
     previous: b.previous || null,
+    note: b.note || null,
     target_seconds: b.target_seconds ?? null,
     per_side: perSideStretch(b),
     sets: isStretch(b)
@@ -1121,11 +1122,40 @@ function lastLine(previous) {
   return `Last: ${fmtSets(previous.sets, previous.unit)} on ${fmtDate(previous.date, thisYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
+/** A saved setup note (#125), shown under Last. onEdit makes it tappable. */
+function noteLine(note, onEdit) {
+  if (!note) return null;
+  const body = [icon('pencil', 16), h('span', {}, note)];
+  return onEdit
+    ? h('button', { type: 'button', class: 'setup-note', 'aria-label': `Setup note: ${note}. Tap to edit`, onclick: onEdit }, ...body)
+    : h('p', { class: 'setup-note' }, ...body);
+}
+
+/** Add, change or clear an exercise's setup note during a workout. It rides on the workout, so it saves offline. */
+function noteSheet(e, edit) {
+  const gymOnly = ['machine', 'cable'].includes(e.kind);
+  const input = h('textarea', { name: 'setup_note', rows: 3, maxlength: 200, placeholder: 'For example: seat on 4, wide handle' }, e.note || '');
+  const save = (value) => {
+    close();
+    edit((d) => {
+      const t = d.exercises.find((x) => x.id === e.id);
+      t.note = value || null;
+      t.setup_note = value;
+    });
+    toast(value ? 'Setup note saved.' : 'Setup note cleared.');
+  };
+  const close = sheet(e.note ? 'Edit setup note' : 'Add setup note', h('form', { class: 'stack', onsubmit: (ev) => { ev.preventDefault(); save(input.value.trim()); } },
+    field(e.name, input, `Shown next time ${e.name} comes up${gymOnly ? ' at this gym, since machine and cable settings differ between gyms' : ''}. Only you can see it.`),
+    h('button', { class: 'btn primary block', type: 'submit' }, 'Save note'),
+    e.note && h('button', { class: 'btn block', type: 'button', onclick: () => save('') }, 'Clear note')));
+  input.focus();
+}
+
 function planRow(b, gym) {
   return h(
     'li',
     { class: 'plan-row' },
-    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
     !S.draft.share_id && !S.draft.routine_id && h(
       'div',
       { class: 'plan-actions' },
@@ -1617,6 +1647,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       'div',
       { class: 'stack' },
       ex && ex.cues && h('p', { class: 'cues' }, ex.cues),
+      h('button', { type: 'button', class: 'btn block', onclick: () => { close(); noteSheet(e, edit); } }, icon('pencil', 18), e.note ? 'Edit setup note' : 'Add setup note'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === 0, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx - 1)); } }, icon('up', 18), 'Move earlier'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === doc.exercises.length - 1, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx + 1)); } }, icon('down', 18), 'Move later'),
       h('button', { type: 'button', class: 'btn block', disabled: !doc.gym_id, onclick: () => {
@@ -1634,7 +1665,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
     'section',
     { class: `card lift ${e.sets.length && e.sets.every((s) => s.done) ? 'complete' : ''}` },
     h('header', { class: 'lift-head' },
-      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), !stretch && h('p', { class: 'last' }, lastLine(e.previous))),
+      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), !stretch && h('p', { class: 'last' }, lastLine(e.previous)), noteLine(e.note, () => noteSheet(e, edit))),
       h('button', { type: 'button', class: 'btn square ghost', 'aria-label': `Options for ${e.name}`, onclick: menu }, icon('more')),
     ),
     e.reason && h('details', { class: 'why-fold' }, h('summary', {}, 'Why this'), h('p', { class: 'why' }, e.reason)),

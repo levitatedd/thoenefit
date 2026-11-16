@@ -1538,6 +1538,70 @@ console.log('Workout recap and records (#123)');
   }, [hist.id, earlier]);
 }
 
+console.log('Setup notes (#125)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  const day = await page.inputValue('select[aria-label="Workout type"]');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const card = page.locator('.lift', { has: page.locator('.set:not(.cardio):not(.stretch)') }).first();
+  const name = (await card.locator('h2').textContent()).trim();
+  check('a lift with no note shows none', (await card.locator('.setup-note').count()) === 0);
+  // Write it with no signal: the note rides on the workout and syncs later.
+  await context.setOffline(true);
+  await card.locator('button[aria-label^="Options for"]').click();
+  await page.click('.sheet button:has-text("Add setup note")');
+  await page.fill('.sheet textarea[name=setup_note]', 'Seat on 4, wide handle');
+  await shot('38-setup-note-sheet');
+  await page.click('.sheet button:has-text("Save note")');
+  check('the note shows under Last on the workout card straight away, even offline', (await card.locator('.setup-note').textContent()).trim() === 'Seat on 4, wide handle');
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForSelector('#sync.saved', { timeout: 20000 }).catch(() => {});
+  // Tap the note to change it.
+  await card.locator('.setup-note').click();
+  await page.fill('.sheet textarea[name=setup_note]', 'Seat on 5, wide handle');
+  await page.click('.sheet button:has-text("Save note")');
+  const row = card.locator('.set').first();
+  if (!(await row.locator('input').nth(0).inputValue())) await row.locator('input').nth(0).fill('50');
+  if (!(await row.locator('input').nth(1).inputValue())) await row.locator('input').nth(1).fill('8');
+  await row.locator('.plate').click();
+  await card.scrollIntoViewIfNeeded();
+  await shot('39-setup-note-card');
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
+  // The next matching workout shows it without opening History.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', day);
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const planRow = page.locator('.plan-row', { hasText: name }).first();
+  check(`the next ${day} plan shows the updated note under ${name}`, (await planRow.count()) === 1 && (await planRow.locator('.setup-note').textContent()).trim() === 'Seat on 5, wide handle', name);
+  await planRow.scrollIntoViewIfNeeded();
+  await shot('40-setup-note-plan');
+  check('no sideways scrolling with a note', (await overflow()) <= 0);
+  // Clear it from the next workout, so the rest of the walk-through starts clean.
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  await page.locator('.lift', { hasText: name }).first().locator('.setup-note').click();
+  await page.click('.sheet button:has-text("Clear note")');
+  check('a note can be cleared', (await page.locator('.lift', { hasText: name }).first().locator('.setup-note').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+  const hist = (await api('history&limit=1')).workouts[0];
+  await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, hist.id);
+}
+
 console.log('Send feedback');
 {
   await page.setViewportSize({ width: 402, height: 874 });

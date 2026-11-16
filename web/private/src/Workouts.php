@@ -64,6 +64,7 @@ final class Workouts
 
         $exRows = [];
         $setRows = [];
+        $notes = []; // history key => setup note, for entries that carry one (#125)
         $exercises = is_array($d['exercises'] ?? null) ? array_values($d['exercises']) : [];
         if (count($exercises) > 40) {
             throw new HttpError(422, 'A workout can hold at most 40 exercises.');
@@ -83,6 +84,9 @@ final class Workouts
             $repMax = max($repMin, min(100, (int) ($e['rep_max'] ?? 12)));
             $sugg = $e['suggested_weight'] ?? null;
             $targetSeconds = $e['target_seconds'] ?? null;
+            if (array_key_exists('setup_note', $e)) {
+                $notes[Catalog::variantKey($exId, $kinds[$exId], $gymId)] = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $e['setup_note'])), 0, 200);
+            }
             $exRows[] = [
                 'id' => $weId,
                 'workout_id' => $id,
@@ -153,7 +157,14 @@ final class Workouts
             'updated_at' => now_utc(),
         ];
 
-        $this->db->tx(function (Db $db) use ($id, $uid, $existing, $row, $exRows, $setRows, $status) {
+        $this->db->tx(function (Db $db) use ($id, $uid, $existing, $row, $exRows, $setRows, $status, $notes) {
+            // Setup notes ride on the workout so they can be written offline (#125). Empty clears.
+            foreach ($notes as $key => $note) {
+                $db->run('DELETE FROM exercise_notes WHERE user_id=? AND variant_key=?', [$uid, $key]);
+                if ($note !== '') {
+                    $db->insert('exercise_notes', ['user_id' => $uid, 'variant_key' => $key, 'note' => $note, 'updated_at' => now_utc()]);
+                }
+            }
             if ($existing) {
                 $db->update('workouts', $row, 'id=?', [$id]);
             } else {
@@ -465,6 +476,27 @@ final class Workouts
     }
 
     private const LB_PER_KG = 2.20462262;
+
+    /** Setup notes (#125) by history key. */
+    public function notes(int $uid): array
+    {
+        $out = [];
+        foreach ($this->db->all('SELECT variant_key, note FROM exercise_notes WHERE user_id=?', [$uid]) as $r) {
+            $out[$r['variant_key']] = $r['note'];
+        }
+        return $out;
+    }
+
+    /** Adds each exercise's setup note (or null) to a plan or workout's exercises. */
+    public function withNotes(int $uid, array $exercises): array
+    {
+        $notes = $this->notes($uid);
+        foreach ($exercises as &$e) {
+            $e['note'] = isset($e['variant_key']) ? ($notes[$e['variant_key']] ?? null) : null;
+        }
+        unset($e);
+        return $exercises;
+    }
 
     /**
      * A finished workout's recap (#123): its working sets, and for each lift
