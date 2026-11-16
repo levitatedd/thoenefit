@@ -1260,8 +1260,146 @@ input[type="file"] {
   text-decoration: none;
 }
 
+.tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 30px;
+  border-radius: 999px;
+  transition: background-color 0.15s ease;
+}
+
+/* The selected tab (#111): a mint pill behind the icon and a bolder mint label,
+   so it reads at a glance rather than by colour alone. */
 .tab[aria-current="page"] {
   color: var(--mint);
+  font-weight: 700;
+}
+
+.tab[aria-current="page"] .tab-icon {
+  background: rgba(58, 242, 156, 0.18);
+}
+
+/* During a workout the Today spot is Pause / Play (#111). */
+.pause-tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--mint);
+}
+
+.pause-tab .tab-icon {
+  background: rgba(58, 242, 156, 0.10);
+  box-shadow: inset 0 0 0 1.5px rgba(58, 242, 156, 0.45);
+}
+
+.pause-tab.paused {
+  color: var(--yellow);
+}
+
+.pause-tab.paused .tab-icon,
+.pause-tab.paused[aria-current="page"] .tab-icon {
+  background: var(--yellow);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.pause-tab:active .tab-icon {
+  transform: scale(0.94);
+}
+
+/* On other tabs during a workout: the way back to it. */
+.back-to-workout {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: #16352a;
+  box-shadow: inset 0 0 0 1px rgba(58, 242, 156, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--chalk);
+  text-decoration: none;
+}
+
+.back-to-workout.paused {
+  background: #3a3216;
+  box-shadow: inset 0 0 0 1px rgba(245, 198, 60, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.btw-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.btw-label strong {
+  font: 700 17px/1.2 var(--display);
+}
+
+.btw-label > span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.back-to-workout.paused .btw-label > span {
+  color: var(--yellow);
+  font-weight: 600;
+}
+
+.btw-go {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--mint);
+  font-weight: 700;
+}
+
+.btw-go .icon {
+  transform: rotate(180deg);
+}
+
+/* The workout screen while paused. */
+.paused-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #3a3216;
+  box-shadow: inset 0 0 0 1px rgba(245, 198, 60, 0.5);
+}
+
+.paused-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.paused-banner strong {
+  color: var(--yellow);
+  font: 700 19px/1.2 var(--display);
+}
+
+.paused-banner .btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.elapsed.paused {
+  color: var(--yellow);
 }
 
 /* ---- sheets and toasts ---- */

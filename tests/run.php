@@ -1026,6 +1026,44 @@ check('ISO and stored UTC times read the same, whatever the server timezone', (f
     return $len($a) === 55 * 60 && $a['start'] === strtotime('2026-11-01T23:00:00Z');
 })());
 
+echo "Pausing a workout\n";
+check('paused time is taken off the training time', $span('2026-11-01 10:00:00', '2026-11-01 11:00:00', '2026-11-01 10:05:00', '2026-11-01 10:55:00', 600)['seconds'] === 3000);
+check('without a pause, training time is start to finish as before', $span('2026-11-01 10:00:00', '2026-11-01 11:00:00', '2026-11-01 10:05:00', '2026-11-01 10:55:00')['seconds'] === 3600);
+check('a pause as long as the whole workout leaves no duration', $span('2026-11-01 10:00:00', '2026-11-01 10:10:00', null, null, 600) === null);
+$pauser = $auth->createUser('pauser', 'pauser long password');
+$pd = $doc($big, 'push', [[$bench, 6, 10, [[135, 8]]]], '2026-11-01T10:00:00Z', 'active');
+$pd['paused_s'] = 300;
+$pd['paused_at'] = '2026-11-01T10:30:00Z';
+$wk->save($pauser, $pd);
+$got = $wk->get($pauser, $pd['id']);
+check('a paused workout keeps its pause on the server, for other devices', $got['paused_s'] === 300 && $got['paused_at'] === '2026-11-01T10:30:00Z' && count($got['exercises'][0]['sets']) === 1);
+$pd['paused_at'] = null;
+$pd['paused_s'] = 900;
+$pd['rev'] = 2;
+$wk->save($pauser, $pd);
+$got = $wk->get($pauser, $pd['id']);
+check('resuming clears the pause and keeps the total', $got['paused_s'] === 900 && $got['paused_at'] === null);
+$pd['paused_at'] = '2026-11-01T10:40:00Z';
+$pd['status'] = 'completed';
+$pd['completed_at'] = '2026-11-01T10:45:00Z';
+$pd['exercises'][0]['sets'][0]['done_at'] = '2026-11-01T10:20:00Z';
+$pd['rev'] = 3;
+$wk->save($pauser, $pd);
+$got = $wk->get($pauser, $pd['id']);
+check('finishing while paused counts the pause up to the finish', $got['paused_s'] === 1200 && $got['paused_at'] === null && $got['status'] === 'completed');
+check('the workout duration leaves out the paused time', TF\Workouts::workoutSpan($got)['seconds'] === 2700 - 1200);
+check('junk pause values are ignored', (function () use ($wk, $pauser, $doc, $big, $bench) {
+    $j = $doc($big, 'push', [[$bench, 6, 10, [[135, 8]]]], '2026-11-02T10:00:00Z', 'active');
+    $j['paused_s'] = -50;
+    $j['paused_at'] = 'not a time';
+    $wk->save($pauser, $j);
+    $g = $wk->get($pauser, $j['id']);
+    $wk->delete($pauser, $j['id']);
+    return $g['paused_s'] === 0 && $g['paused_at'] === null;
+})());
+$wk->delete($pauser, $pd['id']);
+$db->run('DELETE FROM users WHERE id=?', [$pauser]);
+
 echo "Weekly training trends\n";
 $trendsUid = $auth->createUser('trends-user', 'trends-user-123');
 $trendsGym = $mkGym($trendsUid, 'Trends gym', ['barbell', 'bench']);

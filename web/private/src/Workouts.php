@@ -48,6 +48,14 @@ final class Workouts
         $unit = ($d['unit'] ?? 'lb') === 'kg' ? 'kg' : 'lb';
         $started = norm_time($d['started_at'] ?? null) ?? now_utc();
         $completed = $status === 'completed' ? (norm_time($d['completed_at'] ?? null) ?? now_utc()) : null;
+        // Paused time (#111) is left out of the workout's duration. A workout finished
+        // while paused counts the pause up to the finish.
+        $pausedS = is_numeric($d['paused_s'] ?? null) ? max(0, min(172800, (int) $d['paused_s'])) : 0;
+        $pausedAt = norm_time($d['paused_at'] ?? null);
+        if ($pausedAt !== null && $completed !== null) {
+            $pausedS = min(172800, $pausedS + max(0, (int) (self::ts($completed) - self::ts($pausedAt))));
+            $pausedAt = null;
+        }
 
         $kinds = [];
         foreach ($this->db->all('SELECT id, kind FROM exercises WHERE user_id IS NULL OR user_id=?', [$uid]) as $r) {
@@ -139,6 +147,8 @@ final class Workouts
             'notes' => isset($d['notes']) ? mb_substr((string) $d['notes'], 0, 2000) : null,
             // How hard it felt, chosen when finishing (#38). Used for the calorie estimate.
             'effort' => isset(Calories::EFFORTS[$d['effort'] ?? '']) ? $d['effort'] : null,
+            'paused_s' => $pausedS,
+            'paused_at' => $pausedAt,
             'rev' => $rev,
             'updated_at' => now_utc(),
         ];
@@ -233,6 +243,8 @@ final class Workouts
             'completed_at' => to_iso($w['completed_at']),
             'notes' => $w['notes'],
             'effort' => $w['effort'] ?? null,
+            'paused_s' => (int) ($w['paused_s'] ?? 0),
+            'paused_at' => to_iso($w['paused_at'] ?? null),
             'rev' => (int) $w['rev'],
             'exercises' => [],
         ];
@@ -334,11 +346,14 @@ final class Workouts
      * finished long after its last one (left open overnight, say), keeps only
      * IDLE_EDGE of that gap. Gaps up to IDLE_GAP are left as they are.
      *
+     * Time spent paused (#111) is then taken off: `seconds` is the training time,
+     * which is what durations, calories and Strava use.
+     *
      * @param string|null $firstDone time the earliest completed set was logged
      * @param string|null $lastDone  time the latest completed set was logged
-     * @return array{start: int, end: int}|null null when there is no positive duration
+     * @return array{start: int, end: int, seconds: int}|null null when there is no positive duration
      */
-    public static function activeSpan(?string $startedAt, ?string $completedAt, ?string $firstDone = null, ?string $lastDone = null): ?array
+    public static function activeSpan(?string $startedAt, ?string $completedAt, ?string $firstDone = null, ?string $lastDone = null, int $pausedS = 0): ?array
     {
         $start = self::ts($startedAt);
         $end = self::ts($completedAt);
@@ -353,7 +368,8 @@ final class Workouts
         if ($last !== null && $end - $last > self::IDLE_GAP) {
             $end = max($start, $last + self::IDLE_EDGE);
         }
-        return $end > $start ? ['start' => $start, 'end' => $end] : null;
+        $seconds = $end - $start - max(0, $pausedS);
+        return $seconds > 0 ? ['start' => $start, 'end' => $end, 'seconds' => $seconds] : null;
     }
 
     /** activeSpan() for a workout as returned by get(). */
@@ -368,7 +384,7 @@ final class Workouts
             }
         }
         $iso = static fn(?int $t) => $t === null ? null : gmdate('Y-m-d\TH:i:s\Z', $t);
-        return self::activeSpan($workout['started_at'] ?? null, $workout['completed_at'] ?? null, $iso($times ? min($times) : null), $iso($times ? max($times) : null));
+        return self::activeSpan($workout['started_at'] ?? null, $workout['completed_at'] ?? null, $iso($times ? min($times) : null), $iso($times ? max($times) : null), (int) ($workout['paused_s'] ?? 0));
     }
 
     /** Eight Monday-start weeks in the user's timezone, grouped by workout start. */
@@ -388,13 +404,13 @@ final class Workouts
             $weeks[$start] = ['start' => $start, 'workouts' => 0, 'volume' => 0.0, 'seconds' => null];
         }
         $workouts = $this->db->all(
-            "SELECT w.id, w.started_at, w.completed_at, w.unit,
+            "SELECT w.id, w.started_at, w.completed_at, w.unit, w.paused_s,
                     SUM(CASE WHEN s.warmup=0 THEN s.weight * s.reps ELSE 0 END) AS volume,
                     MIN(s.done_at) AS first_done, MAX(s.done_at) AS last_done
              FROM workouts w
              LEFT JOIN workout_sets s ON s.workout_id=w.id AND s.done=1
              WHERE w.user_id=? AND w.status='completed' AND w.started_at BETWEEN ? AND ?
-             GROUP BY w.id, w.started_at, w.completed_at, w.unit",
+             GROUP BY w.id, w.started_at, w.completed_at, w.unit, w.paused_s",
             [$uid, now_utc($first->getTimestamp()), now_utc($now)]
         );
         foreach ($workouts as $w) {
@@ -408,8 +424,8 @@ final class Workouts
             $weeks[$key]['volume'] += $volume;
             // Idle time before the first set or after the last is removed, and a
             // workout still over MAX_COUNTED is left out, like one with no duration.
-            $span = self::activeSpan($w['started_at'], $w['completed_at'], $w['first_done'], $w['last_done']);
-            $elapsed = $span ? $span['end'] - $span['start'] : 0;
+            $span = self::activeSpan($w['started_at'], $w['completed_at'], $w['first_done'], $w['last_done'], (int) $w['paused_s']);
+            $elapsed = $span ? $span['seconds'] : 0;
             if ($elapsed > 0 && $elapsed <= self::MAX_COUNTED) {
                 $weeks[$key]['seconds'] = ($weeks[$key]['seconds'] ?? 0) + $elapsed;
             }

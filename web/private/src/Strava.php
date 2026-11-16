@@ -354,7 +354,7 @@ final class Strava
             'name' => $label . ' at ' . $workout['gym_name'],
             'sport_type' => 'WeightTraining',
             'start_date_local' => gmdate('Y-m-d\TH:i:s\Z', $span['start']),
-            'elapsed_time' => $span['end'] - $span['start'],
+            'elapsed_time' => $span['seconds'],
         ];
     }
 

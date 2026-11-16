@@ -47,7 +47,7 @@ final class Calories
             return null;
         }
         $span = Workouts::workoutSpan($workout);
-        $seconds = $span ? $span['end'] - $span['start'] : 0;
+        $seconds = $span ? $span['seconds'] : 0;
         if ($seconds < 60 || $seconds > Workouts::MAX_COUNTED) { // under a minute: nothing worth estimating
             return null;
         }
