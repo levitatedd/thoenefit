@@ -68,6 +68,14 @@ const waitForToast = (pg, text) => pg.waitForFunction((src) => {
   return !!t && t.classList.contains('show') && new RegExp(src).test(t.textContent);
 }, text.source);
 const shot = async (name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png` });
+// Finishing shows a recap sheet (#123). Waits for it to finish loading, closes it, and returns its text.
+const closeRecap = async (pg) => {
+  await pg.waitForSelector('.sheet h2:has-text("Workout saved")');
+  await pg.waitForFunction(() => !/Checking for new records/.test(document.querySelector('.sheet')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
+  const text = await pg.textContent('.sheet');
+  await pg.click('.sheet button:has-text("Close")');
+  return text;
+};
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
 console.log('Sign in and onboarding');
@@ -323,6 +331,14 @@ await shot('07b-finish-send-to-strava');
 await page.click('.sheet button:has-text("Finish and save")');
 await waitForToast(page, /Workout saved/);
 check('the message says it goes to Strava once it syncs', /goes to Strava once it syncs/.test(await page.textContent('.toast')));
+{
+  await page.waitForSelector('.sheet h2:has-text("Workout saved")');
+  check('finishing shows a recap with the working sets, straight away (#123)', /\d+ working sets? (logged|across)/.test(await page.textContent('.sheet')));
+  await page.waitForSelector('.sheet .recap', { timeout: 20000 });
+  check('once synced, a first workout lists its lifts as first logged results, not records', /First logged/.test(await page.textContent('.sheet')) && (await page.locator('.sheet .badge.record').count()) === 0 && (await page.locator('.sheet .recap-first a.recap-name').count()) > 0);
+  await shot('07c-recap-first');
+  await page.click('.sheet button:has-text("Close")');
+}
 for (let i = 0; i < 40 && !finishSave; i++) await page.waitForTimeout(250);
 page.off('request', watchSave);
 await context.unroute('**/api.php?a=bootstrap*', connected);
@@ -758,6 +774,7 @@ check('the sender can see that their partner has started', /Training now/.test(a
 await page.click('.sheet button:has-text("Close")');
 await pp.click('button:has-text("Finish workout")');
 await pp.click('.sheet button:has-text("Finish and save")');
+await closeRecap(pp);
 await pp.waitForSelector('.plan-row');
 check('after finishing, the partner is back to their own plan', (await pp.locator('.shared-note').count()) === 0 && (await pp.locator('.share-card').count()) === 0);
 // #36: only the admin can share with the chatgpt account.
@@ -1083,6 +1100,7 @@ if (!process.env.TF_URL) {
   await page.click('.sheet .choice:has-text("Hard")');
   await shot('15-finish-effort');
   await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
   await page.waitForSelector('.plan-row, .page-head');
   await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
   await page.goto(`${URL}#/history`);
@@ -1347,6 +1365,7 @@ console.log('Pause and resume a workout');
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
   await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
   await page.waitForSelector('.plan-row, .page-head');
   await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
   check('after finishing, the Today spot is the normal Today tab again', (await page.locator('.pause-tab').count()) === 0 && (await page.locator('a.tab[href="#/today"]').count()) === 1 && (await page.locator('.back-to-workout').count()) === 0);
@@ -1436,6 +1455,7 @@ console.log('Stretches (#138)');
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
   await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
   await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
   await page.waitForTimeout(800);
   await page.goto(`${URL}#/history`);
@@ -1463,6 +1483,59 @@ console.log('Stretches (#138)');
   await page.waitForSelector('.plan-row');
   await setBox('Include stretches', false);
   await setBox('Include a warm-up', wasWarm);
+}
+
+console.log('Workout recap and records (#123)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const doc = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('tf.docs.'));
+    const st = JSON.parse(localStorage.getItem(key));
+    return st.docs.find((d) => d.id === st.activeId);
+  });
+  const lift = doc.exercises.find((e) => !['cardio', 'stretch'].includes(e.kind));
+  const weight = lift.sets[0].weight || 50;
+  // An earlier workout with the same lift at the same weight for fewer reps, so this one beats it.
+  const earlier = await page.evaluate(async ([ex, w, gym]) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const id = crypto.randomUUID();
+    const at = new Date(Date.now() - 2 * 86400000).toISOString();
+    const body = { workout: { id, gym_id: gym, day_type: 'push', status: 'completed', unit: b.user.unit, started_at: at, completed_at: at, rev: 1,
+      exercises: [{ id: crypto.randomUUID(), exercise_id: ex, rep_min: 6, rep_max: 10, target_sets: 1, sets: [{ id: crypto.randomUUID(), weight: w, reps: 5, warmup: false, done: true, done_at: at }] }] } };
+    await fetch('api.php?a=save_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify(body) });
+    return id;
+  }, [lift.exercise_id, weight, doc.gym_id]);
+  const card = page.locator('.lift', { hasText: lift.name }).first();
+  const row = card.locator('.set').first();
+  await row.locator('input').nth(0).fill(String(weight));
+  await row.locator('input').nth(1).fill('30');
+  await row.locator('.plate').click();
+  await page.waitForTimeout(300);
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForSelector('.sheet .recap', { timeout: 20000 });
+  const recapText = await page.textContent('.sheet');
+  check('the recap counts the working sets, once', (recapText.match(/working set/g) || []).length === 1 && /1 working set across 1 exercise/.test(recapText), recapText);
+  check(`a genuine improvement is called a New record (${lift.name})`, (await page.locator('.sheet .recap-record', { hasText: lift.name }).count()) === 1 && /× 30, (up from \d+ reps at that weight|the heaviest yet)/.test(recapText), recapText);
+  await shot('36-recap-record');
+  await page.locator('.sheet .recap-record a.recap-name').first().click();
+  await page.waitForFunction((n) => document.querySelector('h1')?.textContent === n, lift.name);
+  check('the record links to that exercise\'s history', /#\/exercises\/\d+/.test(await page.evaluate(() => location.hash)) && (await page.locator('.sheet').count()) === 0);
+  const hist = (await api('history&limit=1')).workouts[0];
+  await page.goto(`${URL}#/history/${hist.id}`);
+  await page.waitForSelector('.recap');
+  check('the finished workout in History shows the same recap', (await page.locator('.recap .recap-record', { hasText: lift.name }).count()) === 1);
+  check('no sideways scrolling on the recap', (await overflow()) <= 0);
+  await shot('37-history-recap');
+  await page.evaluate(async (ids) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of ids) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, [hist.id, earlier]);
 }
 
 console.log('Send feedback');
