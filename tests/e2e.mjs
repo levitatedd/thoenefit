@@ -1363,6 +1363,108 @@ console.log('Pause and resume a workout');
   }, id);
 }
 
+console.log('Stretches (#138)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const box = (label) => page.locator(`label.check:has-text("${label}") input`);
+  const settle = async () => { await page.waitForTimeout(300); await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0); };
+  const setBox = async (label, on) => { if ((await box(label).isChecked()) !== on) { await box(label).click(); await settle(); } };
+  const targets = () => page.$$eval('.plan-row .target', (els) => els.map((e) => e.textContent));
+  await page.selectOption('select[aria-label="Workout type"]', 'legs');
+  await settle();
+  const wasWarm = (await box('Include a warm-up').count()) ? await box('Include a warm-up').isChecked() : false;
+  await setBox('Include a warm-up', false);
+  // Ticking a box keeps everything in place while the new plan is built: no box
+  // disappears and nothing below it jumps (#138 feedback).
+  {
+    let release;
+    const held = new Promise((r) => (release = r));
+    await page.route(/a=generate\b/, async (r) => { await held; await r.continue().catch(() => {}); });
+    const y = () => page.evaluate(() => Math.round(document.querySelector('.stepper, .controls .field:last-child').getBoundingClientRect().top));
+    const before = { y: await y(), boxes: await page.locator('.controls label.check').count(), rows: await page.locator('.plan-row').count() };
+    await page.locator('label.check:has-text("Include stretches") input').click();
+    await page.waitForTimeout(250);
+    const during = { y: await y(), boxes: await page.locator('.controls label.check').count(), rows: await page.locator('.plan-row').count(), dim: await page.locator('.stack.loading').count() };
+    release();
+    await page.unroute(/a=generate\b/);
+    await settle();
+    check('while a new plan is built, every box stays and nothing below moves', before.boxes === 3 && during.boxes === 3 && during.y === before.y, JSON.stringify({ before, during }));
+    check('the current plan stays on screen, dimmed, until the new one arrives', during.rows === before.rows && during.dim === 1, JSON.stringify({ before, during }));
+    await page.locator('label.check:has-text("Include stretches") input').click();
+    await settle();
+  }
+  // Bodyweight only keeps the warm-up box: the warm-up becomes dynamic stretches.
+  await setBox('Bodyweight only', true);
+  check('Bodyweight only still offers Include a warm-up', (await box('Include a warm-up').count()) === 1);
+  await setBox('Include a warm-up', true);
+  let bwT = await targets();
+  check('the summary calls it a stretch warm-up', /Stretch warm-up and \d+ exercises/.test(await page.textContent('.summary')), await page.textContent('.summary'));
+  check('a bodyweight-only warm-up is 2 or 3 dynamic stretches, no machine', [2, 3].includes(bwT.filter((x) => /moving/.test(x)).length) && /moving/.test(bwT[0]) && !bwT.some((x) => /min warm-up/.test(x)), bwT.join(' | '));
+  await shot('35-bodyweight-warm-up');
+  await setBox('Include a warm-up', false);
+  await setBox('Bodyweight only', false);
+  check('Include stretches sits with Bodyweight only, off to start with', (await page.locator('.controls label.check:has-text("Include stretches")').count()) === 1 && !(await box('Include stretches').isChecked()) && !(await targets()).some((t) => /^Hold|moving/.test(t)));
+  await setBox('Include stretches', true);
+  let t = await targets();
+  const lastLift = t.map((x) => /sets of/.test(x)).lastIndexOf(true);
+  check('Include stretches by itself: 2 or 3 cooldown stretches after the lifting, no warm-up', [2, 3].includes(t.slice(lastLift + 1).length) && t.slice(lastLift + 1).every((x) => /^Hold \d+ s/.test(x)) && !t.some((x) => /warm-up|moving/.test(x)), t.join(' | '));
+  check('the summary counts the stretches and their time', /\d+ stretches, about \d+ minutes/.test(await page.textContent('.summary')));
+  await setBox('Include a warm-up', true);
+  t = await targets();
+  const kind = (x) => (/warm-up/.test(x) ? 'cardio' : /moving/.test(x) ? 'dynamic' : /^Hold/.test(x) ? 'cooldown' : 'lift');
+  const order = [...new Set(t.map(kind))];
+  const moving = t.filter((x) => /moving/.test(x)).length;
+  check('both boxes: cardio warm-up, 2 or 3 dynamic stretches, lifting, cooldown stretches', order.join() === 'cardio,dynamic,lift,cooldown' && [2, 3].includes(moving), t.join(' | '));
+  await shot('33-stretches-plan');
+  await page.reload();
+  await page.waitForSelector('.plan-row');
+  check('the choice is remembered', await box('Include stretches').isChecked());
+  // Log a stretch: seconds per hold, no rest timer.
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const card = page.locator('.lift', { has: page.locator('.set.stretch') }).first();
+  await card.scrollIntoViewIfNeeded();
+  check('a stretch is logged in seconds, per side when done on each side', (await card.locator('.set-head').textContent()).includes('Seconds') && /^(L|1)$/.test((await card.locator('.set-tag').first().textContent()).trim()));
+  await card.locator('.set.stretch input').first().fill('40');
+  await card.locator('.set.stretch .plate').first().click();
+  await page.waitForTimeout(300);
+  check('completing a hold starts no rest timer', await page.locator('.rest').isHidden() && (await card.locator('.set.stretch.done').count()) === 1);
+  await shot('34-stretch-logging');
+  const stretchName = (await card.locator('h2').textContent()).trim();
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
+  await page.waitForTimeout(800);
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.log-row');
+  check('History lists the logged stretch', (await api('history&limit=1')).workouts[0].exercises.includes(stretchName), stretchName);
+  await page.locator('.log-row').first().click();
+  await page.waitForSelector('.lift');
+  const hcard = page.locator('.lift', { hasText: stretchName });
+  check('the finished workout shows the stretch with its seconds', (await hcard.count()) === 1 && (await hcard.locator('.set.stretch input').first().inputValue()) === '40');
+  const wid = (await page.evaluate(() => location.hash)).split('/').pop();
+  const w = (await api(`workout&id=${wid}`)).workout;
+  const hist = (await api('history&limit=1')).workouts[0];
+  const liftSets = w.exercises.filter((e) => e.kind !== 'stretch' && e.kind !== 'cardio').reduce((n, e) => n + e.sets.filter((x) => x.done && !x.warmup).length, 0);
+  check('stretches add nothing to the workout\'s set count or volume', hist.sets === liftSets, JSON.stringify({ sets: hist.sets, liftSets }));
+  await page.goto(`${URL}#/exercises`);
+  await page.fill('.filters input', 'child');
+  await page.waitForTimeout(300);
+  check("stretches are in the Exercises library (Child's Pose)", (await page.textContent('.page')).includes("Child's Pose"));
+  // Leave the account as the rest of the walk-through expects.
+  await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, wid);
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await setBox('Include stretches', false);
+  await setBox('Include a warm-up', wasWarm);
+}
+
 console.log('Send feedback');
 {
   await page.setViewportSize({ width: 402, height: 874 });

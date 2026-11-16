@@ -15,7 +15,7 @@ const S = {
   vocab: null,
   offlineBoot: false,
   draft: null, // generated workout not started yet
-  draftOpts: { day_type: null, minutes: null, bodyweight_only: false, warm_up: null },
+  draftOpts: { day_type: null, minutes: null, bodyweight_only: false, warm_up: null, stretches: null },
   draftError: null,
   draftLoading: false,
   rest: null, // {endsAt, total}
@@ -546,7 +546,7 @@ function activeGym() {
 async function loadDraft({ regenerate = false } = {}) {
   const gym = activeGym();
   if (!gym) return;
-  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up };
+  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
@@ -613,10 +613,29 @@ function blockToEntry(b) {
     reason: b.reason,
     previous: b.previous || null,
     target_seconds: b.target_seconds ?? null,
-    sets: isCardio(b)
+    per_side: perSideStretch(b),
+    sets: isStretch(b)
+      ? Array.from({ length: b.target_sets }, () => stretchSet(b.target_seconds))
+      : isCardio(b)
       ? [cardioSet(b.target_seconds, b.previous)]
       : Array.from({ length: b.target_sets }, () => ({ id: uuid(), weight: b.suggested_weight, reps: b.suggested_reps, warmup: false, done: false, done_at: null })),
   };
+}
+
+/** One stretch hold (#138), filled in with the planned seconds. */
+function stretchSet(seconds) {
+  return { id: uuid(), weight: null, reps: null, warmup: false, duration_s: seconds || 30, done: false, done_at: null };
+}
+
+/** L / R for a stretch done on each side, otherwise the hold's number. */
+function holdTag(e, si) {
+  return perSideStretch(e) && e.sets.length === 2 ? (si === 0 ? 'L' : 'R') : String(si + 1);
+}
+
+/** Seconds input for a stretch hold. */
+function secondsInput(s, onChange) {
+  return h('input', { class: 'num', type: 'text', inputmode: 'numeric', pattern: '[0-9]*', 'aria-label': 'Seconds', value: s.duration_s == null ? '' : String(s.duration_s),
+    oninput: (ev) => { const v = parseNum(ev.target.value); onChange(v == null ? null : Math.max(0, Math.round(v))); } });
 }
 
 /** A cardio set (#18), filled in with the target time and the level used last time. */
@@ -963,14 +982,29 @@ function viewToday() {
         onchange: (e) => {
           clearTimeout(S.minutesTimer);
           S.draftOpts.bodyweight_only = e.target.checked;
-          S.draft = null;
-          loadDraft();
+          loadDraft(); // the current plan stays, dimmed, until the new one arrives, so nothing jumps
         },
       }),
       'Bodyweight only',
     ),
-    // A cardio warm-up (#18), only offered when the gym has a cardio machine. The choice is remembered.
-    S.draft && S.draft.warm_up_available && h('label', { class: 'check' },
+    // Stretches (#138): cooldown stretches after lifting, plus dynamic ones after a warm-up. Remembered.
+    h('label', { class: 'check' },
+      h('input', {
+        type: 'checkbox',
+        checked: S.draftOpts.stretches ?? !!S.user.stretches,
+        disabled: S.draftLoading,
+        onchange: (e) => {
+          clearTimeout(S.minutesTimer);
+          S.draftOpts.stretches = e.target.checked;
+          S.user.stretches = e.target.checked;
+          loadDraft();
+        },
+      }),
+      'Include stretches',
+    ),
+    // A warm-up: a cardio machine (#18), or dynamic stretches with no machine (#138). Always
+    // shown, so the boxes never shift while a plan is being built. The choice is remembered.
+    h('label', { class: 'check' },
       h('input', {
         type: 'checkbox',
         checked: S.draftOpts.warm_up ?? !!S.user.warm_up,
@@ -979,7 +1013,6 @@ function viewToday() {
           clearTimeout(S.minutesTimer);
           S.draftOpts.warm_up = e.target.checked;
           S.user.warm_up = e.target.checked;
-          S.draft = null;
           loadDraft();
         },
       }),
@@ -1011,7 +1044,7 @@ function viewToday() {
     body = h(
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
-      h('p', { class: 'summary' }, `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${d.warm_up ? 'Warm-up and ' : ''}${d.exercises.length - (d.warm_up ? 1 : 0)} exercises, about ${d.est_minutes} minutes`),
+      h('p', { class: 'summary' }, planSummary(d)),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
@@ -1053,8 +1086,31 @@ function dayLabel(d) {
 
 const isCardio = (b) => b.kind === 'cardio';
 
+/** "Warm-up, 5 exercises and 7 stretches, about 49 minutes" */
+function planSummary(d) {
+  const lifts = d.exercises.filter((b) => !isTimed(b)).length;
+  // Without a cardio machine the warm-up is the dynamic stretches, so they are not counted twice.
+  const stretchWarmUp = d.warm_up && d.warm_up_kind === 'stretches';
+  const stretches = d.exercises.filter((b) => isStretch(b) && !(stretchWarmUp && b.pattern === 'dynamic_stretch')).length;
+  const warm = d.warm_up ? (stretchWarmUp ? 'Stretch warm-up' : 'Warm-up') : '';
+  const ex = `${lifts} exercise${lifts === 1 ? '' : 's'}`;
+  const list = stretches
+    ? `${warm ? `${warm}, ` : ''}${ex} and ${stretches} stretch${stretches === 1 ? '' : 'es'}`
+    : `${warm ? `${warm} and ` : ''}${ex}`;
+  return `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${list}, about ${d.est_minutes} minutes`;
+}
+
+const isStretch = (b) => b.kind === 'stretch';
+const isTimed = (b) => isCardio(b) || isStretch(b);
+/** A stretch done once on each side: two holds, left then right (#138). */
+const perSideStretch = (b) => isStretch(b) && (b.per_side ?? S.exById.get(b.exercise_id)?.per_side ?? false);
+
 function targetLine(b, unit) {
   if (isCardio(b)) return `${Math.round((b.target_seconds || 600) / 60)} min warm-up`;
+  if (isStretch(b)) {
+    const sec = `${b.target_seconds || 30} s${perSideStretch(b) ? ' each side' : ''}`;
+    return b.pattern === 'dynamic_stretch' ? `${sec}, moving` : b.pattern === 'static_stretch' ? `Hold ${sec}` : sec;
+  }
   const w = b.suggested_weight != null ? ` at ${fmtW(b.suggested_weight)} ${unit}${b.kind === 'dumbbell' ? ' each' : ''}` : '';
   return `${b.target_sets} sets of ${b.rep_min}-${b.rep_max}${w}`;
 }
@@ -1069,7 +1125,7 @@ function planRow(b, gym) {
   return h(
     'li',
     { class: 'plan-row' },
-    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), h('p', { class: 'why' }, b.reason)),
     !S.draft.share_id && !S.draft.routine_id && h(
       'div',
       { class: 'plan-actions' },
@@ -1367,6 +1423,7 @@ function viewWorkout() {
 function exerciseCard(doc, e, idx, nextSet, edit) {
   const ex = S.exById.get(e.exercise_id);
   const cardio = isCardio(e);
+  const stretch = isStretch(e);
   const needsWeight = !['bodyweight', 'band'].includes(e.kind);
   const perSide = e.kind === 'dumbbell' ? `${doc.unit} each` : doc.unit;
   let workingNo = 0;
@@ -1404,7 +1461,40 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(n)), minutes, distance, level, done);
   };
 
+  // A stretch hold (#138): seconds, then done. No rest timer and no weights.
+  const stretchRow = (s, si) => {
+    const seconds = secondsInput(s, (v) => edit((d) => (find(d, e.id, s.id).duration_s = v), false));
+    const done = h('button', {
+      type: 'button',
+      class: 'plate',
+      'aria-pressed': String(s.done),
+      'aria-label': s.done ? 'Completed. Tap to undo' : 'Complete',
+      onclick: () => {
+        if (s.done) {
+          edit((d) => Object.assign(find(d, e.id, s.id), { done: false, done_at: null }));
+          return;
+        }
+        if (!(find(doc, e.id, s.id).duration_s > 0)) {
+          seconds.focus();
+          toast('Enter the seconds you held it.');
+          return;
+        }
+        document.activeElement && document.activeElement.blur();
+        edit((d) => {
+          Object.assign(find(d, e.id, s.id), { done: true, done_at: new Date().toISOString() });
+          if (d.paused_at) {
+            endPause(d);
+            toast('Workout resumed.');
+          }
+        });
+      },
+    }, icon('check', 30));
+    return h('li', { class: `set stretch ${s.done ? 'done' : ''} ${s.id === nextSet ? 'next' : ''}` },
+      h('span', { class: 'set-tag', 'aria-label': perSideStretch(e) && e.sets.length === 2 ? (si === 0 ? 'Left side' : 'Right side') : `Hold ${si + 1}` }, holdTag(e, si)), seconds, done);
+  };
+
   const rows = e.sets.map((s, si) => {
+    if (stretch) return stretchRow(s, si);
     if (cardio) return cardioRow(s, si + 1);
     if (!s.warmup) workingNo += 1;
     const weight = h('input', {
@@ -1544,11 +1634,13 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
     'section',
     { class: `card lift ${e.sets.length && e.sets.every((s) => s.done) ? 'complete' : ''}` },
     h('header', { class: 'lift-head' },
-      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), h('p', { class: 'last' }, lastLine(e.previous))),
+      h('div', {}, h('h2', {}, historyLink(e.exercise_id, e.name, 'workout', 'Workout')), h('p', { class: 'target' }, targetLine(e, doc.unit)), !stretch && h('p', { class: 'last' }, lastLine(e.previous))),
       h('button', { type: 'button', class: 'btn square ghost', 'aria-label': `Options for ${e.name}`, onclick: menu }, icon('more')),
     ),
     e.reason && h('details', { class: 'why-fold' }, h('summary', {}, 'Why this'), h('p', { class: 'why' }, e.reason)),
-    cardio
+    stretch
+      ? h('div', { class: 'set-head stretch', 'aria-hidden': 'true' }, h('span', {}, perSideStretch(e) ? 'Side' : 'Hold'), h('span', {}, 'Seconds'), h('span', {}, 'Done'))
+      : cardio
       ? h('div', { class: 'set-head cardio', 'aria-hidden': 'true' }, h('span', {}, ''), h('span', {}, 'Min'), h('span', {}, distUnit(doc.unit)), h('span', {}, 'Level'), h('span', {}, 'Done'))
       : h('div', { class: 'set-head', 'aria-hidden': 'true' }, h('span', {}, 'Set'), h('span', {}, perSide), h('span', {}), h('span', {}, 'Reps'), h('span', {}, 'Done')),
     h('ol', { class: 'sets' }, rows),
@@ -1556,15 +1648,17 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('button', { type: 'button', class: 'btn small', onclick: () => edit((d) => {
         const t = d.exercises.find((x) => x.id === e.id);
         const last = t.sets[t.sets.length - 1];
-        t.sets.push(cardio
+        t.sets.push(stretch
+          ? stretchSet(last ? last.duration_s : e.target_seconds)
+          : cardio
           ? { ...cardioSet(last ? last.duration_s : e.target_seconds, null), level: last ? last.level : null }
           : { id: uuid(), weight: last ? last.weight : e.suggested_weight, reps: last ? last.reps : null, warmup: false, done: false, done_at: null });
-      }) }, icon('plus', 18), cardio ? 'Add interval' : 'Add set'),
+      }) }, icon('plus', 18), stretch ? 'Add hold' : cardio ? 'Add interval' : 'Add set'),
       h('button', { type: 'button', class: 'btn small', disabled: e.sets.length === 0, onclick: async () => {
         const last = e.sets[e.sets.length - 1];
-        if (last.done && !(await confirmSheet('Remove a completed set?', `The last set (${cardio ? fmtCardio(last, doc.unit) : `${fmtW(last.weight)} × ${last.reps}`}) is deleted.`, 'Remove set', true))) return;
+        if (last.done && !(await confirmSheet('Remove a completed set?', `The last set (${cardio || stretch ? fmtCardio(last, doc.unit) : `${fmtW(last.weight)} × ${last.reps}`}) is deleted.`, 'Remove set', true))) return;
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
-      } }, icon('minus', 18), cardio ? 'Remove interval' : 'Remove set'),
+      } }, icon('minus', 18), stretch ? 'Remove hold' : cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
     ),
   );
@@ -1827,7 +1921,7 @@ function viewPersonWorkout(personId, id) {
             return h('section', { class: 'card lift read-only' },
               h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name))),
               h('ol', { class: 'sets read-only' }, e.sets.map((s, si) => {
-                if (isCardio(e)) return h('li', { class: 'set-line' }, h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(si + 1)), h('span', {}, fmtCardio(s, workout.unit)));
+                if (isTimed(e)) return h('li', { class: 'set-line' }, h('span', { class: 'set-tag', 'aria-hidden': 'true' }, isStretch(e) ? holdTag(e, si) : String(si + 1)), h('span', {}, fmtCardio(s, workout.unit)));
                 if (!s.warmup) n += 1;
                 return h('li', { class: `set-line ${s.warmup ? 'warm' : ''}` },
                   h('span', { class: 'set-tag', 'aria-label': s.warmup ? 'Warm-up set' : `Set ${n}` }, s.warmup ? 'W' : String(n)),
@@ -1856,8 +1950,15 @@ function viewHistoryDetail(id) {
             let n = 0;
             return h('section', { class: 'card lift' },
               h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name)), h('a', { class: 'trend-link', href: `#/exercises/${e.exercise_id}`, onclick: () => (S.backTo = { to: `exercises/${e.exercise_id}`, path: `history/${id}`, label: 'Workout History', y: window.scrollY }) }, 'Trend')),
+              isStretch(e) && h('div', { class: 'set-head stretch history', 'aria-hidden': 'true' }, h('span', {}, perSideStretch(e) ? 'Side' : 'Hold'), h('span', {}, 'Seconds'), h('span', {}, '')),
               isCardio(e) && h('div', { class: 'set-head cardio history', 'aria-hidden': 'true' }, h('span', {}, ''), h('span', {}, 'Min'), h('span', {}, distUnit(workout.unit)), h('span', {}, 'Level'), h('span', {}, '')),
               h('ol', { class: 'sets' }, e.sets.map((s, si) => {
+                if (isStretch(e)) {
+                  return h('li', { class: 'set stretch done' },
+                    h('span', { class: 'set-tag', 'aria-hidden': 'true' }, holdTag(e, si)),
+                    secondsInput(s, (v) => { s.duration_s = v; touch(); }),
+                    h('button', { type: 'button', class: 'btn square ghost', 'aria-label': 'Delete', onclick: () => { e.sets.splice(si, 1); touch(); paint(); } }, icon('trash', 20)));
+                }
                 if (isCardio(e)) {
                   return h('li', { class: 'set cardio done' },
                     h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(si + 1)),
@@ -1875,7 +1976,9 @@ function viewHistoryDetail(id) {
               })),
               h('div', { class: 'set-actions' }, h('button', { type: 'button', class: 'btn small', onclick: () => {
                 const last = e.sets[e.sets.length - 1];
-                e.sets.push(isCardio(e)
+                e.sets.push(isStretch(e)
+                  ? { ...stretchSet(last ? last.duration_s : 30), done: true, done_at: workout.completed_at }
+                  : isCardio(e)
                   ? { ...cardioSet(last ? last.duration_s : 600, null), level: last ? last.level : null, done: true, done_at: workout.completed_at }
                   : { id: uuid(), weight: last ? last.weight : 0, reps: last ? last.reps : null, warmup: false, done: true, done_at: workout.completed_at });
                 touch();
@@ -1894,9 +1997,9 @@ function viewHistoryDetail(id) {
         const effortBox = S.user.body_weight != null && workout.status === 'completed' && field('How hard was it?',
           choices(EFFORTS, workout.effort || 'moderate', (v) => { workout.effort = v; touch(); }, { columns: 3 }));
         save.onclick = () => act(async () => {
-          const bad = workout.exercises.some((e) => e.sets.some((s) => (isCardio(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
+          const bad = workout.exercises.some((e) => e.sets.some((s) => (isTimed(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
           if (bad) {
-            toast('Every set needs its reps (or minutes, for cardio) filled in.', 'bad');
+            toast('Every set needs its reps (or time, for cardio and stretches) filled in.', 'bad');
             return;
           }
           workout.rev += 1;
@@ -2107,6 +2210,24 @@ function viewExercise(id) {
           h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
           h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
         ];
+        if (isStretch(ex)) {
+          // Stretches (#138): seconds held per session.
+          const spts = mine.map((s) => ({
+            label: fmtDate(s.date, oneYear ? { month: 'short', day: 'numeric' } : { month: 'short', year: 'numeric' }),
+            t: new Date(s.date).getTime(),
+            title: fmtDate(s.date, fullDate),
+            href: `#/history/${s.workout_id}`,
+            value: s.sets.reduce((n, x) => n + (x.duration_s || 0), 0),
+            lines: [fmtSets(s.sets, s.unit), ...where(s)],
+            s,
+          }));
+          fill(box,
+            h('h3', {}, 'Seconds held'),
+            lineChart(spts, { unit: 's', format: (v) => String(Math.round(v)), onOpen, hint: 'Tap a point to see that session.' }),
+            ...sessionList(),
+          );
+          return;
+        }
         if (isCardio(ex)) {
           // Cardio (#18): minutes, and distance when it was recorded.
           const total = (s, f) => s.sets.reduce((n, x) => n + (x[f] || 0), 0);
@@ -2367,7 +2488,7 @@ function viewSettings() {
     const r = await api.post('save_profile', { [key]: value });
     S.user = r.user;
     S.draft = null;
-    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null };
+    S.draftOpts = { day_type: null, minutes: null, bodyweight_only: false, warm_up: null, stretches: null };
   });
   const routineCount = (S.routines || []).length;
   // Headings are mint so the sections are easy to pick out (#103). What affects
@@ -2779,7 +2900,7 @@ function viewGymForm(id) {
   const gym = existing ? { ...existing, equipment: [...existing.equipment], increments: { ...existing.increments } } : { name: '', equipment: [], increments: {} };
   const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true, placeholder: 'For example: Home' });
   const defaults = S.vocab.increments[unit];
-  const incs = Object.entries(S.vocab.kinds).filter(([k]) => k !== 'band' && k !== 'cardio').map(([k, label]) =>
+  const incs = Object.entries(S.vocab.kinds).filter(([k]) => !['band', 'cardio', 'stretch'].includes(k)).map(([k, label]) =>
     field(`${label}${k === 'dumbbell' ? ' (each)' : k === 'bodyweight' ? ' (added weight)' : ''}`, h('input', { class: 'num', type: 'text', inputmode: 'decimal', value: fmtW(gym.increments[k] ?? defaults[k]), oninput: (e) => {
       const n = parseNum(e.target.value);
       if (n == null) delete gym.increments[k];

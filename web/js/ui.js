@@ -87,7 +87,8 @@ export const toMetres = (v, unit) => (v == null ? null : v * (unit === 'kg' ? 10
 
 /** A cardio set (#18): "10 min · 1.7 mi · level 8". */
 export function fmtCardio(set, unit) {
-  const parts = [`${trim((set.duration_s || 0) / 60, 1)} min`];
+  // Short holds (stretches, #138) read better in seconds.
+  const parts = [(set.duration_s || 0) < 120 ? `${Math.round(set.duration_s || 0)} s` : `${trim((set.duration_s || 0) / 60, 1)} min`];
   if (set.distance_m) parts.push(`${trim(metresTo(set.distance_m, unit), 2)} ${distUnit(unit)}`);
   if (set.level != null) parts.push(`level ${trim(set.level, 1)}`);
   return parts.join(' · ');
