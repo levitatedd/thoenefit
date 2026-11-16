@@ -1195,15 +1195,22 @@ check('without either box, no stretches and no warm-up', !array_intersect($kinds
 $warmOnly = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'warm_up' => true] + $at);
 check('Include a warm-up by itself: the cardio warm-up as before, no stretches', $warmOnly['exercises'][0]['kind'] === 'cardio' && !in_array('stretch', $kinds($warmOnly), true));
 $cool = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'stretches' => true] + $at);
-$coolTail = array_slice($cool['exercises'], -4);
-check('Include stretches by itself: cooldown stretches after the lifting, no warm-up', $cool['stretches'] === true && $cool['exercises'][0]['kind'] !== 'cardio' && count(array_filter($cool['exercises'], static fn($b) => $b['kind'] === 'stretch')) === 4
-    && !array_filter($coolTail, static fn($b) => $b['pattern'] !== 'static_stretch') && $cool['exercises'][count($cool['exercises']) - 5]['kind'] !== 'stretch');
-check('a leg day cools down with leg stretches', count(array_intersect(array_column($coolTail, 'name'), ['Standing Quad Stretch', 'Seated Hamstring Stretch', 'Figure-Four Glute Stretch', 'Kneeling Hip Flexor Stretch', 'Wall Calf Stretch'])) >= 3, implode(', ', array_column($coolTail, 'name')));
-check('four different cooldown stretches', count(array_unique(array_column($coolTail, 'exercise_id'))) === 4);
+$coolN = count(array_filter($cool['exercises'], static fn($b) => $b['kind'] === 'stretch'));
+$coolTail = array_slice($cool['exercises'], -$coolN);
+check('Include stretches by itself: 2 or 3 cooldown stretches after the lifting, no warm-up', $cool['stretches'] === true && $cool['exercises'][0]['kind'] !== 'cardio' && $coolN >= 2 && $coolN <= 3
+    && !array_filter($coolTail, static fn($b) => $b['pattern'] !== 'static_stretch') && $cool['exercises'][count($cool['exercises']) - $coolN - 1]['kind'] !== 'stretch', (string) $coolN);
+check('a leg day cools down with leg stretches', count(array_intersect(array_column($coolTail, 'name'), ['Standing Quad Stretch', 'Seated Hamstring Stretch', 'Figure-Four Glute Stretch', 'Kneeling Hip Flexor Stretch', 'Wall Calf Stretch'])) >= 2, implode(', ', array_column($coolTail, 'name')));
+check('the cooldown stretches are all different', count(array_unique(array_column($coolTail, 'exercise_id'))) === $coolN);
+$short = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'stretches' => true, 'warm_up' => true, 'minutes' => 30] + $at);
+$shortCounts = array_count_values(array_map(static fn($b) => $b['pattern'], array_filter($short['exercises'], static fn($b) => $b['kind'] === 'stretch')));
+check('a 30-minute workout gets 2 stretches at each end', ($shortCounts['dynamic_stretch'] ?? 0) === 2 && ($shortCounts['static_stretch'] ?? 0) === 2, json_encode($shortCounts));
+$full = $gen->generate($sUser, $sGym, ['day_type' => 'full', 'stretches' => true, 'warm_up' => true, 'minutes' => 75] + $at);
+$fullCounts = array_count_values(array_map(static fn($b) => $b['pattern'], array_filter($full['exercises'], static fn($b) => $b['kind'] === 'stretch')));
+check('a long full-body workout gets 3 at each end, never more', ($fullCounts['dynamic_stretch'] ?? 0) === 3 && ($fullCounts['static_stretch'] ?? 0) === 3, json_encode($fullCounts));
 $both = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'warm_up' => true, 'stretches' => true] + $at);
 $order = array_map(static fn($b) => $b['kind'] === 'cardio' ? 'cardio' : ($b['pattern'] === 'dynamic_stretch' ? 'dynamic' : ($b['pattern'] === 'static_stretch' ? 'cooldown' : 'lift')), $both['exercises']);
 $collapsed = array_values(array_unique($order));
-check('both boxes: cardio warm-up, then dynamic stretches, then lifting, then cooldown stretches', $collapsed === ['cardio', 'dynamic', 'lift', 'cooldown'] && count(array_keys($order, 'dynamic')) === 3, implode(' ', $order));
+check('both boxes: cardio warm-up, then 2 or 3 dynamic stretches, then lifting, then the same number of cooldown stretches', $collapsed === ['cardio', 'dynamic', 'lift', 'cooldown'] && in_array(count(array_keys($order, 'dynamic')), [2, 3], true) && count(array_keys($order, 'dynamic')) === count(array_keys($order, 'cooldown')), implode(' ', $order));
 check('stretch time is part of the plan estimate, and stretches never add lifts', $both['est_minutes'] === (int) round(array_sum(array_column($both['exercises'], 'minutes'))) && $cool['est_minutes'] > 0 && count($lifts($cool)) <= count($lifts($none)) && count($lifts($both)) <= count($lifts($warmOnly)));
 $quad = null;
 foreach ($cool['exercises'] as $b) {

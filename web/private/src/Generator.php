@@ -613,10 +613,9 @@ final class Generator
         $warm = null;
         $stretches = ($opts['stretches'] ?? false) === true;
         $warmUpAsked = ($opts['warm_up'] ?? false) === true;
-        $dynamicCount = $stretches && $warmUpAsked ? 3 : 0;
-        $cooldownCount = $stretches ? ($minutes <= 30 ? 3 : 4) : 0;
-        // Leave room for the stretches while choosing lifts; the real time is added below.
-        $stretchReserve = ($dynamicCount + $cooldownCount) * 1.0;
+        $wantDynamic = $stretches && $warmUpAsked;
+        // Leave room for up to three stretches at each end while choosing lifts; the real time is added below.
+        $stretchReserve = ($stretches ? 3 : 0) + ($wantDynamic ? 3 : 0);
         $total += $stretchReserve;
         $worked = [];
         if (($opts['warm_up'] ?? false) === true && !$bodyweightOnly) {
@@ -713,7 +712,13 @@ final class Generator
         }
 
         // Stretches (#138): cardio warm-up → dynamic stretches → lifting → cooldown stretches.
+        // Two or three at each end: three when the lifts work at least three
+        // areas hard (3+ planned sets each), two for a narrower or short workout.
         $total -= $stretchReserve;
+        $hardAreas = count(array_filter($worked, static fn($sets) => $sets >= 3));
+        $perEnd = $stretches ? ($minutes > 30 && $hardAreas >= 3 ? 3 : 2) : 0;
+        $dynamicCount = $wantDynamic ? $perEnd : 0;
+        $cooldownCount = $perEnd;
         if ($dynamicCount) {
             $dynamic = $this->pickStretches($gym, $by['dynamic_stretch'] ?? [], $worked, $dynamicCount);
             foreach ($dynamic as $i => &$d) {
