@@ -95,7 +95,7 @@ final class Auth
         $ident = 'inv:' . ($_SERVER['REMOTE_ADDR'] ?? 'cli');
         $since = now_utc(time() - self::WINDOW_MINUTES * 60);
         if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', [$ident, $since]) >= self::MAX_TOKEN_TRIES) {
-            throw new HttpError(429, 'Too many tries with the wrong invite token. Wait 15 minutes and try again.');
+            throw new HttpError(429, 'Too many tries with the wrong invite code. Wait 15 minutes and try again.');
         }
         $hash = $this->db->val('SELECT value FROM app_settings WHERE name=?', [self::INVITE_KEY]);
         if (!$hash) {
@@ -103,7 +103,7 @@ final class Auth
         }
         if (!password_verify(trim($token), (string) $hash)) {
             $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', [$ident, now_utc()]);
-            throw new HttpError(403, 'That invite token is not right.');
+            throw new HttpError(403, 'That invite code is not right.');
         }
         if ((int) $this->db->val("SELECT COUNT(*) FROM users WHERE status='pending'") >= self::MAX_PENDING) {
             throw new HttpError(429, 'There are already a lot of requests waiting. Try again after the admin has gone through them.');

@@ -614,6 +614,9 @@ const guest = await browser.newContext({ viewport: { width: 402, height: 874 }, 
 const gp = await guest.newPage();
 await gp.goto(URL);
 await gp.click('button:has-text("Request an account")');
+await gp.waitForSelector('input[name=invite_token]');
+if (SHOTS) await gp.screenshot({ path: `${SHOTS}/32-request-invite-code.png` });
+check('the request form asks for an Invite code and says where to get one (#137)', (await gp.locator('.field', { has: gp.locator('input[name=invite_token]') }).textContent()).includes('Invite code') && (await gp.textContent('.page')).includes('Ask the person who runs this ThoeneFit site for an invite code.') && !(await gp.textContent('.page')).includes('invite token'));
 await gp.fill('input[name=invite_token]', 'wrong-token-zzz');
 await gp.fill('input[name=display_name]', 'New Lifter');
 await gp.fill('input[name=username]', applicant);
@@ -621,7 +624,7 @@ await gp.fill('input[name=password]', 'my-own-password-1');
 await gp.fill('input[name=password_again]', 'my-own-password-1');
 await gp.click('button:has-text("Send request")');
 await gp.waitForSelector('.form-error:not(:empty)');
-check('a request with the wrong invite token is refused', /invite token is not right/.test(await gp.textContent('.form-error')), await gp.textContent('.form-error'));
+check('a request with the wrong invite code is refused', /invite code is not right/.test(await gp.textContent('.form-error')), await gp.textContent('.form-error'));
 await gp.fill('input[name=invite_token]', 'crew-token-2026');
 await gp.fill('input[name=password_again]', 'different-password');
 await gp.click('button:has-text("Send request")');

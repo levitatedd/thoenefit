@@ -2760,10 +2760,10 @@ function viewRequest() {
       btn.disabled = false;
     }
   } },
-    field('Invite token', token, 'From the person who runs this ThoeneFit. It is only used to send this request.'),
+    field('Invite code', token, 'Ask the person who runs this ThoeneFit site for an invite code.'),
     field('Your name', name, 'Shown in the app. Optional.'),
     field('Username', username, '2-64 letters, numbers, dots, dashes or underscores.'),
-    field('Password', password, 'At least 10 characters. This is your own sign-in password, not the invite token.'),
+    field('Password', password, 'At least 10 characters. This is your own sign-in password, not the invite code.'),
     field('Password again', again),
     error,
     btn,
