@@ -31,6 +31,8 @@ final class Calories
         'stair-climber' => 4.0,
     ];
     public const CARDIO_MET_DEFAULT = 4.5;
+    /** Stretching (#138), from the Compendium of Physical Activities. */
+    public const STRETCH_MET = 2.3;
 
     public static function effort(?string $effort): string
     {
@@ -64,7 +66,8 @@ final class Calories
                 }
                 $d = min($d, $seconds - $cardioSeconds); // never more than the whole session
                 $cardioSeconds += $d;
-                $kcal += (self::CARDIO_MET[$e['slug'] ?? ''] ?? self::CARDIO_MET_DEFAULT) * $bodyKg * $d / 3600;
+                $met = ($e['kind'] ?? '') === 'stretch' ? self::STRETCH_MET : (self::CARDIO_MET[$e['slug'] ?? ''] ?? self::CARDIO_MET_DEFAULT);
+                $kcal += $met * $bodyKg * $d / 3600;
             }
         }
         $kcal += self::LIFTING_MET[self::effort($workout['effort'] ?? null)] * $bodyKg * ($seconds - $cardioSeconds) / 3600;

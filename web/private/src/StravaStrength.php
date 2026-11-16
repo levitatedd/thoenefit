@@ -101,7 +101,8 @@ final class StravaStrength
     public static function cardioText(array $set, bool $kilometres): string
     {
         $num = static fn(float $v, int $places) => rtrim(rtrim(number_format($v, $places, '.', ''), '0'), '.');
-        $parts = [$num($set['duration_s'] / 60, 1) . ' min'];
+        // Short holds (stretches, #138) read better in seconds.
+        $parts = [$set['duration_s'] < 120 ? (int) $set['duration_s'] . ' s' : $num($set['duration_s'] / 60, 1) . ' min'];
         if (($set['distance_m'] ?? 0) > 0) {
             $parts[] = $kilometres ? $num($set['distance_m'] / 1000, 2) . ' km' : $num($set['distance_m'] / 1609.344, 2) . ' mi';
         }

@@ -1179,6 +1179,72 @@ $fRes = $fImp->run($cUid, $cGym, 'lb', $fp, $fImp->plan($cUid, $fp));
 $fw = $wk->get($cUid, current(array_filter($wk->history($cUid, 5), static fn($w) => $w['started_at'] === '2025-11-06T19:23:18Z'))['id']);
 check('an imported bike warm-up keeps its time, distance and level, in the same workout as the lifts', $fRes['workouts'] === 2 && $fw['exercises'][0]['name'] === 'Stationary Bike' && $fw['exercises'][0]['sets'][0]['duration_s'] === 300 && $fw['exercises'][0]['sets'][0]['distance_m'] === 2607.1 && $fw['exercises'][0]['sets'][0]['level'] === 12.0 && $fw['exercises'][1]['name'] === 'Barbell Bench Press' && $fw['exercises'][0]['target_seconds'] === 300, json_encode($fw['exercises'][0] ?? null));
 
+echo "Stretches\n";
+$stretchEx = array_values(array_filter(Catalog::exercises(), static fn($e) => $e[2] === 'stretch'));
+check('built-in stretches need no equipment and are dynamic or static (' . count($stretchEx) . ')', count($stretchEx) >= 14 && !array_filter($stretchEx, static fn($e) => $e[3] !== [] || !in_array($e[4], Catalog::STRETCH_PATTERNS, true) || !$e[5]));
+check('every per-side stretch is a real built-in stretch', !array_diff(Catalog::PER_SIDE, array_column($stretchEx, 0)));
+check('stretches are logged as time, like cardio', Catalog::isTimed('stretch'));
+$sUid = $auth->createUser('stretch-user', 'stretch-user-123');
+$sUser = $db->one('SELECT * FROM users WHERE id=?', [$sUid]);
+$sGym = $mkGym($sUid, 'Stretch gym', ['barbell', 'bench', 'rack', 'dumbbells', 'stationary_bike', 'leg_press', 'leg_curl', 'leg_extension']);
+$at = ['now' => strtotime('2026-11-10T12:00:00Z')];
+$kinds = static fn($plan) => array_column($plan['exercises'], 'kind');
+$lifts = static fn($plan) => array_values(array_filter($plan['exercises'], static fn($b) => !Catalog::isTimed($b['kind'])));
+$none = $gen->generate($sUser, $sGym, ['day_type' => 'legs'] + $at);
+check('without either box, no stretches and no warm-up', !array_intersect($kinds($none), ['stretch', 'cardio']) && $none['stretches'] === false);
+$warmOnly = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'warm_up' => true] + $at);
+check('Include a warm-up by itself: the cardio warm-up as before, no stretches', $warmOnly['exercises'][0]['kind'] === 'cardio' && !in_array('stretch', $kinds($warmOnly), true));
+$cool = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'stretches' => true] + $at);
+$coolTail = array_slice($cool['exercises'], -4);
+check('Include stretches by itself: cooldown stretches after the lifting, no warm-up', $cool['stretches'] === true && $cool['exercises'][0]['kind'] !== 'cardio' && count(array_filter($cool['exercises'], static fn($b) => $b['kind'] === 'stretch')) === 4
+    && !array_filter($coolTail, static fn($b) => $b['pattern'] !== 'static_stretch') && $cool['exercises'][count($cool['exercises']) - 5]['kind'] !== 'stretch');
+check('a leg day cools down with leg stretches', count(array_intersect(array_column($coolTail, 'name'), ['Standing Quad Stretch', 'Seated Hamstring Stretch', 'Figure-Four Glute Stretch', 'Kneeling Hip Flexor Stretch', 'Wall Calf Stretch'])) >= 3, implode(', ', array_column($coolTail, 'name')));
+check('four different cooldown stretches', count(array_unique(array_column($coolTail, 'exercise_id'))) === 4);
+$both = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'warm_up' => true, 'stretches' => true] + $at);
+$order = array_map(static fn($b) => $b['kind'] === 'cardio' ? 'cardio' : ($b['pattern'] === 'dynamic_stretch' ? 'dynamic' : ($b['pattern'] === 'static_stretch' ? 'cooldown' : 'lift')), $both['exercises']);
+$collapsed = array_values(array_unique($order));
+check('both boxes: cardio warm-up, then dynamic stretches, then lifting, then cooldown stretches', $collapsed === ['cardio', 'dynamic', 'lift', 'cooldown'] && count(array_keys($order, 'dynamic')) === 3, implode(' ', $order));
+check('stretch time is part of the plan estimate, and stretches never add lifts', $both['est_minutes'] === (int) round(array_sum(array_column($both['exercises'], 'minutes'))) && $cool['est_minutes'] > 0 && count($lifts($cool)) <= count($lifts($none)) && count($lifts($both)) <= count($lifts($warmOnly)));
+$quad = null;
+foreach ($cool['exercises'] as $b) {
+    if ($b['name'] === 'Standing Quad Stretch') {
+        $quad = $b;
+    }
+}
+$childs = $gen->block($sUser, $sGym, Catalog::forUser($db, $sUid)[array_search("Child's Pose", array_column(Catalog::forUser($db, $sUid), 'name'), true)]);
+check('a stretch done on each side is two 30-second holds; one done once is a single hold', ($quad === null || ($quad['target_sets'] === 2 && $quad['per_side'] === true)) && $childs['target_sets'] === 1 && $childs['target_seconds'] === 30 && $childs['suggested_weight'] === null && $childs['per_side'] === false);
+$bwStretch = $gen->generate($sUser, $sGym, ['day_type' => 'legs', 'stretches' => true, 'bodyweight_only' => true] + $at);
+check('bodyweight-only workouts still get stretches', in_array('stretch', $kinds($bwStretch), true));
+$alts = $gen->alternatives($sUid, $sGym, $bySlug['standing-quad-stretch']);
+$patternOf = array_column(Catalog::forUser($db, $sUid), 'pattern', 'id');
+check('swapping a stretch only offers other stretches of the same kind', $alts && !array_filter($alts, static fn($a) => $patternOf[$a['exercise_id']] !== 'static_stretch'), json_encode($alts));
+// Log a workout with a cooldown stretch: it stays out of volume, recovery and progression.
+$before = $gen->muscleStats($sUid, strtotime('2026-11-10T12:00:00Z'));
+$sDoc = $doc($sGym, 'legs', [[$bySlug['back-squat'], 6, 10, [[185, 10], [185, 10]]]], '2026-11-09T17:00:00Z');
+$sDoc['exercises'][] = ['id' => uuid(), 'exercise_id' => $bySlug['standing-quad-stretch'], 'rep_min' => 1, 'rep_max' => 1, 'target_sets' => 2, 'target_seconds' => 30, 'rest_seconds' => 0,
+    'sets' => [['id' => uuid(), 'weight' => null, 'reps' => null, 'duration_s' => 30, 'done' => true, 'done_at' => '2026-11-09T17:30:00Z'], ['id' => uuid(), 'weight' => null, 'reps' => null, 'duration_s' => 35, 'done' => true, 'done_at' => '2026-11-09T17:31:00Z']]];
+$wk->save($sUid, $sDoc);
+$sHist = $wk->history($sUid)[0];
+check('logged stretches show in History', in_array('Standing Quad Stretch', $sHist['exercises'], true) && $wk->get($sUid, $sDoc['id'])['exercises'][1]['sets'][1]['duration_s'] === 35);
+check('stretches add nothing to lifting volume or set counts', $sHist['sets'] === 2 && (int) $sHist['volume'] === 185 * 20);
+$withStretch = $gen->muscleStats($sUid, strtotime('2026-11-10T12:00:00Z'));
+$sDoc2 = $sDoc;
+$sDoc2['id'] = uuid();
+array_pop($sDoc2['exercises']);
+$sDoc2['exercises'][0]['id'] = uuid();
+foreach ($sDoc2['exercises'][0]['sets'] as &$ss) { $ss['id'] = uuid(); }
+unset($ss);
+$wk->delete($sUid, $sDoc['id']);
+$wk->save($sUid, $sDoc2);
+$withoutStretch = $gen->muscleStats($sUid, strtotime('2026-11-10T12:00:00Z'));
+check('stretches do not change the recovery estimate', $withStretch === $withoutStretch, json_encode([$withStretch['quads'], $withoutStretch['quads']]));
+check('stretches are never given a weight to progress', $gen->block($sUser, $sGym, Catalog::forUser($db, $sUid)[array_search('Standing Quad Stretch', array_column(Catalog::forUser($db, $sUid), 'name'), true)])['suggested_weight'] === null);
+$wk->delete($sUid, $sDoc2['id']);
+$db->run('DELETE FROM gyms WHERE user_id=?', [$sUid]);
+$db->run('DELETE FROM users WHERE id=?', [$sUid]);
+check('a stretch counts a gentler effort than cardio for calories', \TF\Calories::STRETCH_MET < \TF\Calories::CARDIO_MET_DEFAULT);
+check('short holds read in seconds on Strava', \TF\StravaStrength::cardioText(['duration_s' => 30], false) === '30 s' && \TF\StravaStrength::cardioText(['duration_s' => 600], false) === '10 min');
+
 echo "Estimated calories\n";
 $kUid = $auth->createUser('calorie-user', 'calorie-user-123');
 $kGym = $mkGym($kUid, 'Calorie gym', ['barbell', 'bench', 'rack', 'stationary_bike']);
