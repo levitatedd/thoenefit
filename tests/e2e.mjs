@@ -251,10 +251,10 @@ await page.reload();
 await page.waitForSelector('.lift');
 check('a refresh mid-workout comes straight back to it with the sets intact', (await page.locator('.lift').first().locator('.set.done').count()) === setRows);
 await page.goto(`${URL}#/today`);
-await page.waitForSelector('text=Resume workout');
-check('Today offers to resume the unfinished workout', true);
+await page.waitForSelector('text=Back to workout');
+check('Today offers a way back to the unfinished workout', true);
 await shot('06-resume');
-await page.click('text=Resume workout');
+await page.click('a.btn:has-text("Back to workout")');
 await page.waitForSelector('.lift');
 
 // Wait for the service worker so the app can reopen with no network.
@@ -1237,6 +1237,83 @@ for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'],
   if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
+console.log('Pause and resume a workout');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  const tabBg = (sel) => page.$eval(sel, (el) => getComputedStyle(el.querySelector('.tab-icon')).backgroundColor);
+  await page.goto(`${URL}#/history`);
+  await page.waitForSelector('.tabs');
+  check('the selected tab has a mint pill behind its icon, the others do not', (await tabBg('.tab[aria-current="page"]')) === 'rgba(58, 242, 156, 0.18)' && (await tabBg('a.tab[href="#/trends"]')) === 'rgba(0, 0, 0, 0)');
+  check('with no workout, the Today spot is the normal Today tab', (await page.locator('a.tab[href="#/today"]').count()) === 1 && (await page.locator('.pause-tab').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  const pauseTab = page.locator('.pause-tab');
+  check('during a workout the Today spot is a Pause button with an accessible label', (await pauseTab.getAttribute('aria-label')) === 'Pause workout' && (await pauseTab.locator('.tab-icon').count()) === 1);
+  const strength = () => page.locator('.lift', { has: page.locator('.set:not(.cardio)') }).first();
+  const first = strength().locator('.set').first();
+  await first.locator('input').nth(0).fill('95');
+  await first.locator('input').nth(1).fill('8');
+  await first.locator('.plate').click();
+  await page.waitForSelector('#sync.saved');
+  await shot('28-workout-running');
+  await pauseTab.click();
+  await waitForToast(page, /Workout paused/);
+  check('pausing switches it to Play, labelled Resume workout, and shows the paused banner', (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Resume workout' && (await page.locator('.paused-banner').count()) === 1);
+  check('pausing stops the rest timer', await page.locator('.rest').isHidden());
+  const frozen = await page.textContent('#elapsed');
+  await page.waitForTimeout(2200);
+  check('the workout clock stops while paused', (await page.textContent('#elapsed')) === frozen, frozen);
+  await shot('29-workout-paused');
+  await page.click('.tab:has-text("History")');
+  await page.waitForSelector('.back-to-workout');
+  check('other tabs show a way back to the workout, saying it is paused', /in progress/.test(await page.textContent('.back-to-workout')) && /Paused/.test(await page.textContent('.back-to-workout')));
+  check('the Play button stays in the Today spot on other tabs', (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Resume workout');
+  check('no sideways scrolling with the way-back bar', (await overflow()) <= 0);
+  await shot('30-history-during-workout');
+  await page.click('.back-to-workout');
+  await page.waitForSelector('.paused-banner');
+  check('the bar goes back to the workout, with the logged set kept', (await page.locator('.set.done').count()) === 1);
+  await page.click('.paused-banner button:has-text("Resume")');
+  await waitForToast(page, /Workout resumed/);
+  check('Resume clears the pause', (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Pause workout');
+  const running = await page.textContent('#elapsed');
+  await page.waitForTimeout(1500);
+  check('and the clock runs again', (await page.textContent('#elapsed')) !== running);
+  await page.locator('.pause-tab').click();
+  await waitForToast(page, /Workout paused/);
+  const second = strength().locator('.set').nth(1);
+  await second.locator('input').nth(0).fill('95');
+  await second.locator('input').nth(1).fill('8');
+  await second.locator('.plate').click();
+  await waitForToast(page, /Workout resumed/);
+  check('logging a set while paused resumes the workout', (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.set.done').count()) === 2);
+  // Pause for a few seconds, then finish while paused: that time is left out.
+  await page.locator('.pause-tab').click();
+  await waitForToast(page, /Workout paused/);
+  await page.waitForTimeout(3000);
+  await page.waitForSelector('#sync.saved');
+  const id = await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.startsWith('tf.docs.')))).activeId);
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await page.waitForSelector('.plan-row, .page-head');
+  await page.waitForFunction(() => document.querySelector('#sync') === null || document.querySelector('#sync').textContent === 'Saved');
+  check('after finishing, the Today spot is the normal Today tab again', (await page.locator('.pause-tab').count()) === 0 && (await page.locator('a.tab[href="#/today"]').count()) === 1 && (await page.locator('.back-to-workout').count()) === 0);
+  let saved = null;
+  for (let i = 0; i < 20 && !(saved && saved.status === 'completed'); i++) {
+    saved = (await api(`workout&id=${id}`)).workout;
+    if (saved.status !== 'completed') await page.waitForTimeout(300);
+  }
+  check('the server has the finished workout with its paused time recorded', saved.status === 'completed' && saved.paused_s >= 4 && saved.paused_at === null && saved.exercises.reduce((n, e) => n + e.sets.length, 0) === 2, JSON.stringify({ s: saved.status, p: saved.paused_s, a: saved.paused_at }));
+  await api(`workout&id=${id}`);
+  await page.evaluate(async (wid) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id: wid }) });
+  }, id);
+}
+
 console.log('Send feedback');
 {
   await page.setViewportSize({ width: 402, height: 874 });
@@ -1348,8 +1425,8 @@ console.log('Sign out and clear local data');
   await page.click('button[type=submit]');
   await page.waitForSelector('.tabs');
   await page.goto(`${URL}#/today`);
-  await page.waitForSelector('button:has-text("Start workout"), button:has-text("Resume workout"), a:has-text("Resume workout")');
-  check('signing back in works, and the discarded workout did not come back', (await page.locator(':text("Resume workout")').count()) === 0);
+  await page.waitForSelector('button:has-text("Start workout"), a:has-text("Back to workout")');
+  check('signing back in works, and the discarded workout did not come back', (await page.locator('a:has-text("Back to workout")').count()) === 0);
   check('the synced history is still on the server', (await api('history')).workouts.length > 0);
 }
 
