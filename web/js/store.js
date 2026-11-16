@@ -88,6 +88,27 @@ export class Api {
   }
 }
 
+/**
+ * Everything ThoeneFit keeps on this device about the account that was signed
+ * in (#23): its saved and unsynced workouts, the cached profile and settings
+ * the app opens with offline, the rest timer, and the Send-to-Strava choice.
+ * Other accounts' unsynced workouts and device-wide choices (the install
+ * reminder) are left alone. Returns the keys it removed.
+ */
+export function clearLocalData(storage, userId) {
+  const keys = [`tf.docs.${userId}`, 'tf.boot', 'tf.rest', 'tf.stravaOnFinish'];
+  const removed = [];
+  for (const key of keys) {
+    try {
+      if (storage.getItem(key) !== null) removed.push(key);
+      storage.removeItem(key);
+    } catch (e) {
+      // Storage blocked: there is nothing we could have read back either.
+    }
+  }
+  return removed;
+}
+
 /** What goes to the server: the workout without local-only bookkeeping. */
 export function wire(doc) {
   const { _dirty, ...rest } = doc;
@@ -123,6 +144,14 @@ export class WorkoutSync {
     this.offline = false;
     this.error = null;
     this.timer = null;
+    this.closed = false;
+  }
+
+  /** Stop syncing and never write to storage again (the account signed out and cleared this device, #23). */
+  close() {
+    this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
   }
 
   load() {
@@ -140,6 +169,7 @@ export class WorkoutSync {
   }
 
   persist() {
+    if (this.closed) return;
     try {
       this.storage.setItem(this.key, JSON.stringify({ docs: [...this.docs.values()], deletes: this.deletes, activeId: this.activeId }));
     } catch (e) {
@@ -213,6 +243,7 @@ export class WorkoutSync {
   }
 
   queue(delay) {
+    if (this.closed) return;
     this.onChange();
     if (this.timer) clearTimeout(this.timer);
     this.timer = this.schedule(() => {
@@ -222,6 +253,7 @@ export class WorkoutSync {
   }
 
   async flush() {
+    if (this.closed) return;
     if (this.busy) {
       this.again = true;
       return;
