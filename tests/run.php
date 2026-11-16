@@ -1379,6 +1379,8 @@ preg_match('/const MUSCLE_ART = \[([^\]]+)\]/', file_get_contents(dirname(__DIR_
 check('the app maps every muscle group to its illustration', isset($artList[1]) && str_replace(["'", ' '], '', $artList[1]) === implode(',', array_keys(Catalog::MUSCLES)));
 $artInfo = getimagesize("$artDir/lats.png");
 check('the illustrations are small PNGs with a transparent background', $artInfo[2] === IMAGETYPE_PNG && $artInfo[0] <= 300 && $artInfo[1] <= 300 && array_sum(array_map('filesize', glob("$artDir/*.png"))) < 250000);
+$sizes = array_unique(array_map(static fn($f) => implode('x', array_slice(getimagesize($f), 0, 2)), glob("$artDir/*.png")));
+check('every illustration has the same square size, so narrow ones (legs) line up with the rest', count($sizes) === 1 && reset($sizes) === '240x240', implode(' ', $sizes));
 
 echo "Estimated calories\n";
 $kUid = $auth->createUser('calorie-user', 'calorie-user-123');
