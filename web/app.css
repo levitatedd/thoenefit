@@ -1789,3 +1789,50 @@ button.setup-note {
   align-items: center;
   gap: 6px;
 }
+
+/* ---- Muscle illustrations (#150) ---------------------------------------
+   The exercise's first primary muscle, faint behind the text on the right
+   and fading out toward the left: a low-opacity slate body with the muscle
+   in muted mint. The text sits above it and stays fully legible. */
+.has-art {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.has-art > :not(.muscle-art) {
+  position: relative;
+  z-index: 1;
+}
+
+.muscle-art {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  right: 4%;
+  height: min(92%, 230px);
+  width: auto;
+  max-width: 58%;
+  object-fit: contain;
+  transform: translateY(-50%);
+  opacity: 0.2;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to left, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 55%, transparent 100%);
+}
+
+/* Exercise page: in the open space beside the name and details. */
+.exercise-head {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.exercise-head .muscle-art {
+  right: 0;
+  height: 100%;
+  max-height: 260px;
+  max-width: 50%;
+  opacity: 0.24;
+}

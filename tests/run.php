@@ -1371,6 +1371,15 @@ $db->run('DELETE FROM exercise_notes WHERE user_id=?', [$nUid]);
 $db->run('DELETE FROM gyms WHERE user_id=?', [$nUid]);
 $db->run('DELETE FROM users WHERE id=?', [$nUid]);
 
+echo "Muscle illustrations\n";
+$artDir = dirname(__DIR__) . '/web/icons/muscles';
+$missingArt = array_filter(array_keys(Catalog::MUSCLES), static fn($m) => !is_file("$artDir/$m.png") || filesize("$artDir/$m.png") < 1000);
+check('all 13 muscle groups have their illustration (#150)', count(Catalog::MUSCLES) === 13 && !$missingArt, implode(', ', $missingArt));
+preg_match('/const MUSCLE_ART = \[([^\]]+)\]/', file_get_contents(dirname(__DIR__) . '/web/js/app.js'), $artList);
+check('the app maps every muscle group to its illustration', isset($artList[1]) && str_replace(["'", ' '], '', $artList[1]) === implode(',', array_keys(Catalog::MUSCLES)));
+$artInfo = getimagesize("$artDir/lats.png");
+check('the illustrations are small PNGs with a transparent background', $artInfo[2] === IMAGETYPE_PNG && $artInfo[0] <= 300 && $artInfo[1] <= 300 && array_sum(array_map('filesize', glob("$artDir/*.png"))) < 250000);
+
 echo "Estimated calories\n";
 $kUid = $auth->createUser('calorie-user', 'calorie-user-123');
 $kGym = $mkGym($kUid, 'Calorie gym', ['barbell', 'bench', 'rack', 'stationary_bike']);

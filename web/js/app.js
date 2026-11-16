@@ -1216,10 +1216,27 @@ function exerciseNotesSection(ex) {
   return box;
 }
 
+/** Muscle groups with artwork in icons/muscles (#150): all thirteen. */
+const MUSCLE_ART = ['chest', 'shoulders', 'triceps', 'biceps', 'forearms', 'lats', 'upper_back', 'lower_back', 'abs', 'glutes', 'quads', 'hamstrings', 'calves'];
+
+/**
+ * A faint muted-mint illustration of an exercise's first primary muscle, drawn
+ * behind the text (#150). Decorative, so screen readers skip it. Cardio and
+ * stretches, and anything without a matching muscle, get none.
+ */
+function muscleArt(exerciseId) {
+  const ex = S.exById.get(exerciseId);
+  const muscle = ex && !['cardio', 'stretch'].includes(ex.kind) ? ex.muscles_main[0] : null;
+  if (!MUSCLE_ART.includes(muscle)) return null;
+  return h('img', { class: 'muscle-art', src: `icons/muscles/${muscle}.png`, alt: '', 'aria-hidden': 'true', 'data-muscle': muscle, decoding: 'async' });
+}
+
 function planRow(b, gym) {
+  const art = muscleArt(b.exercise_id);
   return h(
     'li',
-    { class: 'plan-row' },
+    { class: `plan-row${art ? ' has-art' : ''}` },
+    art,
     h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
     !S.draft.share_id && !S.draft.routine_id && h(
       'div',
@@ -2440,9 +2457,12 @@ function viewExercise(id) {
       return [field('Machine history is kept per gym', picker), rangeHere, box];
     },
   );
+  const art = muscleArt(ex.id);
   return h('main', { class: 'page' }, backOr('exercises', 'Exercises'),
-    h('h1', {}, ex.name),
-    h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])),
+    h('div', { class: `exercise-head${art ? ' has-art' : ''}` },
+      art,
+      h('h1', {}, ex.name),
+      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
     section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),
