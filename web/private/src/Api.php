@@ -283,7 +283,9 @@ final class Api
                     // Remember the choice for next time (#18).
                     $this->db->run('UPDATE users SET warm_up=? WHERE id=?', [$in['warm_up'] ? 1 : 0, $uid]);
                 }
-                self::json(['workout' => $this->gen->generate($user, $gym, $in)]);
+                $plan = $this->gen->generate($user, $gym, $in);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
+                self::json(['workout' => $plan]);
                 return;
             case 'alternatives':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
@@ -301,7 +303,7 @@ final class Api
                 if (!$ex || ($bodyweightOnly && !Catalog::supports($ex, [], true))) {
                     throw new HttpError(404, 'Exercise not found.');
                 }
-                self::json(['block' => $this->gen->block($user, $gym, $ex, bodyweightOnly: $bodyweightOnly)]);
+                self::json(['block' => $this->workouts->withNotes($uid, [$this->gen->block($user, $gym, $ex, bodyweightOnly: $bodyweightOnly)])[0]]);
                 return;
             case 'import_fitbod':
                 @set_time_limit(180);
@@ -364,7 +366,9 @@ final class Api
                 return;
             case 'routine_draft':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
-                self::json(['workout' => $this->routines->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen)]);
+                $plan = $this->routines->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
+                self::json(['workout' => $plan]);
                 return;
             case 'share_workout':
                 $this->shares->send(
@@ -387,8 +391,10 @@ final class Api
                 return;
             case 'shared_draft':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
+                $plan = $this->shares->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
                 self::json([
-                    'workout' => $this->shares->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen),
+                    'workout' => $plan,
                     // Accepting can add the sender's own exercises to this person's library.
                     'exercises' => Catalog::forUser($this->db, $uid, true),
                 ]);
@@ -465,6 +471,7 @@ final class Api
                 $e['previous'] = $this->gen->lastPerformance($uid, $e['variant_key']);
             }
             unset($e);
+            $active['exercises'] = $this->workouts->withNotes($uid, $active['exercises']);
         }
         return [
             'version' => app_version(),

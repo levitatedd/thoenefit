@@ -1742,3 +1742,30 @@ ul.notes {
   color: var(--ink);
   font-weight: 700;
 }
+
+/* ---- Setup notes (#125) ------------------------------------------------ */
+.setup-note {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(245, 198, 60, 0.12);
+  color: var(--chalk);
+  font: 600 14px/1.35 var(--body);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.setup-note .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--yellow);
+}
+
+button.setup-note {
+  cursor: pointer;
+}
