@@ -1376,6 +1376,25 @@ console.log('Stretches (#138)');
   await settle();
   const wasWarm = (await box('Include a warm-up').count()) ? await box('Include a warm-up').isChecked() : false;
   await setBox('Include a warm-up', false);
+  // Ticking a box keeps everything in place while the new plan is built: no box
+  // disappears and nothing below it jumps (#138 feedback).
+  {
+    let release;
+    const held = new Promise((r) => (release = r));
+    await page.route(/a=generate\b/, async (r) => { await held; await r.continue().catch(() => {}); });
+    const y = () => page.evaluate(() => Math.round(document.querySelector('.stepper, .controls .field:last-child').getBoundingClientRect().top));
+    const before = { y: await y(), boxes: await page.locator('.controls label.check').count(), rows: await page.locator('.plan-row').count() };
+    await page.locator('label.check:has-text("Include stretches") input').click();
+    await page.waitForTimeout(250);
+    const during = { y: await y(), boxes: await page.locator('.controls label.check').count(), rows: await page.locator('.plan-row').count(), dim: await page.locator('.stack.loading').count() };
+    release();
+    await page.unroute(/a=generate\b/);
+    await settle();
+    check('while a new plan is built, every box stays and nothing below moves', before.boxes === 3 && during.boxes === 3 && during.y === before.y, JSON.stringify({ before, during }));
+    check('the current plan stays on screen, dimmed, until the new one arrives', during.rows === before.rows && during.dim === 1, JSON.stringify({ before, during }));
+    await page.locator('label.check:has-text("Include stretches") input').click();
+    await settle();
+  }
   // Bodyweight only keeps the warm-up box: the warm-up becomes dynamic stretches.
   await setBox('Bodyweight only', true);
   check('Bodyweight only still offers Include a warm-up', (await box('Include a warm-up').count()) === 1);
