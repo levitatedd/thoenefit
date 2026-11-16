@@ -328,7 +328,7 @@ function render() {
     [
       ['history', 'History', 'history'],
       ['trends', 'Trends', 'trends'],
-      ['today', 'Today', 'today'],
+      ['today', 'Workout', 'today'],
       ['exercises', 'Exercises', 'list'],
       ['settings', 'Settings', 'gear'],
     ].map(([key, label, ic]) => (key === 'today' && sync?.active

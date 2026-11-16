@@ -375,7 +375,7 @@ check('opened from a past workout, the way back says Workout History', (await pa
 await page.click('.back');
 await page.waitForSelector('.lift');
 check('and returns to that same workout', (await page.evaluate(() => location.hash)) === workoutHash && (await page.locator('.back').textContent()).trim() === 'History');
-await page.click('.tab:has-text("Today")');
+await page.click('a.tab[href="#/today"]');
 await page.waitForSelector('.plan-row');
 await page.selectOption('select[aria-label="Workout type"]', 'push');
 await page.waitForFunction((n) => [...document.querySelectorAll('.plan-row h3')].some((e) => e.textContent === n) && !document.querySelector('.stack.loading'), liftName);
@@ -1244,7 +1244,7 @@ console.log('Pause and resume a workout');
   await page.goto(`${URL}#/history`);
   await page.waitForSelector('.tabs');
   check('the selected tab has a mint pill behind its icon, the others do not', (await tabBg('.tab[aria-current="page"]')) === 'rgba(58, 242, 156, 0.18)' && (await tabBg('a.tab[href="#/trends"]')) === 'rgba(0, 0, 0, 0)');
-  check('with no workout, the Today spot is the normal Today tab', (await page.locator('a.tab[href="#/today"]').count()) === 1 && (await page.locator('.pause-tab').count()) === 0);
+  check('with no workout, the middle tab is called Workout, with the barbell, and opens Today', (await page.locator('a.tab[href="#/today"]').textContent()) === 'Workout' && (await page.locator('.pause-tab').count()) === 0);
   await page.goto(`${URL}#/today`);
   await page.waitForSelector('button:has-text("Start workout")');
   await page.click('button:has-text("Start workout")');
