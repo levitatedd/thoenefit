@@ -128,6 +128,20 @@ final class Api
             ],
             // Other people on this server, by display name only, for sharing a workout.
             'people' => fn() => ['people' => $this->people($user)],
+            // Other people's workout history (#13), read-only, only for those who share it (#15).
+            'people_history' => fn() => ['people' => $this->auth->historyPeople($user)],
+            'member_history' => function () use ($user) {
+                $person = $this->auth->historyOwner($user, (int) ($_GET['user'] ?? 0));
+                return ['person' => $person, 'workouts' => $this->workouts->history($person['id'], (int) ($_GET['limit'] ?? 30), (int) ($_GET['offset'] ?? 0))];
+            },
+            'member_workout' => function () use ($user) {
+                $person = $this->auth->historyOwner($user, (int) ($_GET['user'] ?? 0));
+                $w = $this->workouts->get($person['id'], (string) ($_GET['id'] ?? ''));
+                if (!$w || $w['status'] !== 'completed') {
+                    throw new HttpError(404, 'Workout not found.');
+                }
+                return ['person' => $person, 'workout' => $w];
+            },
             'routines' => fn() => ['routines' => $this->routines->all($uid)],
             'shares' => fn() => [
                 'incoming' => $this->shares->incoming($uid),
@@ -381,6 +395,7 @@ final class Api
             'body_weight' => ($u['body_weight_kg'] ?? null) === null ? null
                 : round($u['unit'] === 'kg' ? (float) $u['body_weight_kg'] : (float) $u['body_weight_kg'] * 2.20462262, 1),
             'effort' => Calories::effort($u['effort'] ?? null),
+            'history_visibility' => ($u['history_visibility'] ?? 'private') === 'members' ? 'members' : 'private',
         ];
     }
 
@@ -472,6 +487,9 @@ final class Api
         }
         if (isset($in['split_type']) && isset(Generator::SPLIT_DAYS[$in['split_type']])) {
             $set['split_type'] = $in['split_type'];
+        }
+        if (isset($in['history_visibility']) && in_array($in['history_visibility'], Auth::HISTORY_VISIBILITY, true)) {
+            $set['history_visibility'] = $in['history_visibility'];
         }
         if (isset($in['minutes'])) {
             $set['minutes'] = max(15, min(180, (int) $in['minutes']));

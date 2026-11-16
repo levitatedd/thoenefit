@@ -214,6 +214,38 @@ final class Auth
         return $out;
     }
 
+    /** History visibility choices (#15): only the account itself, or anyone signed in. */
+    public const HISTORY_VISIBILITY = ['private', 'members'];
+
+    /**
+     * People whose workout history this account may look at (#13): every
+     * other active account that has chosen to share it. Display names only.
+     *
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function historyPeople(array $viewer): array
+    {
+        $out = [];
+        foreach ($this->db->all("SELECT id, display_name FROM users WHERE status='active' AND history_visibility='members' AND id<>? ORDER BY display_name, id", [(int) $viewer['id']]) as $u) {
+            $out[] = ['id' => (int) $u['id'], 'name' => $u['display_name']];
+        }
+        return $out;
+    }
+
+    /**
+     * The account whose history the viewer asked for, if they may see it.
+     * Answers 404 either way, so it does not reveal who has a private history.
+     */
+    public function historyOwner(array $viewer, int $ownerId): array
+    {
+        foreach ($this->historyPeople($viewer) as $p) {
+            if ($p['id'] === $ownerId) {
+                return $p;
+            }
+        }
+        throw new HttpError(404, 'That person does not share their workout history.');
+    }
+
     /** Accounts for the Manage Users page. Never includes password hashes. */
     public function listUsers(string $status = 'active'): array
     {

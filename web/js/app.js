@@ -310,11 +310,12 @@ function render() {
   let view;
   if (tab === 'workout') view = viewWorkout();
   else if (tab === 'history') view = arg ? viewHistoryDetail(arg) : viewHistory();
+  else if (tab === 'people') view = arg2 ? viewPersonWorkout(Number(arg), arg2) : viewPersonHistory(Number(arg));
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
   else if (tab === 'settings') view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : arg === 'import' ? viewImport() : arg === 'users' ? viewUsers() : arg === 'whats-new' ? viewWhatsNew() : viewSettings();
   else view = viewToday();
-  const current = tab === 'workout' ? 'today' : tab;
+  const current = tab === 'workout' ? 'today' : tab === 'people' ? 'history' : tab;
   const nav = h(
     'nav',
     { class: 'tabs', 'aria-label': 'Main' },
@@ -1662,7 +1663,11 @@ function viewTrends() {
   return page('Trends', h('p', { class: 'muted' }, 'Last 8 weeks, including this week.'), content);
 }
 
-function viewHistory() {
+/**
+ * A page-by-page list of finished workouts. fetchPage(offset, limit) returns
+ * {workouts}; hrefOf(w) is where a row opens; empty is shown when there are none.
+ */
+function workoutList(fetchPage, hrefOf, empty) {
   const PAGE = 50;
   const list = h('ul', { class: 'log' });
   const more = h('button', { class: 'btn block', type: 'button', hidden: true }, 'Show older workouts');
@@ -1671,14 +1676,14 @@ function viewHistory() {
   const load = async () => {
     more.disabled = true;
     try {
-      const data = await api.get('history', `&limit=${PAGE}&offset=${offset}`);
+      const data = await fetchPage(offset, PAGE);
       note.hidden = true;
       if (!data.workouts.length && offset === 0) {
-        list.replaceWith(h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')));
+        list.replaceWith(empty);
         return;
       }
       list.append(...data.workouts.map((w) =>
-        h('li', {}, h('a', { class: 'log-row', href: `#/history/${w.id}` },
+        h('li', {}, h('a', { class: 'log-row', href: hrefOf(w) },
           h('span', { class: 'log-date' }, fmtDate(w.started_at, offset || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
           h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
           h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
@@ -1694,7 +1699,66 @@ function viewHistory() {
   };
   more.onclick = load;
   load();
-  return page('History', note, list, more);
+  return [note, list, more];
+}
+
+function viewHistory() {
+  // Other people who share their history (#13). Nothing shows until someone does.
+  const people = h('div', { 'data-people': '' });
+  api.get('people_history').then(({ people: list }) => fill(people, list.length > 0 && h('section', { class: 'card stack people-card' },
+    h('h2', {}, 'Other people'),
+    h('ul', { class: 'log' }, list.map((p) => h('li', {}, h('a', { class: 'log-row', href: `#/people/${p.id}` }, h('span', { class: 'log-title' }, p.name), h('span', { class: 'log-meta' }, 'See their workouts'))))),
+    h('p', { class: 'muted small' }, S.user.history_visibility === 'members' ? 'They can see your history too.' : 'Your own history is private. You can share it in Settings.'))), () => {});
+  return page('History', people,
+    workoutList(
+      (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
+      (w) => `#/history/${w.id}`,
+      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today'))));
+}
+
+/** Someone else's finished workouts (#13). Read-only; the server checks they share them (#15). */
+function viewPersonHistory(personId) {
+  const title = h('h1', {}, 'Workout history');
+  return h('main', { class: 'page' }, backLink('history', 'History'), title,
+    h('p', { class: 'muted' }, 'Read-only. You can look, but only they can change their workouts.'),
+    workoutList(
+      async (offset, limit) => {
+        const data = await api.get('member_history', `&user=${personId}&limit=${limit}&offset=${offset}`);
+        title.textContent = `${data.person.name}'s workouts`;
+        return data;
+      },
+      (w) => `#/people/${personId}/${w.id}`,
+      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Their finished workouts will show up here.'))));
+}
+
+/** One of someone else's workouts, read-only. */
+function viewPersonWorkout(personId, id) {
+  const back = h('a', { class: 'back', href: `#/people/${personId}` }, icon('back', 20), 'Their workouts');
+  return h('main', { class: 'page' }, back,
+    asyncSection(
+      () => api.get('member_workout', `&user=${personId}&id=${encodeURIComponent(id)}`),
+      ({ person, workout }) => {
+        fill(back, icon('back', 20), `${person.name}'s workouts`);
+        return [
+          h('header', { class: 'page-head' },
+            h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`),
+            h('p', { class: 'muted' }, `${person.name}, ${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`),
+            workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
+          ...workout.exercises.filter((e) => e.sets.length).map((e) => {
+            let n = 0;
+            return h('section', { class: 'card lift read-only' },
+              h('header', { class: 'lift-head' }, h('div', {}, h('h2', {}, e.name))),
+              h('ol', { class: 'sets read-only' }, e.sets.map((s, si) => {
+                if (isCardio(e)) return h('li', { class: 'set-line' }, h('span', { class: 'set-tag', 'aria-hidden': 'true' }, String(si + 1)), h('span', {}, fmtCardio(s, workout.unit)));
+                if (!s.warmup) n += 1;
+                return h('li', { class: `set-line ${s.warmup ? 'warm' : ''}` },
+                  h('span', { class: 'set-tag', 'aria-label': s.warmup ? 'Warm-up set' : `Set ${n}` }, s.warmup ? 'W' : String(n)),
+                  h('span', {}, s.weight > 0 ? `${fmtW(s.weight)} ${workout.unit} × ${s.reps}` : `${s.reps} reps`));
+              })));
+          }),
+        ];
+      },
+    ));
 }
 
 function viewHistoryDetail(id) {
@@ -2104,6 +2168,12 @@ function viewSettings() {
     section('Gyms',
       h('ul', { class: 'log' }, S.gyms.map((g) => h('li', {}, h('a', { class: 'log-row', href: `#/settings/gym/${g.id}` }, h('span', { class: 'log-title' }, g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')), h('span', { class: 'log-meta' }, g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only'))))),
       h('a', { class: 'btn block', href: '#/settings/gym/new' }, icon('plus', 18), 'Add a gym')),
+    section('Who can see your history',
+      choices([
+        ['private', 'Only me', 'Nobody else can see your workouts'],
+        ['members', 'All signed-in users', 'Anyone with an account here can see your finished workouts, read-only'],
+      ], S.user.history_visibility || 'private', (v) => saveProfile('history_visibility', v).then((ok) => ok !== null && toast(v === 'members' ? 'Your history is now visible to signed-in users.' : 'Your history is now private.'))),
+      h('p', { class: 'muted small' }, 'Workouts in progress are never shown. Others see what you logged, not your gyms, routines or settings.')),
     section('Your data',
       h('a', { class: 'btn block', href: 'api.php?a=export', download: '' }, 'Export all sets as CSV'),
       h('p', { class: 'muted small' }, 'One row per set, including warm-ups, with dates in UTC.'),

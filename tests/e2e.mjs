@@ -1125,6 +1125,74 @@ console.log('Admin password resets and deactivation');
   await cctx.close();
 }
 
+console.log("Seeing each other's history");
+{
+  const csrf = (await api('bootstrap')).csrf;
+  const viewerName = `viewer${Date.now() % 100000}`;
+  await post('create_user', { username: viewerName, display_name: 'Viewer', password: 'viewer-password-1' }, csrf);
+  const vctx = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await vctx.addInitScript(() => { try { localStorage.setItem('tf.install', JSON.stringify({ never: true })); } catch (e) { /* about:blank */ } });
+  const vp = await vctx.newPage();
+  vp.on('pageerror', (e) => errors.push(String(e)));
+  await vp.goto(URL);
+  await vp.fill('input[name=username]', viewerName);
+  await vp.fill('input[name=password]', 'viewer-password-1');
+  await vp.click('button[type=submit]');
+  await vp.waitForSelector('h1:has-text("Welcome")');
+  await vp.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json();
+    await fetch('api.php?a=save_profile', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ onboarded: true }) });
+  });
+  const myId = (await api('bootstrap')).user.id;
+  const viewerGet = (q) => vp.evaluate(async (u) => (await fetch(u, { credentials: 'same-origin' })).status, `api.php?a=${q}`);
+  await vp.goto(`${URL}#/history`);
+  await vp.reload();
+  await vp.waitForSelector('.tabs');
+  await vp.waitForTimeout(400);
+  check('history starts private: nobody else is listed on History', (await vp.locator('.people-card').count()) === 0);
+  check('a private history cannot be fetched by another account', (await viewerGet(`member_history&user=${myId}`)) === 404);
+
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Who can see your history');
+  check('Settings offers Only me and All signed-in users, starting at Only me', (await page.locator('.choice[aria-pressed="true"]:has-text("Only me")').count()) === 1 && (await page.locator('.choice:has-text("All signed-in users")').count()) === 1);
+  await page.click('.choice:has-text("All signed-in users")');
+  await waitForToast(page, /visible to signed-in users/);
+  await page.locator('.section', { hasText: 'Who can see your history' }).scrollIntoViewIfNeeded();
+  await shot('17-history-visibility');
+
+  await vp.goto(`${URL}#/today`);
+  await vp.goto(`${URL}#/history`);
+  await vp.waitForSelector('.people-card');
+  check('once shared, the other person sees them under Other people on History', /E2E/.test(await vp.textContent('.people-card')));
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18-history-other-people.png` });
+  await vp.click('.people-card .log-row');
+  await vp.waitForFunction(() => /'s workouts/.test(document.querySelector('h1')?.textContent || '') && document.querySelectorAll('.log-row').length > 0);
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18b-history-their-list.png` });
+  check("their list opens with the person's name and their workouts", /E2E's workouts/.test(await vp.textContent('h1')) && (await vp.locator('.log-row').count()) > 0);
+  await vp.click('.log-row:has-text("Push")');
+  await vp.waitForSelector('.lift.read-only');
+  check('no stray text from the page builder', !/object HTMLElement|undefined|null/.test(await vp.textContent('main')));
+  check('one of their workouts shows the sets they logged', (await vp.locator('.set-line').count()) > 0 && / × \d/.test(await vp.textContent('.set-line:not(.warm)')));
+  check('it is read-only: nothing to type in, no Save or Delete', (await vp.locator('.page input').count()) === 0 && (await vp.locator('button:has-text("Save changes"), button:has-text("Delete workout"), button:has-text("Send to Strava")').count()) === 0);
+  check('the History tab stays selected', (await vp.getAttribute('.tab:has-text("History")', 'aria-current')) === 'page');
+  check('no sideways scrolling on their workout', (await vp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
+  if (SHOTS) await vp.screenshot({ path: `${SHOTS}/19-history-other-workout.png`, fullPage: true });
+  const wid = (await vp.evaluate(() => location.hash)).split('/').pop();
+  const save = await vp.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json();
+    const r = await fetch('api.php?a=save_workout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, rev: 999, status: 'completed', exercises: [] } }) });
+    return r.status;
+  }, wid);
+  check("the server refuses edits to someone else's workout", save === 403, String(save));
+
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Who can see your history');
+  await page.click('.choice:has-text("Only me")');
+  await waitForToast(page, /now private/);
+  check('switching back to Only me hides it again', (await viewerGet(`member_history&user=${myId}`)) === 404 && (await viewerGet(`member_workout&user=${myId}&id=${wid}`)) === 404);
+  await vctx.close();
+}
+
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;
