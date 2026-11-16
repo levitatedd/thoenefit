@@ -1091,11 +1091,14 @@ const isCardio = (b) => b.kind === 'cardio';
 /** "Warm-up, 5 exercises and 7 stretches, about 49 minutes" */
 function planSummary(d) {
   const lifts = d.exercises.filter((b) => !isTimed(b)).length;
-  const stretches = d.exercises.filter(isStretch).length;
+  // Without a cardio machine the warm-up is the dynamic stretches, so they are not counted twice.
+  const stretchWarmUp = d.warm_up && d.warm_up_kind === 'stretches';
+  const stretches = d.exercises.filter((b) => isStretch(b) && !(stretchWarmUp && b.pattern === 'dynamic_stretch')).length;
+  const warm = d.warm_up ? (stretchWarmUp ? 'Stretch warm-up' : 'Warm-up') : '';
   const ex = `${lifts} exercise${lifts === 1 ? '' : 's'}`;
   const list = stretches
-    ? `${d.warm_up ? 'Warm-up, ' : ''}${ex} and ${stretches} stretch${stretches === 1 ? '' : 'es'}`
-    : `${d.warm_up ? 'Warm-up and ' : ''}${ex}`;
+    ? `${warm ? `${warm}, ` : ''}${ex} and ${stretches} stretch${stretches === 1 ? '' : 'es'}`
+    : `${warm ? `${warm} and ` : ''}${ex}`;
   return `${d.bodyweight_only ? 'Bodyweight only · ' : ''}${list}, about ${d.est_minutes} minutes`;
 }
 

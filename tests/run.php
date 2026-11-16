@@ -1129,9 +1129,15 @@ $first = $warm['exercises'][0];
 check('with it, the workout starts with 10 minutes on a cardio machine the gym has (' . $first['name'] . ')', $warm['warm_up'] === true && $first['slot'] === 'warmup' && $first['kind'] === 'cardio' && $first['target_seconds'] === 600 && $first['name'] === 'Stationary Bike' && $first['target_sets'] === 1 && $first['rest_seconds'] === 0);
 check('the warm-up counts toward the planned time, and the lifts start the same as without it', $warm['est_minutes'] === (int) round(array_sum(array_column($warm['exercises'], 'minutes'))) && $warm['est_minutes'] <= $warm['minutes'] && array_column(array_slice($warm['exercises'], 1, 3), 'exercise_id') === array_column(array_slice($plain['exercises'], 0, 3), 'exercise_id'));
 $none = $gen->generate($cUser, $noCardioGym, ['day_type' => 'push', 'warm_up' => true]);
-check('a gym with no cardio machine gets no warm-up and does not offer one', $none['warm_up'] === false && $none['warm_up_available'] === false && $none['exercises'][0]['kind'] !== 'cardio');
+$leadOf = static fn($plan) => array_values(array_filter($plan['exercises'], static fn($b) => $b['kind'] !== 'stretch' || $b['pattern'] !== 'dynamic_stretch' ? false : true));
+check('a gym with no cardio machine still offers a warm-up: dynamic stretches instead of a machine', $none['warm_up'] === true && $none['warm_up_available'] === true && $none['warm_up_kind'] === 'stretches'
+    && !in_array('cardio', array_column($none['exercises'], 'kind'), true) && $none['exercises'][0]['pattern'] === 'dynamic_stretch' && in_array(count($leadOf($none)), [2, 3], true));
 $bw = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'warm_up' => true, 'bodyweight_only' => true]);
-check('bodyweight-only workouts get no machine warm-up', $bw['warm_up'] === false && $bw['warm_up_available'] === false);
+check('bodyweight-only workouts get no machine, but warm up with 2 or 3 dynamic stretches (#138)', $bw['warm_up'] === true && $bw['warm_up_available'] === true && !in_array('cardio', array_column($bw['exercises'], 'kind'), true)
+    && $bw['exercises'][0]['pattern'] === 'dynamic_stretch' && in_array(count($leadOf($bw)), [2, 3], true) && !in_array('static_stretch', array_column($bw['exercises'], 'pattern'), true));
+$bwOff = $gen->generate($cUser, $cGym, ['day_type' => 'push', 'bodyweight_only' => true]);
+check('with the box unticked, bodyweight-only workouts have no warm-up', $bwOff['warm_up'] === false && !in_array('stretch', array_column($bwOff['exercises'], 'kind'), true));
+check('with a machine, the warm-up is still the machine and no stretches unless asked', $warm['warm_up_kind'] === 'cardio' && !in_array('stretch', array_column($warm['exercises'], 'kind'), true));
 $ellip = $bySlug['elliptical'];
 $bike = $bySlug['stationary-bike'];
 $cardioDoc = $doc($cGym, 'push', [[$bench, 6, 10, [[135, 8]]]], '2026-11-08T17:00:00Z');
