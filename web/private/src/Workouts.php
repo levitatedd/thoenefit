@@ -464,6 +464,89 @@ final class Workouts
         return array_values($out);
     }
 
+    private const LB_PER_KG = 2.20462262;
+
+    /**
+     * A finished workout's recap (#123): its working sets, and for each lift
+     * either a new record or a first logged result.
+     *
+     * Records compare completed working sets (not warm-ups) with this account's
+     * earlier completed workouts, Fitbod imports included, by history key, so
+     * machines and cables only compare at the same gym. Earlier weights are
+     * converted to this workout's unit. Per lift, the heaviest weight beats
+     * most reps at a weight; a lift never logged before is a first result.
+     * Cardio and stretches are left out.
+     */
+    public function recap(int $uid, string $id): ?array
+    {
+        $w = $this->get($uid, $id);
+        if (!$w || $w['status'] !== 'completed') {
+            return null;
+        }
+        $startedAt = $this->db->val('SELECT started_at FROM workouts WHERE id=?', [$w['id']]);
+        $unit = $w['unit'];
+        $tol = static fn(float $weight) => max(0.25, 0.005 * $weight);
+        $out = ['working_sets' => 0, 'exercises' => 0, 'unit' => $unit, 'records' => [], 'firsts' => []];
+        foreach ($w['exercises'] as $e) {
+            if (Catalog::isTimed($e['kind'])) {
+                continue;
+            }
+            $sets = array_values(array_filter($e['sets'], static fn($s) => $s['done'] && !$s['warmup'] && (int) $s['reps'] > 0));
+            if (!$sets) {
+                continue;
+            }
+            $out['working_sets'] += count($sets);
+            $out['exercises']++;
+            // Best reps at each weight this time, heaviest first.
+            $now = [];
+            foreach ($sets as $s) {
+                $key = (string) round((float) $s['weight'], 2);
+                $now[$key] = max($now[$key] ?? 0, (int) $s['reps']);
+            }
+            krsort($now, SORT_NUMERIC);
+            $topWeight = (float) array_key_first($now);
+            $prev = [];
+            foreach ($this->db->all(
+                "SELECT s.weight, s.reps, w.unit FROM workout_sets s
+                 JOIN workout_exercises we ON we.id=s.workout_exercise_id
+                 JOIN workouts w ON w.id=s.workout_id
+                 WHERE w.user_id=? AND w.status='completed' AND w.id<>? AND w.started_at<? AND we.variant_key=?
+                   AND s.done=1 AND s.warmup=0 AND s.reps>0",
+                [$uid, $w['id'], $startedAt, $e['variant_key']]
+            ) as $p) {
+                $weight = (float) $p['weight'];
+                if ($p['unit'] !== $unit) {
+                    $weight = $unit === 'kg' ? $weight / self::LB_PER_KG : $weight * self::LB_PER_KG;
+                }
+                $prev[] = [round($weight, 1), (int) $p['reps']];
+            }
+            $base = ['exercise_id' => $e['exercise_id'], 'name' => $e['name']];
+            if (!$prev) {
+                $out['firsts'][] = $base + ['weight' => $topWeight, 'reps' => $now[array_key_first($now)]];
+                continue;
+            }
+            $prevTop = max(array_column($prev, 0));
+            if ($topWeight > 0 && $topWeight > $prevTop + $tol($prevTop)) {
+                $out['records'][] = $base + ['type' => 'weight', 'weight' => $topWeight, 'reps' => $now[array_key_first($now)], 'previous_weight' => $prevTop];
+                continue;
+            }
+            foreach ($now as $weight => $reps) {
+                $weight = (float) $weight;
+                $before = 0;
+                foreach ($prev as [$pw, $pr]) {
+                    if (abs($pw - $weight) <= $tol($weight)) {
+                        $before = max($before, $pr);
+                    }
+                }
+                if ($before > 0 && $reps > $before) {
+                    $out['records'][] = $base + ['type' => 'reps', 'weight' => $weight, 'reps' => $reps, 'previous_reps' => $before];
+                    break;
+                }
+            }
+        }
+        return $out;
+    }
+
     /** Streams every logged set as CSV. */
     public function exportCsv(int $uid, $out): void
     {
