@@ -1376,6 +1376,16 @@ console.log('Stretches (#138)');
   await settle();
   const wasWarm = (await box('Include a warm-up').count()) ? await box('Include a warm-up').isChecked() : false;
   await setBox('Include a warm-up', false);
+  // Bodyweight only keeps the warm-up box: the warm-up becomes dynamic stretches.
+  await setBox('Bodyweight only', true);
+  check('Bodyweight only still offers Include a warm-up', (await box('Include a warm-up').count()) === 1);
+  await setBox('Include a warm-up', true);
+  let bwT = await targets();
+  check('the summary calls it a stretch warm-up', /Stretch warm-up and \d+ exercises/.test(await page.textContent('.summary')), await page.textContent('.summary'));
+  check('a bodyweight-only warm-up is 2 or 3 dynamic stretches, no machine', [2, 3].includes(bwT.filter((x) => /moving/.test(x)).length) && /moving/.test(bwT[0]) && !bwT.some((x) => /min warm-up/.test(x)), bwT.join(' | '));
+  await shot('35-bodyweight-warm-up');
+  await setBox('Include a warm-up', false);
+  await setBox('Bodyweight only', false);
   check('Include stretches sits with Bodyweight only, off to start with', (await page.locator('.controls label.check:has-text("Include stretches")').count()) === 1 && !(await box('Include stretches').isChecked()) && !(await targets()).some((t) => /^Hold|moving/.test(t)));
   await setBox('Include stretches', true);
   let t = await targets();

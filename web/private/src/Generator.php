@@ -613,7 +613,10 @@ final class Generator
         $warm = null;
         $stretches = ($opts['stretches'] ?? false) === true;
         $warmUpAsked = ($opts['warm_up'] ?? false) === true;
-        $wantDynamic = $stretches && $warmUpAsked;
+        // Without a cardio machine (bodyweight only, or a gym with none) the
+        // warm-up is dynamic stretches on their own, which need no equipment.
+        $noMachine = $bodyweightOnly || empty($by['cardio']);
+        $wantDynamic = $warmUpAsked && ($stretches || $noMachine);
         // Leave room for up to three stretches at each end while choosing lifts; the real time is added below.
         $stretchReserve = ($stretches ? 3 : 0) + ($wantDynamic ? 3 : 0);
         $total += $stretchReserve;
@@ -716,9 +719,9 @@ final class Generator
         // areas hard (3+ planned sets each), two for a narrower or short workout.
         $total -= $stretchReserve;
         $hardAreas = count(array_filter($worked, static fn($sets) => $sets >= 3));
-        $perEnd = $stretches ? ($minutes > 30 && $hardAreas >= 3 ? 3 : 2) : 0;
+        $perEnd = $minutes > 30 && $hardAreas >= 3 ? 3 : 2;
         $dynamicCount = $wantDynamic ? $perEnd : 0;
-        $cooldownCount = $perEnd;
+        $cooldownCount = $stretches ? $perEnd : 0;
         if ($dynamicCount) {
             $dynamic = $this->pickStretches($gym, $by['dynamic_stretch'] ?? [], $worked, $dynamicCount);
             foreach ($dynamic as $i => &$d) {
@@ -744,8 +747,10 @@ final class Generator
             'gym_id' => $gym['id'],
             'gym_name' => $gym['name'],
             'bodyweight_only' => $bodyweightOnly,
-            'warm_up' => $warm !== null,
-            'warm_up_available' => !$bodyweightOnly && !empty($by['cardio']),
+            'warm_up' => $warm !== null || $dynamicCount > 0,
+            // Every workout can warm up: on a cardio machine when there is one, otherwise with dynamic stretches.
+            'warm_up_available' => true,
+            'warm_up_kind' => $noMachine ? 'stretches' : 'cardio',
             'stretches' => $stretches,
             'unit' => $user['unit'],
             'minutes' => $minutes,
