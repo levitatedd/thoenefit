@@ -982,8 +982,7 @@ function viewToday() {
         onchange: (e) => {
           clearTimeout(S.minutesTimer);
           S.draftOpts.bodyweight_only = e.target.checked;
-          S.draft = null;
-          loadDraft();
+          loadDraft(); // the current plan stays, dimmed, until the new one arrives, so nothing jumps
         },
       }),
       'Bodyweight only',
@@ -998,14 +997,14 @@ function viewToday() {
           clearTimeout(S.minutesTimer);
           S.draftOpts.stretches = e.target.checked;
           S.user.stretches = e.target.checked;
-          S.draft = null;
           loadDraft();
         },
       }),
       'Include stretches',
     ),
-    // A cardio warm-up (#18), only offered when the gym has a cardio machine. The choice is remembered.
-    S.draft && S.draft.warm_up_available && h('label', { class: 'check' },
+    // A warm-up: a cardio machine (#18), or dynamic stretches with no machine (#138). Always
+    // shown, so the boxes never shift while a plan is being built. The choice is remembered.
+    h('label', { class: 'check' },
       h('input', {
         type: 'checkbox',
         checked: S.draftOpts.warm_up ?? !!S.user.warm_up,
@@ -1014,7 +1013,6 @@ function viewToday() {
           clearTimeout(S.minutesTimer);
           S.draftOpts.warm_up = e.target.checked;
           S.user.warm_up = e.target.checked;
-          S.draft = null;
           loadDraft();
         },
       }),
