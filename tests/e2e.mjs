@@ -108,6 +108,10 @@ check('nothing needs a cable or machine at a garage gym', !first.some((n) => /Ca
 check('each exercise explains why', (await page.$$eval('.plan-row .why', (els) => els.every((e) => e.textContent.length > 20))) === true);
 check('no sideways scrolling at iPhone width', (await overflow()) <= 0);
 await shot('03-today');
+{
+  const colour = (sel) => page.$eval(sel, (el) => getComputedStyle(el).color);
+  check('Today\'s heading and planned exercise names are mint', (await colour('.today-head h1')) === 'rgb(58, 242, 156)' && (await colour('.plan-row .name-link')) === 'rgb(58, 242, 156)');
+}
 
 // Recovery estimate lives on the Trends tab (#26), so Today ends with the plan and the logo.
 const order = await page.evaluate(() => {
@@ -165,6 +169,7 @@ for (let i = 0; i < setRows; i++) {
     await page.waitForSelector('#rest:not([hidden])');
     check('finishing a set starts the rest timer', /\d:\d\d/.test(await page.textContent('#rest-time')));
     await shot('05-workout');
+check('during a workout the exercise names stay white, so green still means done', (await page.$eval('.lift .name-link', (el) => getComputedStyle(el).color)) === 'rgb(244, 242, 236)');
     await page.click('#rest button:has-text("Skip")');
   }
 }

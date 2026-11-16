@@ -839,7 +839,7 @@ function viewToday() {
   const gym = activeGym();
   const active = sync.active;
   refreshShares();
-  const head = h('header', { class: 'page-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
+  const head = h('header', { class: 'page-head today-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {

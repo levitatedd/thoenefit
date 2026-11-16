@@ -537,6 +537,18 @@ textarea:focus {
   color: var(--blue);
 }
 
+/* Today in mint, like Settings: the heading and the planned exercise names.
+   The in-progress workout keeps white names, so green stays "done" there. */
+.today-head h1,
+.plan-row .name-link,
+.plan-row .name-link .icon {
+  color: var(--mint);
+}
+
+.plan-row .name-link {
+  text-decoration-color: rgba(58, 242, 156, 0.35);
+}
+
 .target {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
