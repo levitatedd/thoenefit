@@ -319,6 +319,8 @@ function render() {
     view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : sub ? sub() : viewSettings();
   }
   else view = viewToday();
+  // The main page of each tab has a mint heading, like Today and Settings (#103).
+  if (!arg && ['history', 'trends', 'exercises'].includes(tab)) view.classList.add('tab-home');
   const current = tab === 'workout' ? 'today' : tab === 'people' ? 'history' : tab;
   const nav = h(
     'nav',
