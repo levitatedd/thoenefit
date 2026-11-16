@@ -166,6 +166,46 @@ check('the old password no longer works and the new one does', throws(fn() => $a
 $auth->setPassword($uid, 'correct horse battery');
 $db->run('DELETE FROM auth_sessions WHERE user_id=?', [$uid2]);
 
+echo "Admin password resets and deactivation\n";
+$admDb = $freshDb('admin');
+Migrator::ensure($admDb);
+$admAuth = new Auth($admDb, []);
+$boss = $admAuth->createUser('boss', 'boss long password');
+$pat = $admAuth->createUser('pat', 'pat long password');
+$lee = $admAuth->createUser('lee', 'lee long password');
+$bossRow = $admDb->one('SELECT * FROM users WHERE id=?', [$boss]);
+$patRow = $admDb->one('SELECT * FROM users WHERE id=?', [$pat]);
+$patSessions = fn() => (int) $admDb->val('SELECT COUNT(*) FROM auth_sessions WHERE user_id=?', [$pat]);
+$admAuth->login('pat', 'pat long password');
+$admAuth->login('pat', 'pat long password');
+$admDb->insert('workouts', ['id' => uuid(), 'user_id' => $pat, 'gym_name' => 'Gym', 'day_type' => 'push', 'status' => 'completed', 'unit' => 'lb', 'started_at' => \TF\now_utc(), 'completed_at' => \TF\now_utc(), 'rev' => 1, 'updated_at' => \TF\now_utc()]);
+check('a regular user cannot reset passwords or deactivate anyone', throws(fn() => $admAuth->adminResetPassword($patRow, $lee, 'a new long password'), 403) && throws(fn() => $admAuth->deactivate($patRow, $lee), 403) && throws(fn() => $admAuth->reactivate($patRow, $lee), 403));
+check('a too-short reset password is refused and signs nobody out', throws(fn() => $admAuth->adminResetPassword($bossRow, $pat, 'short'), 422) && $patSessions() === 2);
+$admAuth->adminResetPassword($bossRow, $pat, 'reset by the admin');
+check('the admin can reset a password, which signs that person out everywhere', $patSessions() === 0);
+check('the old password stops working and the new one works', throws(fn() => $admAuth->login('pat', 'pat long password'), 401) && (int) $admAuth->login('pat', 'reset by the admin')['id'] === $pat);
+check("the admin's own account is changed from Settings, not here", throws(fn() => $admAuth->adminResetPassword($bossRow, $boss, 'another long one'), 422) && throws(fn() => $admAuth->deactivate($bossRow, $boss), 422));
+check('an account that does not exist is reported as not found', throws(fn() => $admAuth->deactivate($bossRow, 9999), 404));
+$admAuth->deactivate($bossRow, $pat);
+check('deactivating signs the account out everywhere', $patSessions() === 0 && $admDb->val('SELECT status FROM users WHERE id=?', [$pat]) === 'inactive');
+check('a deactivated account cannot sign in, and is told why only with the right password', throws(fn() => $admAuth->login('pat', 'reset by the admin'), 403) && throws(fn() => $admAuth->login('pat', 'wrong password!'), 401));
+$admDb->run("DELETE FROM login_attempts");
+check('its workouts are kept', (int) $admDb->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$pat]) === 1);
+check('it leaves the account list and appears under deactivated accounts', !in_array('pat', array_column($admAuth->listUsers(), 'username'), true) && array_column($admAuth->listUsers('inactive'), 'username') === ['pat']);
+check('it is no longer offered for sharing a workout', !in_array($pat, array_column($admAuth->shareTargets($bossRow), 'id'), true));
+check('deactivating it twice is reported, not repeated', throws(fn() => $admAuth->deactivate($bossRow, $pat), 404));
+$admAuth->adminResetPassword($bossRow, $pat, 'reset while it was off');
+check('a deactivated account can still have its password reset', $admDb->val('SELECT status FROM users WHERE id=?', [$pat]) === 'inactive');
+$admAuth->reactivate($bossRow, $pat);
+check('turning it back on lets it sign in again, with its history intact', (int) $admAuth->login('pat', 'reset while it was off')['id'] === $pat && (int) $admDb->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$pat]) === 1);
+check('only a deactivated account can be turned back on', throws(fn() => $admAuth->reactivate($bossRow, $lee), 404));
+$admDb->run("UPDATE users SET role='admin' WHERE id=?", [$lee]);
+check('an admin account cannot be deactivated', throws(fn() => $admAuth->deactivate($bossRow, $lee), 422));
+unset($admDb, $admAuth);
+foreach (['', '-wal', '-shm'] as $sfx) {
+    @unlink("$file-admin$sfx");
+}
+
 echo "Account requests\n";
 $reqDb = $freshDb('requests');
 Migrator::ensure($reqDb);
