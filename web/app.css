@@ -539,6 +539,7 @@ textarea:focus {
 
 /* Today in mint, like Settings: the heading and the planned exercise names.
    The in-progress workout keeps white names, so green stays "done" there. */
+.tab-home > h1,
 .today-head h1,
 .plan-row .name-link,
 .plan-row .name-link .icon {

@@ -1226,12 +1226,15 @@ console.log("Seeing each other's history");
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
   await page.setViewportSize({ width: w, height: hgt });
   let worst = 0;
+  const plain = [];
   for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
     await page.goto(`${URL}#/${tab}`);
     await page.waitForSelector('.tabs');
     await page.waitForTimeout(250);
     worst = Math.max(worst, await overflow());
+    if ((await page.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
   }
+  if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
 }
 console.log('Send feedback');
