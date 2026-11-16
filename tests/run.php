@@ -166,6 +166,46 @@ check('the old password no longer works and the new one does', throws(fn() => $a
 $auth->setPassword($uid, 'correct horse battery');
 $db->run('DELETE FROM auth_sessions WHERE user_id=?', [$uid2]);
 
+echo "Admin password resets and deactivation\n";
+$admDb = $freshDb('admin');
+Migrator::ensure($admDb);
+$admAuth = new Auth($admDb, []);
+$boss = $admAuth->createUser('boss', 'boss long password');
+$pat = $admAuth->createUser('pat', 'pat long password');
+$lee = $admAuth->createUser('lee', 'lee long password');
+$bossRow = $admDb->one('SELECT * FROM users WHERE id=?', [$boss]);
+$patRow = $admDb->one('SELECT * FROM users WHERE id=?', [$pat]);
+$patSessions = fn() => (int) $admDb->val('SELECT COUNT(*) FROM auth_sessions WHERE user_id=?', [$pat]);
+$admAuth->login('pat', 'pat long password');
+$admAuth->login('pat', 'pat long password');
+$admDb->insert('workouts', ['id' => uuid(), 'user_id' => $pat, 'gym_name' => 'Gym', 'day_type' => 'push', 'status' => 'completed', 'unit' => 'lb', 'started_at' => \TF\now_utc(), 'completed_at' => \TF\now_utc(), 'rev' => 1, 'updated_at' => \TF\now_utc()]);
+check('a regular user cannot reset passwords or deactivate anyone', throws(fn() => $admAuth->adminResetPassword($patRow, $lee, 'a new long password'), 403) && throws(fn() => $admAuth->deactivate($patRow, $lee), 403) && throws(fn() => $admAuth->reactivate($patRow, $lee), 403));
+check('a too-short reset password is refused and signs nobody out', throws(fn() => $admAuth->adminResetPassword($bossRow, $pat, 'short'), 422) && $patSessions() === 2);
+$admAuth->adminResetPassword($bossRow, $pat, 'reset by the admin');
+check('the admin can reset a password, which signs that person out everywhere', $patSessions() === 0);
+check('the old password stops working and the new one works', throws(fn() => $admAuth->login('pat', 'pat long password'), 401) && (int) $admAuth->login('pat', 'reset by the admin')['id'] === $pat);
+check("the admin's own account is changed from Settings, not here", throws(fn() => $admAuth->adminResetPassword($bossRow, $boss, 'another long one'), 422) && throws(fn() => $admAuth->deactivate($bossRow, $boss), 422));
+check('an account that does not exist is reported as not found', throws(fn() => $admAuth->deactivate($bossRow, 9999), 404));
+$admAuth->deactivate($bossRow, $pat);
+check('deactivating signs the account out everywhere', $patSessions() === 0 && $admDb->val('SELECT status FROM users WHERE id=?', [$pat]) === 'inactive');
+check('a deactivated account cannot sign in, and is told why only with the right password', throws(fn() => $admAuth->login('pat', 'reset by the admin'), 403) && throws(fn() => $admAuth->login('pat', 'wrong password!'), 401));
+$admDb->run("DELETE FROM login_attempts");
+check('its workouts are kept', (int) $admDb->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$pat]) === 1);
+check('it leaves the account list and appears under deactivated accounts', !in_array('pat', array_column($admAuth->listUsers(), 'username'), true) && array_column($admAuth->listUsers('inactive'), 'username') === ['pat']);
+check('it is no longer offered for sharing a workout', !in_array($pat, array_column($admAuth->shareTargets($bossRow), 'id'), true));
+check('deactivating it twice is reported, not repeated', throws(fn() => $admAuth->deactivate($bossRow, $pat), 404));
+$admAuth->adminResetPassword($bossRow, $pat, 'reset while it was off');
+check('a deactivated account can still have its password reset', $admDb->val('SELECT status FROM users WHERE id=?', [$pat]) === 'inactive');
+$admAuth->reactivate($bossRow, $pat);
+check('turning it back on lets it sign in again, with its history intact', (int) $admAuth->login('pat', 'reset while it was off')['id'] === $pat && (int) $admDb->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$pat]) === 1);
+check('only a deactivated account can be turned back on', throws(fn() => $admAuth->reactivate($bossRow, $lee), 404));
+$admDb->run("UPDATE users SET role='admin' WHERE id=?", [$lee]);
+check('an admin account cannot be deactivated', throws(fn() => $admAuth->deactivate($bossRow, $lee), 422));
+unset($admDb, $admAuth);
+foreach (['', '-wal', '-shm'] as $sfx) {
+    @unlink("$file-admin$sfx");
+}
+
 echo "Account requests\n";
 $reqDb = $freshDb('requests');
 Migrator::ensure($reqDb);
@@ -519,6 +559,23 @@ check('one account cannot overwrite another\'s workout', throws(fn() => $wk->sav
 check('one account cannot delete another\'s workout', throws(fn() => $wk->delete($uid2, $d1['id']), 403));
 $wk->delete($uid, $d2['id']);
 check('deleting a workout removes its sets', (int) $db->val('SELECT COUNT(*) FROM workout_sets WHERE workout_id=?', [$d2['id']]) === 0);
+
+echo "Seeing each other's history\n";
+$mikeRow = $db->one('SELECT * FROM users WHERE id=?', [$uid]);
+$samRow = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+check('history starts private for every account', $db->val('SELECT history_visibility FROM users WHERE id=?', [$uid]) === 'private' && $db->val('SELECT history_visibility FROM users WHERE id=?', [$uid2]) === 'private');
+check('nobody is listed while everyone keeps their history private', $auth->historyPeople($samRow) === []);
+check('asking for a private history is refused', throws(fn() => $auth->historyOwner($samRow, $uid), 404));
+$db->run("UPDATE users SET history_visibility='members' WHERE id=?", [$uid]);
+$people = $auth->historyPeople($samRow);
+check('once shared, others see the account by display name only', $people === [['id' => $uid, 'name' => 'Mike']], json_encode($people));
+check('the account is not listed to itself', $auth->historyPeople($mikeRow) === []);
+check('a shared history can be opened', $auth->historyOwner($samRow, $uid)['id'] === $uid);
+check('sharing goes one way: the other account stays private', throws(fn() => $auth->historyOwner($mikeRow, $uid2), 404));
+$db->run("UPDATE users SET status='pending' WHERE id=?", [$uid]);
+check('an account that cannot sign in is not listed', $auth->historyPeople($samRow) === []);
+$db->run("UPDATE users SET status='active', history_visibility='private' WHERE id=?", [$uid]);
+check('switching back to Only me hides it again', $auth->historyPeople($samRow) === [] && throws(fn() => $auth->historyOwner($samRow, $uid), 404));
 
 echo "Fitbod import\n";
 $imp = new FitbodImport($db);

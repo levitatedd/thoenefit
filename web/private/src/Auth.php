@@ -133,6 +133,48 @@ final class Auth
         }
     }
 
+    /**
+     * The admin sets a new password for someone else (#21) and signs them out
+     * on every device. Their own password is changed from Settings instead.
+     */
+    public function adminResetPassword(array $admin, int $id, string $password): void
+    {
+        $target = $this->manageable($admin, $id, ['active', 'inactive']);
+        $this->setPassword((int) $target['id'], $password);
+        $this->logoutEverywhere((int) $target['id']);
+    }
+
+    /** Blocks sign-in and ends every session, keeping the account's workouts (#21). */
+    public function deactivate(array $admin, int $id): void
+    {
+        $target = $this->manageable($admin, $id, ['active']);
+        if (self::isAdmin($target)) {
+            throw new HttpError(422, 'The admin account cannot be deactivated.');
+        }
+        $this->db->run("UPDATE users SET status='inactive' WHERE id=? AND status='active'", [$target['id']]);
+        $this->logoutEverywhere((int) $target['id']);
+    }
+
+    public function reactivate(array $admin, int $id): void
+    {
+        $this->manageable($admin, $id, ['inactive']);
+        $this->db->run("UPDATE users SET status='active' WHERE id=? AND status='inactive'", [$id]);
+    }
+
+    /** Another account the admin may act on, in one of the given states. */
+    private function manageable(array $admin, int $id, array $statuses): array
+    {
+        self::requireAdmin($admin);
+        if ($id === (int) $admin['id']) {
+            throw new HttpError(422, 'Use Settings to change your own account.');
+        }
+        $target = $this->db->one('SELECT * FROM users WHERE id=?', [$id]);
+        if (!$target || !in_array($target['status'] ?? 'active', $statuses, true)) {
+            throw new HttpError(404, 'That account was not found. Reload the page and try again.');
+        }
+        return $target;
+    }
+
     public static function isAdmin(array $user): bool
     {
         return ($user['role'] ?? 'user') === 'admin';
@@ -170,6 +212,38 @@ final class Auth
             $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
         }
         return $out;
+    }
+
+    /** History visibility choices (#15): only the account itself, or anyone signed in. */
+    public const HISTORY_VISIBILITY = ['private', 'members'];
+
+    /**
+     * People whose workout history this account may look at (#13): every
+     * other active account that has chosen to share it. Display names only.
+     *
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function historyPeople(array $viewer): array
+    {
+        $out = [];
+        foreach ($this->db->all("SELECT id, display_name FROM users WHERE status='active' AND history_visibility='members' AND id<>? ORDER BY display_name, id", [(int) $viewer['id']]) as $u) {
+            $out[] = ['id' => (int) $u['id'], 'name' => $u['display_name']];
+        }
+        return $out;
+    }
+
+    /**
+     * The account whose history the viewer asked for, if they may see it.
+     * Answers 404 either way, so it does not reveal who has a private history.
+     */
+    public function historyOwner(array $viewer, int $ownerId): array
+    {
+        foreach ($this->historyPeople($viewer) as $p) {
+            if ($p['id'] === $ownerId) {
+                return $p;
+            }
+        }
+        throw new HttpError(404, 'That person does not share their workout history.');
     }
 
     /** Accounts for the Manage Users page. Never includes password hashes. */
@@ -217,6 +291,10 @@ final class Auth
                 $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', [$ident, now_utc()]);
             }
             throw new HttpError(401, 'Wrong username or password.');
+        }
+        if (($user['status'] ?? 'active') === 'inactive') {
+            // Only said once the password is right, so it does not reveal which accounts exist.
+            throw new HttpError(403, 'This account has been deactivated. Ask the admin to turn it back on.');
         }
         if (($user['status'] ?? 'active') !== 'active') {
             // Only said once the password is right, so it does not reveal who has asked for an account.
