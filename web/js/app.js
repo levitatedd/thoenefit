@@ -108,6 +108,7 @@ async function boot() {
 function applyBoot(data) {
   S.user = data.user;
   S.strava = data.strava;
+  S.feedbackEnabled = !!data.feedback_enabled;
   S.pendingRequests = data.pending_requests || 0;
   S.gyms = data.gyms;
   S.shares = data.shares || [];
@@ -314,7 +315,7 @@ function render() {
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
   else if (tab === 'settings') {
-    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword }[arg];
+    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword, feedback: viewFeedback }[arg];
     view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : sub ? sub() : viewSettings();
   }
   else view = viewToday();
@@ -2157,7 +2158,7 @@ const EFFORTS = [['light', 'Light'], ['moderate', 'Moderate'], ['hard', 'Hard']]
 
 /** Rows that each open another screen: [href, title, meta, extra attributes]. */
 function linkList(...rows) {
-  return h('ul', { class: 'log link-list' }, rows.map(([href, title, meta, extra]) => h('li', {},
+  return h('ul', { class: 'log link-list' }, rows.filter(Boolean).map(([href, title, meta, extra]) => h('li', {},
     h('a', { class: 'log-row link-row', href, ...(extra || {}) },
       h('span', { class: 'log-title' }, ...[title].flat()),
       meta && h('span', { class: 'log-meta' }, meta),
@@ -2212,6 +2213,63 @@ function viewPassword() {
       } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn));
 }
 
+const FEEDBACK_KINDS = [['idea', 'Idea'], ['problem', 'Problem'], ['other', 'Other']];
+const FEEDBACK_STATUS = { sent: 'Sent', done: 'Done', closed: 'Closed' };
+
+/** Sent feedback with its GitHub status. withNames is for the admin's list only. */
+function feedbackList(items, withNames = false) {
+  const kindLabel = Object.fromEntries(FEEDBACK_KINDS);
+  return h('ul', { class: 'log feedback-list' }, items.map((f) => h('li', { class: 'feedback-row' },
+    h('div', { class: 'feedback-head' },
+      h('span', { class: 'log-title' }, f.title),
+      h('span', { class: `status-pill ${f.status}` }, FEEDBACK_STATUS[f.status] || f.status)),
+    h('span', { class: 'log-meta' },
+      [kindLabel[f.kind] || f.kind, withNames && f.from, fmtDate(f.created_at, { month: 'short', day: 'numeric', year: 'numeric' })].filter(Boolean).join(' · '),
+      f.issue_url && [' · ', h('a', { href: f.issue_url, target: '_blank', rel: 'noopener' }, `#${f.issue_number}`)]))));
+}
+
+/** Send feedback (#20): it becomes a public GitHub issue, without the sender's name. */
+function viewFeedback() {
+  const head = [backLink('settings', 'Settings'), h('h1', {}, 'Send feedback')];
+  if (!S.feedbackEnabled) return h('main', { class: 'page' }, ...head, h('p', { class: 'muted' }, 'Feedback is not set up on this server.'));
+  let kind = 'idea';
+  const title = h('input', { type: 'text', name: 'feedback_title', maxlength: 120, required: true, autocomplete: 'off', placeholder: 'For example: Add a plate calculator' });
+  const body = h('textarea', { name: 'feedback_body', rows: 6, maxlength: 4000, required: true, placeholder: 'What would help, or what went wrong and what you expected instead.' });
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Send feedback');
+  const sent = h('div', { class: 'stack' });
+  const showSent = (items) => fill(sent, items.length ? feedbackList(items) : h('p', { class: 'muted' }, 'Nothing yet. What you send shows up here, with whether it has been done.'));
+  const form = h('form', { class: 'stack', onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    btn.disabled = true;
+    try {
+      const res = await api.post('send_feedback', { kind, title: title.value, body: body.value });
+      // Clear only once it is sent; on an error everything typed stays put.
+      title.value = '';
+      body.value = '';
+      showSent(res.feedback);
+      toast('Thanks, your feedback was sent.');
+    } catch (err) {
+      error.textContent = err.offline ? 'No connection. Your feedback was not sent; try again when you are back online.' : err.message;
+    }
+    btn.disabled = false;
+  } },
+    field('Type', choices(FEEDBACK_KINDS, kind, (v) => (kind = v), { columns: 3 })),
+    field('Title', title),
+    field('Details', body),
+    error,
+    btn,
+    h('p', { class: 'muted small public-note' }, "Feedback is posted publicly on GitHub. Don't include personal details."));
+  showSent([]);
+  sent.replaceChildren(h('p', { class: 'muted' }, 'Loading'));
+  api.get('feedback').then(({ feedback }) => showSent(feedback), (e) => fill(sent, h('p', { class: 'muted' }, e.offline ? 'This needs a connection.' : e.message)));
+  return h('main', { class: 'page' }, ...head,
+    h('p', { class: 'muted' }, 'Ideas and problems go straight onto the ThoeneFit to-do list.'),
+    form,
+    section('What you have sent', sent));
+}
+
 function viewInstallHelp() {
   return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Add to your Home Screen'),
     h('div', { class: 'stack install-help' },
@@ -2258,6 +2316,7 @@ function viewSettings() {
     S.strava?.enabled && section('Integrations', linkList(['#/settings/strava', 'Strava', S.strava.connected ? 'Connected' : 'Not connected'])),
     section('Help', linkList(
       ['#/settings/install', 'Add to your Home Screen', install.isInstalled() ? 'You are using the installed app' : 'Open full screen and keep working with no signal'],
+      S.feedbackEnabled && ['#/settings/feedback', 'Send feedback', 'Ideas, problems or anything else'],
       ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
     S.user.role === 'admin' && section('Users', linkList(
       ['#/settings/users', ['Manage users', S.pendingRequests > 0 && h('span', { class: 'badge alert' }, `${S.pendingRequests} waiting`)], 'Create accounts, approve requests, reset passwords'])),
@@ -2585,6 +2644,11 @@ function viewUsers() {
       inactiveSection,
       section('Invite token', h('p', { class: 'muted' }, 'With the token, someone can ask for an account from the sign-in screen, choosing their own username and password. Nobody gets in until you approve them here.'), inviteState, tokenForm),
       section('Add a person yourself', h('p', { class: 'muted' }, 'New accounts are regular users with their own gyms, workouts and exercises. They set those up the first time they sign in.'), form),
+      // Who sent which feedback (#20). Only shown here; names never go to GitHub.
+      S.feedbackEnabled && section('Feedback', h('p', { class: 'muted' }, 'Everything people have sent from the app, with who sent it. The GitHub issues themselves have no names.'),
+        asyncSection(() => api.get('all_feedback'), ({ feedback }) => (feedback.length
+          ? feedbackList(feedback, true)
+          : h('p', { class: 'muted' }, 'Nothing sent yet.')))),
     ];
   });
   return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Manage users'), loaded);
