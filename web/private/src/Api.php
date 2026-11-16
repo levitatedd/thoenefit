@@ -123,6 +123,8 @@ final class Api
                     'recap' => $this->workouts->recap($uid, $w['id']),
                 ];
             },
+            // Setup notes on the exercise page (#125): one, or one per gym for machines and cables.
+            'exercise_notes' => fn() => ['notes' => $this->workouts->exerciseNotes($uid, $this->visibleExercise($uid, (int) ($_GET['id'] ?? 0))['id'], $this->gyms($uid))],
             'recap' => function () use ($uid) {
                 $r = $this->workouts->recap($uid, (string) ($_GET['id'] ?? ''));
                 if ($r === null) {
@@ -241,6 +243,12 @@ final class Api
                 $sent = $this->feedback->send($uid, (string) ($in['kind'] ?? ''), (string) ($in['title'] ?? ''), (string) ($in['body'] ?? ''), app_version());
                 self::json(['sent' => $sent, 'feedback' => $this->feedback->mine($uid)]);
                 return;
+            case 'save_note':
+                $ex = $this->visibleExercise($uid, (int) ($in['exercise_id'] ?? 0));
+                $gymId = $this->gym($uid, (int) ($in['gym_id'] ?? 0))['id'];
+                $this->workouts->setNote($uid, Workouts::noteKey($ex['id'], $gymId), (string) ($in['note'] ?? ''));
+                self::json(['notes' => $this->workouts->exerciseNotes($uid, $ex['id'], $this->gyms($uid))]);
+                return;
             case 'change_password':
                 if (!password_verify((string) ($in['current'] ?? ''), $user['password_hash'])) {
                     throw new HttpError(403, 'Current password is wrong.');
@@ -284,7 +292,7 @@ final class Api
                     $this->db->run('UPDATE users SET warm_up=? WHERE id=?', [$in['warm_up'] ? 1 : 0, $uid]);
                 }
                 $plan = $this->gen->generate($user, $gym, $in);
-                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises'], $gym['id']);
                 self::json(['workout' => $plan]);
                 return;
             case 'alternatives':
@@ -303,7 +311,7 @@ final class Api
                 if (!$ex || ($bodyweightOnly && !Catalog::supports($ex, [], true))) {
                     throw new HttpError(404, 'Exercise not found.');
                 }
-                self::json(['block' => $this->workouts->withNotes($uid, [$this->gen->block($user, $gym, $ex, bodyweightOnly: $bodyweightOnly)])[0]]);
+                self::json(['block' => $this->workouts->withNotes($uid, [$this->gen->block($user, $gym, $ex, bodyweightOnly: $bodyweightOnly)], $gym['id'])[0]]);
                 return;
             case 'import_fitbod':
                 @set_time_limit(180);
@@ -367,7 +375,7 @@ final class Api
             case 'routine_draft':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
                 $plan = $this->routines->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen);
-                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises'], $gym['id']);
                 self::json(['workout' => $plan]);
                 return;
             case 'share_workout':
@@ -392,7 +400,7 @@ final class Api
             case 'shared_draft':
                 $gym = $this->gym($uid, (int) ($in['gym_id'] ?? 0));
                 $plan = $this->shares->draft($user, $gym, (int) ($in['id'] ?? 0), $this->gen);
-                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises']);
+                $plan['exercises'] = $this->workouts->withNotes($uid, $plan['exercises'], $gym['id']);
                 self::json([
                     'workout' => $plan,
                     // Accepting can add the sender's own exercises to this person's library.
@@ -429,6 +437,17 @@ final class Api
             'effort' => Calories::effort($u['effort'] ?? null),
             'history_visibility' => ($u['history_visibility'] ?? 'private') === 'members' ? 'members' : 'private',
         ];
+    }
+
+    /** An exercise this account can see (built-in, shared, or its own), or 404. */
+    private function visibleExercise(int $uid, int $id): array
+    {
+        foreach (Catalog::forUser($this->db, $uid, true) as $ex) {
+            if ($ex['id'] === $id) {
+                return $ex;
+            }
+        }
+        throw new HttpError(404, 'Exercise not found.');
     }
 
     /** Everyone else with a working account: id and display name only. */
@@ -471,7 +490,7 @@ final class Api
                 $e['previous'] = $this->gen->lastPerformance($uid, $e['variant_key']);
             }
             unset($e);
-            $active['exercises'] = $this->workouts->withNotes($uid, $active['exercises']);
+            $active['exercises'] = $this->workouts->withNotes($uid, $active['exercises'], $active['gym_id']);
         }
         return [
             'version' => app_version(),
