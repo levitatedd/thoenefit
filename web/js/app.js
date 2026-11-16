@@ -328,11 +328,16 @@ function render() {
     [
       ['history', 'History', 'history'],
       ['trends', 'Trends', 'trends'],
-      ['today', 'Today', 'today'],
+      ['today', 'Workout', 'today'],
       ['exercises', 'Exercises', 'list'],
       ['settings', 'Settings', 'gear'],
-    ].map(([key, label, ic]) => h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, icon(ic, 24), h('span', {}, label))),
+    ].map(([key, label, ic]) => (key === 'today' && sync?.active
+      // During a workout: Pause / Resume on the workout itself, and a plain way back to it from anywhere else.
+      ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: `tab workout-tab ${sync.active.paused_at ? 'paused' : ''}`, 'aria-label': sync.active.paused_at ? 'Workout, paused' : 'Workout in progress' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
+      : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24)), h('span', {}, label)))),
   );
+  // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
+  if (sync?.active && tab !== 'workout') view.prepend(backToWorkoutBar());
   root.replaceChildren(view, restDock(), nav);
   if (tab === 'settings' && ['strava-connected', 'strava-denied', 'strava-error'].includes(arg)) {
     history.replaceState(null, '', '#/settings');
@@ -858,7 +863,7 @@ function viewToday() {
         { class: 'card resume' },
         h('h2', {}, `${dayLabel(active.day_type)} workout in progress`),
         h('p', { class: 'muted' }, `${active.gym_name}, started ${fmtTime(active.started_at)}. ${done} of ${total} sets logged.`),
-        h('a', { class: 'btn primary block', href: '#/workout' }, 'Resume workout'),
+        h('a', { class: 'btn primary block', href: '#/workout' }, 'Back to workout'),
         h(
           'button',
           {
@@ -1250,9 +1255,55 @@ function startTicker() {
   ticker = setInterval(() => {
     paintRest();
     const el = document.getElementById('elapsed');
-    if (el && sync.active) el.textContent = fmtClock((Date.now() - new Date(sync.active.started_at).getTime()) / 1000);
+    if (el && sync.active) el.textContent = fmtClock(workoutSeconds(sync.active));
+    const bar = document.getElementById('back-elapsed');
+    if (bar && sync.active) bar.textContent = fmtClock(workoutSeconds(sync.active));
     if (route()[0] === 'today' && document.visibilityState === 'visible') refreshShares(); // throttled inside
   }, 500);
+}
+
+/** Seconds of training so far: start to now, minus time paused (#111). Frozen while paused. */
+function workoutSeconds(doc, now = Date.now()) {
+  const until = doc.paused_at ? new Date(doc.paused_at).getTime() : now;
+  return Math.max(0, (until - new Date(doc.started_at).getTime()) / 1000 - (doc.paused_s || 0));
+}
+
+/** Ends a pause on a workout document, adding it to the paused total. */
+function endPause(d) {
+  if (!d.paused_at) return;
+  d.paused_s = (d.paused_s || 0) + Math.max(0, Math.round((Date.now() - new Date(d.paused_at).getTime()) / 1000));
+  d.paused_at = null;
+}
+
+/** Pause or resume the workout in progress. It is saved on the phone first, like every other change. */
+function togglePause() {
+  const doc = sync.active;
+  if (!doc) return;
+  const pausing = !doc.paused_at;
+  if (pausing) stopRest();
+  sync.edit(doc.id, (d) => (pausing ? (d.paused_at = new Date().toISOString()) : endPause(d)), 0);
+  render();
+  toast(pausing ? 'Workout paused. The clock is stopped.' : 'Workout resumed.');
+}
+
+/** The Today spot in the tab bar on the workout screen: Pause or Play. */
+function pauseTab() {
+  const paused = !!sync.active.paused_at;
+  return h('button', {
+    type: 'button',
+    class: `tab pause-tab ${paused ? 'paused' : ''}`,
+    'aria-current': 'page',
+    'aria-label': paused ? 'Resume workout' : 'Pause workout',
+    onclick: togglePause,
+  }, h('span', { class: 'tab-icon' }, icon(paused ? 'play' : 'pause', 24)), h('span', {}, paused ? 'Resume' : 'Pause'));
+}
+
+/** Shown on the other tabs during a workout: a way back to it, separate from pausing. */
+function backToWorkoutBar() {
+  const doc = sync.active;
+  return h('a', { class: `back-to-workout ${doc.paused_at ? 'paused' : ''}`, href: '#/workout' },
+    h('span', { class: 'btw-label' }, h('strong', {}, `${dayLabel(doc.day_type)} in progress`), h('span', {}, doc.paused_at ? 'Paused' : h('output', { id: 'back-elapsed' }, fmtClock(workoutSeconds(doc))))),
+    h('span', { class: 'btw-go' }, 'Back to workout', icon('back', 18)));
 }
 
 function viewWorkout() {
@@ -1280,15 +1331,19 @@ function viewWorkout() {
     'header',
     { class: 'workout-head' },
     h('div', {}, h('h1', {}, dayLabel(doc.day_type)), h('p', { class: 'muted' }, `${doc.gym_name}, ${doneSets} of ${totalSets} sets`)),
-    h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: 'elapsed' }, fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
+    h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: `elapsed ${doc.paused_at ? 'paused' : ''}` }, fmtClock(workoutSeconds(doc))), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
   );
+  const paused = doc.paused_at && h('section', { class: 'paused-banner', role: 'status' },
+    h('div', {}, h('strong', {}, 'Paused'), h('span', { class: 'muted small' }, 'The clock is stopped. Logging a set resumes it.')),
+    h('button', { class: 'btn primary small', type: 'button', onclick: () => togglePause() }, icon('play', 18), 'Resume'));
 
   const cards = doc.exercises.map((e, idx) => exerciseCard(doc, e, idx, nextSet, edit));
 
   return h(
     'main',
-    { class: 'page workout' },
+    { class: `page workout ${doc.paused_at ? 'is-paused' : ''}` },
     head,
+    paused,
     cards,
     h('button', { class: 'btn block', type: 'button', onclick: () => addExerciseSheet(doc) }, icon('plus', 18), 'Add exercise'),
     h('button', { class: 'btn block', type: 'button', onclick: () => shareSheet({
@@ -1330,7 +1385,13 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         }
         document.activeElement && document.activeElement.blur();
         // No rest timer after cardio: the next exercise can start straight away.
-        edit((d) => Object.assign(find(d, e.id, s.id), { done: true, done_at: new Date().toISOString() }));
+        edit((d) => {
+          Object.assign(find(d, e.id, s.id), { done: true, done_at: new Date().toISOString() });
+          if (d.paused_at) {
+            endPause(d); // logging a set means training again
+            toast('Workout resumed.');
+          }
+        });
       },
     }, icon('check', 30));
     return h('li', { class: `set cardio ${s.done ? 'done' : ''} ${s.id === nextSet ? 'next' : ''}` },
@@ -1394,6 +1455,10 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
           edit((d) => {
             const used = cur.weight == null ? 0 : cur.weight;
             Object.assign(find(d, e.id, s.id), { done: true, done_at: new Date().toISOString(), weight: used });
+            if (d.paused_at) {
+              endPause(d); // logging a set means training again
+              toast('Workout resumed.');
+            }
             // Carry the weight down to the sets still to come, so only reps need typing.
             for (const later of d.exercises.find((x) => x.id === e.id).sets) {
               if (!later.done && later.weight == null && !later.warmup && !s.warmup) later.weight = used;
@@ -1604,6 +1669,7 @@ function finishSheet(doc) {
           sync.edit(doc.id, (d) => {
             for (const e of d.exercises) e.sets = e.sets.filter((s) => s.done);
             d.exercises = d.exercises.filter((e) => e.sets.length);
+            endPause(d); // a pause counts up to the finish, then stops
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
             if (effortField) {
