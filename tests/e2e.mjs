@@ -1620,6 +1620,48 @@ console.log('Setup notes (#125)');
   }, hist.id);
 }
 
+console.log('Muscle illustrations (#150)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', 'pull');
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0);
+  const arts = await page.$$eval('.plan-row', (rows) => rows.map((r) => {
+    const img = r.querySelector('img.muscle-art');
+    return { name: r.querySelector('h3').textContent, target: r.querySelector('.target').textContent, muscle: img?.dataset.muscle || null, loaded: img ? img.complete && img.naturalWidth > 0 : null, alt: img?.getAttribute('alt'), hidden: img?.getAttribute('aria-hidden') };
+  }));
+  const lifts = arts.filter((a) => !/warm-up|moving|^Hold/.test(a.target));
+  check('each planned lift shows its first primary muscle behind the text', lifts.length > 0 && lifts.every((a) => a.muscle && a.loaded), JSON.stringify(arts));
+  check('the pull-day lats illustration appears for a lats exercise', arts.some((a) => a.muscle === 'lats'));
+  check('the illustration is decorative for screen readers', lifts.every((a) => a.alt === '' && a.hidden === 'true'));
+  check('cardio warm-ups and stretches keep a plain card', arts.filter((a) => /warm-up|moving|^Hold/.test(a.target)).every((a) => a.muscle === null));
+  const row = page.locator('.plan-row.has-art').first();
+  const z = await row.evaluate((r) => [getComputedStyle(r.querySelector('.muscle-art')).zIndex, getComputedStyle(r.querySelector('.plan-main')).zIndex, getComputedStyle(r.querySelector('.muscle-art')).opacity]);
+  check('the text and buttons sit above the faint illustration', z[0] === '0' && z[1] === '1' && Number(z[2]) <= 0.3, z.join());
+  check('no sideways scrolling with the illustrations', (await overflow()) <= 0);
+  await row.scrollIntoViewIfNeeded();
+  if (SHOTS) await row.screenshot({ path: `${SHOTS}/42-muscle-art-plan.png` });
+  // The exercise page shows it in the space beside the details.
+  const crunch = await page.evaluate(async () => (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((e) => e.name === 'Ab Crunch Machine').id);
+  await page.goto(`${URL}#/exercises/${crunch}`);
+  await page.waitForSelector('.exercise-head');
+  await page.waitForFunction(() => document.querySelector('.exercise-head img.muscle-art')?.complete);
+  check('the exercise page shows the abs illustration beside the details', (await page.getAttribute('.exercise-head img.muscle-art', 'data-muscle')) === 'abs' && (await page.$eval('.exercise-head img.muscle-art', (i) => i.naturalWidth)) > 0);
+  await shot('43-muscle-art-exercise');
+  // Started workouts keep their cards as they were.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  check('workout cards after Start have no illustration', (await page.locator('.lift .muscle-art').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+}
+
 console.log('Send feedback');
 {
   await page.setViewportSize({ width: 402, height: 874 });
