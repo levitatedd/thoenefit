@@ -77,9 +77,12 @@ NODE_PATH=$(npm root -g) node tests/e2e.mjs
 In Claude Code cloud sessions, there is no Chrome at the default path. Point the walk-through at the preinstalled Chromium with `CHROME=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` (check `ls /opt/pw-browsers` if the version differs).
 
 - Add a check for each new behaviour: server logic in `tests/run.php`, UI in `tests/e2e.mjs`. For a bug fix, confirm the new check fails on the old code.
-- Before calling a failure "known", re-run it on unchanged `staging`. These failed on unchanged `staging` in the cloud environment as of Nov 2026:
-  - four workout-sharing checks
-  - "the Trend link on a past workout is underlined", which is flaky (#84)
+- Before calling a failure "known", re-run it on unchanged `staging`. These four workout-sharing checks failed on every run on unchanged `staging` in the cloud environment as of 17 Nov 2026:
+  - "the other person sees it on Today, with who sent it"
+  - "a regular user does not see the chatgpt account in the share picker"
+  - "each person has their own history entry, with their own weights"
+  - "a workout already in progress can be shared too"
+- The walk-through needs a fresh database. Before each run, delete `data/` and create the `e2e` user again. A second run against the same database times out at "Where you train".
 - Delete the local `data/` folder after test runs.
 
 ## Things that have bitten us
