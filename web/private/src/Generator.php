@@ -308,6 +308,40 @@ final class Generator
         return $out;
     }
 
+    /**
+     * For each muscle (#166): the most recent finished workout in the past 60
+     * days that worked it (main or assisting), with the exercises in it that did.
+     * Muscles not trained in that time are left out.
+     */
+    public function muscleLast(int $uid, ?int $now = null): array
+    {
+        $now = $now ?? time();
+        $rows = $this->db->all(
+            "SELECT w.id, w.started_at, w.gym_name, w.day_type, e.name, e.muscles_main, e.muscles_assist
+             FROM workout_exercises we
+             JOIN workouts w ON w.id=we.workout_id
+             JOIN exercises e ON e.id=we.exercise_id
+             WHERE w.user_id=? AND w.status='completed' AND w.started_at>?
+               AND e.kind NOT IN (" . Db::marks(Catalog::TIMED_KINDS) . ")
+               AND EXISTS (SELECT 1 FROM workout_sets s WHERE s.workout_exercise_id=we.id AND s.done=1 AND s.warmup=0)
+             ORDER BY w.started_at DESC, we.pos",
+            array_merge([$uid, now_utc($now - 60 * 86400)], Catalog::TIMED_KINDS)
+        );
+        $out = [];
+        foreach ($rows as $r) {
+            $muscles = array_merge(json_decode($r['muscles_main'], true) ?: [], json_decode($r['muscles_assist'], true) ?: []);
+            foreach (array_unique($muscles) as $m) {
+                if (!isset($out[$m])) {
+                    $out[$m] = ['workout_id' => $r['id'], 'date' => to_iso($r['started_at']), 'gym_name' => $r['gym_name'], 'day_type' => $r['day_type'], 'exercises' => []];
+                }
+                if ($out[$m]['workout_id'] === $r['id'] && !in_array($r['name'], $out[$m]['exercises'], true)) {
+                    $out[$m]['exercises'][] = $r['name'];
+                }
+            }
+        }
+        return $out;
+    }
+
     /** exercise id => unix time it was last done (finished workouts in the past 45 days). */
     private function recentUse(int $uid, int $now): array
     {

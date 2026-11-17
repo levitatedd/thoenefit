@@ -137,9 +137,14 @@ final class Api
             'exercise_counts' => fn() => ['counts' => (object) $this->workouts->exerciseCounts($uid)],
             'trends' => fn() => [
                 'recovery' => $this->gen->muscleStats($uid),
+                // When each muscle was last trained, for the recovery tile details (#166).
+                'muscle_last' => (object) $this->gen->muscleLast($uid),
                 'unit' => $user['unit'],
-                'weeks' => $this->workouts->weeklyTrends($uid, $user['unit'], is_string($_GET['timezone'] ?? null) ? $_GET['timezone'] : 'UTC'),
+                // The chosen range (#184), in weeks; anything else falls back to 8.
+                'weeks' => $this->workouts->weeklyTrends($uid, $user['unit'], is_string($_GET['timezone'] ?? null) ? $_GET['timezone'] : 'UTC', null, (int) ($_GET['weeks'] ?? 8)),
+                'pins' => $this->workouts->pins($uid),
             ],
+            'pins' => fn() => ['pins' => $this->workouts->pins($uid)],
             // Other people on this server, by display name only, for sharing a workout.
             'people' => fn() => ['people' => $this->people($user)],
             // Other people's workout history (#13), read-only, only for those who share it (#15).
@@ -361,6 +366,11 @@ final class Api
                 }
                 self::json($saved);
                 return;
+            case 'pin_exercise':
+                // Pinned exercises on Trends (#126).
+                $this->workouts->setPin($uid, (int) ($in['exercise_id'] ?? 0), !empty($in['pinned']));
+                self::json(['pins' => $this->workouts->pins($uid)]);
+                return;
             case 'save_routine':
                 $saved = $this->routines->save($uid, (string) ($in['name'] ?? ''), (array) ($in['plan'] ?? []));
                 self::json($saved + ['routines' => $this->routines->all($uid)]);
@@ -503,6 +513,8 @@ final class Api
             'exercises' => Catalog::forUser($this->db, $uid, true),
             // Most-performed first in Add exercise (#174). An object, so ids stay keys in JSON.
             'exercise_counts' => (object) $this->workouts->exerciseCounts($uid),
+            // Pinned exercises (#126), so exercise pages know their pin state offline.
+            'pinned' => array_map('intval', array_column($this->db->all('SELECT exercise_id FROM exercise_pins WHERE user_id=? ORDER BY id', [$uid]), 'exercise_id')),
             'active' => $active,
             'shares' => $this->shares->incoming($uid),
             'routines' => $this->routines->all($uid),

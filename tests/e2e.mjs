@@ -130,7 +130,9 @@ const order = await page.evaluate(() => {
 });
 check('on Today, the wide logo sits top right beside the heading, and only there', !!order && order.slice(0, 4).every(Boolean) && order[4] === 1, JSON.stringify(order));
 check('Recovery estimate is no longer on Today', !(await page.textContent('.page')).includes('Recovery estimate'));
-const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
+// Scroll the page so the name sits mid-screen, clear of the action bar, and note the spot.
+// (A fixed scroll position put it behind the bar with some fonts, so the tap scrolled first, #217.)
+const y0 = await page.evaluate(() => { document.querySelector('.plan-row:nth-child(3) h3 a').scrollIntoView({ block: 'center' }); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
 check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
@@ -138,7 +140,10 @@ check('the way back is labelled Today', (await page.textContent('.back')).trim()
 await shot('03a-history-from-today');
 await page.click('.back');
 await page.waitForSelector('.plan-row');
-check('going back returns to the same planned workout at the same spot', (await names()).join() === first.join() && Math.abs((await page.evaluate(() => window.scrollY)) - y0) < 5);
+{
+  const back = { names: (await names()).join(), y: await page.evaluate(() => window.scrollY) };
+  check('going back returns to the same planned workout at the same spot', back.names === first.join() && Math.abs(back.y - y0) < 5, JSON.stringify({ ...back, first: first.join(), y0 }));
+}
 await page.click('.plan-row:nth-child(1) button:has-text("Lock")');
 await page.click('.plan-row:nth-child(2) button:has-text("Swap")');
 await page.waitForSelector('.sheet .pick');
@@ -490,8 +495,95 @@ check('the Trends tab shows weekly lifting volume, weekly workout time and Recov
   check(`tapping a week on Trends shows that week's total and workouts (${weekText.replace(/\s+/g, ' ').trim()})`, /Week of/.test(weekText) && /workout/.test(weekText) && (await page.locator('.chart-readout').first().locator('a').count()) === 0);
   check('no stray text on Trends', !/\b(undefined|null|NaN|false)\b/.test(await page.textContent('.page')));
 }
+// #166: Recovery estimate as Pick muscle groups tiles, each opening its details.
+{
+  const tiles = await page.$$eval('.recovery-card .muscle-tile', (ts) => ts.map((t) => [t.dataset.muscle, t.querySelector('.muscle-pct').textContent, !!t.querySelector('img'), t.classList.contains('tired')]));
+  check('Recovery estimate shows a tile for every muscle group, with its illustration and percentage, most recovered first (#166)', tiles.length === 13 && tiles.every(([, p, img]) => /^\d+%/.test(p) && img) && tiles.map(([, p]) => parseInt(p, 10)).every((v, i, a) => i === 0 || a[i - 1] >= v), JSON.stringify(tiles));
+  check('below 50% the tile says it is still recovering', tiles.every(([, p, , tired]) => (parseInt(p, 10) < 50) === tired && (tired ? /recovering/.test(p) : true)));
+  const last = (await page.evaluate(async () => (await (await fetch(`api.php?a=trends&timezone=UTC`)).json()).muscle_last));
+  const trained = Object.keys(last)[0];
+  await page.click(`.recovery-card .muscle-tile[data-muscle="${trained}"]`);
+  await page.waitForSelector('.sheet .muscle-detail');
+  const sheetText = await page.textContent('.sheet');
+  check('tapping a trained muscle shows its recovery, when it was last trained, the exercises and a link to the workout', /%/.test(sheetText) && /Last trained/.test(sheetText) && last[trained].exercises.every((n) => sheetText.includes(n)) && (await page.getAttribute('.sheet a:has-text("Open workout")', 'href')) === `#/history/${last[trained].workout_id}`, sheetText.slice(0, 200));
+  await shot('19-trends-muscle');
+  await page.click('.sheet button:has-text("Close")');
+  const untrained = tiles.map(([m]) => m).find((m) => !last[m]);
+  if (untrained) {
+    await page.click(`.recovery-card .muscle-tile[data-muscle="${untrained}"]`);
+    await page.waitForSelector('.sheet .muscle-detail');
+    check('a muscle with no recent training still opens, showing just its estimate', /No training logged/.test(await page.textContent('.sheet')) && (await page.locator('.sheet a:has-text("Open workout")').count()) === 0);
+    await page.click('.sheet button:has-text("Close")');
+  }
+}
+// #184: the line under the title picks the range, and it is remembered.
+{
+  const range = page.locator('main > .top-head select.trends-range');
+  check('the Trends range is the line under the title, starting at Last 8 weeks (#184)', (await range.evaluate((s) => s.selectedOptions[0].textContent)) === 'Last 8 weeks' && (await range.locator('option').allTextContents()).join() === 'Last 8 weeks,Last month,Last 2 months,Last 3 months,Last 6 months,Last year');
+  await range.selectOption('52');
+  await page.waitForSelector('h2:has-text("Monthly lifting volume")');
+  const year = await page.evaluate(async () => (await (await fetch('api.php?a=trends&timezone=UTC&weeks=52')).json()).weeks.length);
+  check('Last year covers 52 weeks, shown by month', year === 52 && (await page.locator('h2:has-text("Monthly workout time")').count()) === 1);
+  await page.reload();
+  await page.waitForSelector('h2:has-text("Monthly lifting volume")');
+  check('the chosen range is still there after reopening the app', (await page.locator('main > .top-head select.trends-range').evaluate((s) => s.selectedOptions[0].textContent)) === 'Last year');
+  await page.locator('main > .top-head select.trends-range').selectOption('8');
+  await page.waitForSelector('h2:has-text("Weekly lifting volume")');
+  check('the server only accepts the offered ranges', (await page.evaluate(async () => (await (await fetch('api.php?a=trends&timezone=UTC&weeks=1000')).json()).weeks.length)) === 8);
+}
 check('Trends is highlighted in the tab bar', (await page.getAttribute('.tab:has-text("Trends")', 'aria-current')) === 'page');
 check('no sideways scrolling on Trends', (await overflow()) <= 0);
+
+console.log('Pinned exercises (#126)');
+{
+  const pinned = () => page.$$eval('.pinned-card .log-title', (els) => els.map((e) => e.textContent));
+  check('with nothing pinned, Trends says how to pin', (await pinned()).length === 0 && /Pin up to 5 exercises/.test(await page.textContent('.pinned-card')));
+  await page.goto(`${URL}#/exercises`);
+  await page.fill('input[type=search]', liftName.slice(0, 12));
+  await page.click(`.log-row:has-text("${liftName}")`);
+  await page.waitForSelector('.pin-btn');
+  await page.waitForSelector('.p1rm-value');
+  const pageP1rm = (await page.textContent('.p1rm-value')).trim();
+  await page.click('.pin-btn');
+  await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
+  check('an exercise page pins it to Trends', /Pinned to Trends/.test(await page.textContent('.pin-btn')));
+  await page.click('.tab:has-text("Trends")');
+  await page.waitForSelector('.pinned-card .log-row');
+  const row = await page.textContent('.pinned-card .log-row');
+  check('Trends shows the pinned exercise with its latest result, opening its chart', row.includes(liftName) && /× \d+/.test(row) && /\/exercises\/\d+$/.test(await page.getAttribute('.pinned-card .log-row', 'href')), row);
+  const pinP1rm = await page.textContent('.pinned-card .pin-p1rm').catch(() => null);
+  check('the pinned exercise shows the same P1RM as its page', pinP1rm === `P1RM · ${pageP1rm}`, `${pinP1rm} vs ${pageP1rm}`);
+  const trendHeads = await page.$$eval('.trends-page .card > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('every Trends section heading is mint green', trendHeads.length >= 4 && trendHeads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(trendHeads));
+  await shot('19b-trends-pinned');
+  // Fill up to five, then try a sixth from its page.
+  const ids = await page.evaluate(async (n) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const others = b.exercises.filter((x) => x.name !== n && !x.archived).slice(0, 5);
+    for (const x of others.slice(0, 4)) await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: x.id, pinned: true }) });
+    return others.map((x) => x.id);
+  }, liftName);
+  const refused = await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    return (await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: id, pinned: true }) })).status;
+  }, ids[4]);
+  check('the server refuses a sixth pin', refused === 409, String(refused));
+  await page.goto(`${URL}#/exercises/${ids[4]}`);
+  await page.reload();
+  await page.waitForSelector('.pin-btn');
+  await page.click('.pin-btn');
+  await page.waitForSelector('.sheet:has-text("Unpin one first")');
+  check('pinning a sixth asks which to unpin first', (await page.locator('.sheet .pin-swap').count()) === 5);
+  await page.locator('.sheet .pin-swap').first().locator('button:has-text("Unpin")').click();
+  await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
+  const pins = (await page.evaluate(async () => (await (await fetch('api.php?a=pins')).json()).pins)).map((p) => p.exercise_id);
+  check('unpinning one makes room, and the new one is pinned', pins.length === 5 && pins.includes(ids[4]), JSON.stringify(pins));
+  // Leave nothing pinned for the rest of the walk-through.
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: id, pinned: false }) });
+  }, pins);
+}
 
 console.log('Exercises, settings, small screens');
 await page.click('.tab:has-text("Exercises")');
@@ -900,27 +992,20 @@ check('Settings shows the app version under its title, and no longer at the bott
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
-  // #192: four goals in the grid, then a collapsed Other goals row with three more.
+  // #216: one goal dropdown, in the agreed order, with the chosen goal's description under it.
   {
-    const grid = await page.$$eval('.goal-picker > .choices:first-child .choice-label', (els) => els.map((e) => e.textContent));
-    const others = await page.$$eval('.goal-picker > .choices:last-child .choice-label', (els) => els.map((e) => e.textContent));
-    check('the goal grid reads Get Started, Get Stronger, General Fitness, Muscular Endurance; Other Goals has Reduce Bodyweight, Powerlifting, Build Muscle', grid.join() === 'Get Started,Get Stronger,General Fitness,Muscular Endurance' && others.join() === 'Reduce Bodyweight,Powerlifting,Build Muscle', JSON.stringify([grid, others]));
-    const goal = async () => (await api('bootstrap')).user.goal;
-    const start = await goal();
-    const rowText = async () => (await page.textContent('.other-goals-row')).trim();
-    check('with Build muscle chosen, Other goals starts open and names it', start === 'muscle' && (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'true' && /Build Muscle/.test(await rowText()), `${start} | ${await rowText()}`);
-    await page.click('.other-goals-row');
-    check('Other goals collapses, and still shows the chosen goal', (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'false' && await page.locator('.goal-picker > .choices:last-child').isHidden() && /Build Muscle/.test(await rowText()));
-    await page.locator('.goal-picker .choice', { hasText: 'Get Started' }).click();
-    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'starter');
-    check('picking a grid goal saves it and clears the name from the Other goals row', (await rowText()) === 'Other Goals' && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
-    await page.click('.other-goals-row');
-    await page.locator('.goal-picker .choice', { hasText: 'Powerlifting' }).click();
+    const goalSel = page.locator('.goal-picker select[aria-label="Goal"]');
+    const opts = await goalSel.locator('option').allTextContents();
+    check('Goal is one dropdown with all seven goals in order (#216)', opts.join() === 'Get Started,General Fitness,Reduce Bodyweight,Build Muscle,Get Stronger,Muscular Endurance,Powerlifting' && (await page.locator('.settings-main .goal-picker .choice').count()) === 0, opts.join());
+    const shown = async () => [await goalSel.evaluate((s) => s.selectedOptions[0].textContent), (await page.textContent('.goal-hint')).trim()];
+    const start = await shown();
+    check('an existing user sees their goal chosen, with its description underneath', (await api('bootstrap')).user.goal === 'muscle' && start[0] === 'Build Muscle' && start[1] === '6-10 reps on big lifts', JSON.stringify(start));
+    await goalSel.selectOption('powerlifting');
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'powerlifting');
-    check('picking Powerlifting saves it as the only choice and names it on the row', /Powerlifting/.test(await rowText()) && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
-    const sel = await page.$eval('.goal-picker .choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor]; });
-    check('Other goals use the Pick muscle groups highlight too', sel[0] === 'rgb(58, 242, 156)' && sel[1] === 'rgba(58, 242, 156, 0.14)', JSON.stringify(sel));
-    await shot('11c-other-goals');
+    check('choosing a goal saves it and updates the description', JSON.stringify(await shown()) === JSON.stringify(['Powerlifting', 'Squat, bench, and deadlift']), JSON.stringify(await shown()));
+    await shot('11c-goal-dropdown');
+    await page.locator('.goal-picker select[aria-label="Goal"]').selectOption('muscle');
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
     // #211: Variety sits under Goal, Mixed by default.
     const variety = page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) });
     const vLabels = await variety.locator('.choice-label').allTextContents();
@@ -930,8 +1015,6 @@ check('Settings shows the app version under its title, and no longer at the bott
     check('picking Varied saves it', (await api('bootstrap')).user.variety === 'varied');
     await page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) }).locator('.choice', { hasText: 'Mixed' }).click();
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'mixed');
-    await page.locator('.goal-picker .choice', { hasText: 'Build Muscle' }).click();
-    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
   }
   check('no divider line between the Settings header and Training', (await page.$eval('.settings-main > .top-head + .section', (el) => getComputedStyle(el).borderTopStyle)) === 'none');
   const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
@@ -959,7 +1042,7 @@ await page.waitForSelector('h1:has-text("What\'s new")');
 }
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
-  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
+  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')), (await page.textContent('.page')).slice(0, 300));
   const { writeFileSync, unlinkSync } = await import('node:fs');
   const notesFile = new globalThis.URL('../web/changelog.json', import.meta.url);
   try {
@@ -1363,19 +1446,23 @@ console.log("Seeing each other's history");
   await vctx.close();
 }
 
+// Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
+// which moves where taps land for the checks after this (#217).
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
-  await page.setViewportSize({ width: w, height: hgt });
+  const wp = await context.newPage();
+  await wp.setViewportSize({ width: w, height: hgt });
   let worst = 0;
   const plain = [];
   for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
-    await page.goto(`${URL}#/${tab}`);
-    await page.waitForSelector('.tabs');
-    await page.waitForTimeout(250);
-    worst = Math.max(worst, await overflow());
-    if ((await page.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
+    await wp.goto(`${URL}#/${tab}`);
+    await wp.waitForSelector('.tabs');
+    await wp.waitForTimeout(250);
+    worst = Math.max(worst, await wp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth));
+    if ((await wp.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
   }
   if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
+  await wp.close();
 }
 console.log('Tab bar while a tab loads (#112)');
 {
@@ -2131,7 +2218,7 @@ console.log('Fixed page headers (#175)');
     }
     check('switching tabs keeps the same header and logo on screen and only changes the title, so nothing blinks', kept.every(Boolean), kept.join());
   }
-  check('Trends and History say "Last 8 weeks." under their titles', screens.trends.sub === 'Last 8 weeks.' && screens.history.sub === 'Last 8 weeks.', JSON.stringify([screens.trends.sub, screens.history.sub]));
+  check('History says "Last 8 weeks." under its title, and Trends names its range there', screens.history.sub === 'Last 8 weeks.' && screens.trends.sub.startsWith('Last 8 weeks'), JSON.stringify([screens.trends.sub, screens.history.sub]));
   check('Settings shows the version under its title', /^Version /.test(screens.settings.sub), screens.settings.sub);
   {
     await page.click('.tab:has-text("History")');

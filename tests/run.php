@@ -1750,6 +1750,33 @@ $all = array_values(array_filter(array_map(static fn($e) => $e['pattern'] === 'h
 $wrap = $bySlot($gen2($regU, 'push', ['avoid' => array_merge($all, [-1])]));
 check('once every option has been rejected, it starts again from the earliest rejected', $wrap['press'] === $all[0], json_encode([$wrap['press'], $all[0]]));
 
+echo "Trends: range, pins and muscle details (#184, #126, #166)\n";
+$tu = $auth->createUser('trend-batch', 'trend batch password');
+$tg = $mkGym($tu, 'Trends gym', Catalog::equipmentKeys());
+check('Trends defaults to 8 weeks and builds exactly the chosen range', count($wk->weeklyTrends($tu, 'lb', 'UTC')) === 8 && count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 52)) === 52 && count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 5)) === 5);
+check('a range that is not offered falls back to 8 weeks', count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 1000)) === 8);
+$wk->save($tu, $doc($tg, 'push', [[$bench, 6, 10, [[125, 8]]]], $ago(6)));
+$wk->save($tu, $doc($tg, 'push', [[$bench, 6, 10, [[135, 8], [145, 6]]]], $ago(3)));
+$wk->save($tu, $doc($tg, 'push', [[$press, 8, 12, [[100, 10]]]], $ago(1)));
+$wk->setPin($tu, $bench, true);
+$wk->setPin($tu, $press, true);
+$wk->setPin($tu, $bench, true); // pinning twice is harmless
+$pins = $wk->pins($tu);
+check('pins come back in the order pinned, once each, with the latest result', array_column($pins, 'exercise_id') === [$bench, $press] && $pins[0]['last']['best'] === ['weight' => 145.0, 'reps' => 6], json_encode($pins[0]['last']['best'] ?? null));
+check('each pin carries its recent sessions of the same setup, newest first, for its P1RM', count($pins[0]['recent']) === 2 && $pins[0]['recent'][0]['date'] === $pins[0]['last']['date'] && $pins[0]['recent'][0]['sets'] === $pins[0]['last']['sets'] && $pins[0]['recent'][1]['date'] < $pins[0]['recent'][0]['date'], json_encode($pins[0]['recent']));
+check('machine pins name the gym, barbell pins do not', $pins[1]['last']['gym_name'] === 'Trends gym' && $pins[0]['last']['gym_name'] === null);
+$more = array_slice(array_values(array_filter(array_keys($exById), static fn($id) => $id !== $bench && $id !== $press)), 0, 4);
+foreach (array_slice($more, 0, 3) as $id) {
+    $wk->setPin($tu, $id, true);
+}
+check('a sixth pin is refused until one is unpinned', count($wk->pins($tu)) === 5 && throws(fn() => $wk->setPin($tu, $more[3], true), 409));
+$wk->setPin($tu, $bench, false);
+$wk->setPin($tu, $more[3], true);
+check('unpinning makes room for another', count($wk->pins($tu)) === 5 && !in_array($bench, array_column($wk->pins($tu), 'exercise_id'), true));
+check('pinning an exercise that does not exist is refused', throws(fn() => $wk->setPin($tu, 999999, true), 404));
+$last = $gen->muscleLast($tu);
+check('each trained muscle knows its latest workout and the exercises in it that worked it', isset($last['chest']) && $last['chest']['exercises'] === ['Machine Chest Press'] && !isset($last['quads']), json_encode($last['chest'] ?? null));
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');
