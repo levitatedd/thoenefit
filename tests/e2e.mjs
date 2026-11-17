@@ -529,8 +529,15 @@ check('exercise page shows form cues and a trend', (await page.locator('.cues').
   check('Top weight, Best reps and Estimated 1-rep max each sit in their own rounded card, with a gap', ['Top weight', 'Best reps at top weight', 'Estimated 1-rep max'].every((t) => cards.some((c) => c.title === t && c.chart && c.readout && c.bg === 'rgb(27, 32, 39)' && c.radius === '16px')) && gap > 0, JSON.stringify({ cards, gap }));
   check('the session count comes after the chart cards', await page.evaluate(() => { const n = document.querySelector('.session-count'); const last = [...document.querySelectorAll('.chart-card')].pop(); return !!(n && last && (last.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)); }));
   const p1 = await page.evaluate(() => { const v = document.querySelector('.p1rm-value'); return v && !v.closest('[hidden]') ? [v.previousElementSibling.textContent, v.textContent] : null; });
-  const today = await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }));
-  check('under Secondary muscles, "P1RM as of:" shows today\'s date and the estimate', !!p1 && p1[0].startsWith('P1RM as of:') && p1[0].includes(today) && /^\d[\d,]* (lb|kg)$/.test(p1[1]) && (await page.evaluate(() => document.querySelector('.p1rm-value').closest('.facts-row').previousElementSibling.previousElementSibling.textContent)) === 'Secondary muscles', JSON.stringify(p1));
+  const latestDate = await page.evaluate(async (name) => {
+    const { bestEstimate } = await import('./js/strength.js');
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.name === name);
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${ex.id}`)).json();
+    const key = sessions[sessions.length - 1].variant_key;
+    const s = [...sessions].reverse().find((x) => x.variant_key === key && bestEstimate(x.sets, ex));
+    return new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }, liftName);
+  check('under Secondary muscles, "P1RM as of:" shows the date of the workout the estimate comes from', !!p1 && p1[0].startsWith('P1RM as of:') && p1[0].includes(latestDate) && /^\d[\d,]* (lb|kg)$/.test(p1[1]) && (await page.evaluate(() => document.querySelector('.p1rm-value').closest('.facts-row').previousElementSibling.previousElementSibling.textContent)) === 'Secondary muscles', JSON.stringify([p1, latestDate]));
 }
 // #162: estimated 1-rep max per session, from the best working set of 10 reps or fewer.
 {
