@@ -232,7 +232,7 @@ Tap the version under the **Settings** heading to see **What's new**. The deploy
 From the repository root, use PHP 8.1+ with PDO SQLite and mbstring. The app creates `data/thoenefit.sqlite` by default.
 
 ```sh
-php web/private/bin/create-user.php mike "Mike"
+php web/private/bin/create-user.php USERNAME "Display Name"
 php -S localhost:8000 -t web
 ```
 
@@ -243,9 +243,9 @@ Open <http://localhost:8000>. For a phone on the same Wi-Fi, bind to `0.0.0.0:80
 1. Create a hosted site with HTTPS, a MySQL database, and a DreamHost shell user. PHP needs PDO MySQL and mbstring.
 2. Copy [config.example.php](config.example.php) to `~/thoenefit-config.php` outside the web root. Fill in the database settings and run `chmod 600 ~/thoenefit-config.php`.
 3. Set the GitHub Actions secrets `SFTP_HOST`, `SFTP_USER`, `SFTP_PASSWORD`, and `SFTP_PATH`. Use the production site's web folder for `SFTP_PATH`.
-4. Push to `main` or run **Test and deploy** on `main` from GitHub Actions. Once the upload finishes, create the first account over SSH with `php ~/fit.mikethoene.com/private/bin/create-user.php mike "Mike"`. Use your own site's folder if it differs.
+4. Push to `main` or run **Test and deploy** on `main` from GitHub Actions. Once the upload finishes, create the first account over SSH with `php ~/fit.example.com/private/bin/create-user.php mike "Mike"`. Replace `fit.example.com` with your hosted site’s folder.
 
-For this repository, `staging` deploys to `fit-test.mikethoene.com` and uses a separate `~/thoenefit-staging-config.php`. On another host, serve `web/` as the document root, keep the config above it, and deny HTTP access to `/private/`.
+For a staging deployment, use a separate site such as `staging.fit.example.com` and a separate `~/thoenefit-staging-config.php`. Serve `web/` as the document root, keep the config above it, and deny HTTP access to `/private/`.
 
 ## Integration setup
 
@@ -253,10 +253,12 @@ For this repository, `staging` deploys to `fit-test.mikethoene.com` and uses a s
 
 Copy the `strava` block from [config.example.php](config.example.php) into the private `~/thoenefit-config.php`. Fill in the Client ID and Client Secret from [Strava API Settings](https://www.strava.com/settings/api). PHP needs OpenSSL and `allow_url_fopen`.
 
-| Where | Production value |
+Replace `fit.example.com` in these examples with your own hostname. Use the hostname alone for the callback domain and the full HTTPS URL for `callback_url`.
+
+| Where | Example value |
 | --- | --- |
-| Strava **Authorization Callback Domain** | `fit.mikethoene.com` |
-| DreamHost config `callback_url` | `https://fit.mikethoene.com/api.php?a=strava_callback` |
+| Strava **Authorization Callback Domain** | `fit.example.com` |
+| DreamHost config `callback_url` | `https://fit.example.com/api.php?a=strava_callback` |
 
 If Strava reports an invalid `redirect_uri`, compare those values and start again with **Connect to Strava**. If you rotate the Client Secret, disconnect and reconnect each linked account.
 
@@ -271,7 +273,7 @@ Create a [fine-grained personal access token](https://github.com/settings/person
 To reset a password over SSH, run this command. It signs the account out on its devices.
 
 ```sh
-php ~/fit.mikethoene.com/private/bin/create-user.php --reset USERNAME
+php ~/fit.example.com/private/bin/create-user.php --reset USERNAME
 ```
 
 ### Sharing your own exercises with everyone
@@ -279,12 +281,12 @@ php ~/fit.mikethoene.com/private/bin/create-user.php --reset USERNAME
 This command moves the named account's custom exercises into the default library. It preserves workout history and skips names that are already there.
 
 ```sh
-php ~/fit.mikethoene.com/private/bin/promote-exercises.php mike
+php ~/fit.example.com/private/bin/promote-exercises.php USERNAME
 ```
 
 ### Updates and database changes
 
-Migrations run on the first request after a deploy. To run them manually over SSH, use `php ~/fit.mikethoene.com/private/bin/migrate.php`.
+Migrations run on the first request after a deploy. To run them manually over SSH, use `php ~/fit.example.com/private/bin/migrate.php`.
 
 ### Backups and restore
 
