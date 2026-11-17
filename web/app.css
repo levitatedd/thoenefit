@@ -1609,6 +1609,12 @@ input[type="file"] {
   font-weight: 600;
 }
 
+/* Difficulty (#170): mint once rated. */
+.btn.difficulty.rated {
+  border-color: rgba(58, 242, 156, 0.45);
+  color: var(--mint);
+}
+
 .pick {
   appearance: none;
   display: flex;
