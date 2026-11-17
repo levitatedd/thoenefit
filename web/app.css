@@ -2224,3 +2224,117 @@ button.setup-note {
   height: auto;
   border-radius: 14px;
 }
+
+/* ---- Plate calculator (#227) -------------------------------------------- */
+.set .plate-hint {
+  grid-column: 2 / -1;
+  margin-top: -4px;
+  color: var(--mint);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.set .plate-hint:empty {
+  display: none;
+}
+
+.plates-weight {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plates-total {
+  font: 700 38px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.plates-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+}
+
+.plates-shaft {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background: #8b93a1;
+}
+
+.plates-side {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.plates-collar {
+  position: relative;
+  width: 10px;
+  height: 22px;
+  border-radius: 3px;
+  background: #c9ced6;
+}
+
+.plates-grip {
+  flex: 1;
+  min-width: 60px;
+}
+
+.plate-disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 34px;
+  border-radius: 5px;
+  background: var(--chalk);
+  color: var(--ink);
+  font: 700 11px/1 var(--body);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+/* Bigger plates are taller and wider; the three largest get their own colours. */
+.plate-disc.r0 { height: 104px; width: 22px; background: var(--mint); }
+.plate-disc.r1 { height: 92px; width: 20px; background: var(--yellow); }
+.plate-disc.r2 { height: 78px; width: 18px; background: var(--blue); }
+.plate-disc.r3 { height: 60px; width: 16px; }
+.plate-disc.r4 { height: 48px; width: 14px; }
+.plate-disc.r5 { height: 38px; width: 12px; }
+.plate-disc.r6 { height: 32px; width: 11px; }
+
+.plates-sheet .tight {
+  gap: 6px;
+}
+
+.plates-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plates-chip {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--raised);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.plates-each {
+  font-weight: 600;
+}
+
+.plates-off {
+  color: var(--yellow);
+  font-size: 14px;
+}
