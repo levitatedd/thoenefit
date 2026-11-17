@@ -754,7 +754,7 @@ await pp.waitForFunction(() => document.querySelectorAll('.plan-row').length > 0
 const theirPlan = await planOn(pp);
 check('accepting gives the same exercises, order and planned sets', shape(theirPlan) === shape(myPlan), `${shape(theirPlan)} <> ${shape(myPlan)}`);
 check('weights are each person\'s own: the sender has suggestions from history, the new partner has none yet', myPlan.some((x) => / at \d/.test(x.target)) && theirPlan.every((x) => !/ at \d/.test(x.target)), JSON.stringify([myPlan[0], theirPlan[0]]));
-check('a shared plan has no Lock, Swap or Regenerate, so it stays the same as the sender\'s', (await pp.locator('.plan-row button').count()) === 0 && (await pp.locator('button:has-text("Regenerate")').count()) === 0);
+check('a shared plan has no Lock, Swap or Regenerate, so it stays the same as the sender\'s (Remove is allowed, #155)', (await pp.locator('.plan-row button:not([aria-label^="Remove"])').count()) === 0 && (await pp.locator('button:has-text("Regenerate")').count()) === 0);
 check('no sideways scrolling on the shared plan', (await pp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
 if (SHOTS) await pp.screenshot({ path: `${SHOTS}/15-share-accepted.png` });
 await pp.reload();
@@ -903,7 +903,7 @@ console.log('Saved routines');
   check('picking it loads the same exercises in the same order', routineRows.map((r) => r.name).join() === pastNames.join(), routineRows.map((r) => r.name).join() + ' <> ' + pastNames.join());
   const liftRow = routineRows.find((r) => r.name === liftName);
   check(`each exercise shows the last logged weight and reps (${liftRow && liftRow.last})`, !!liftRow && /^Last: \d+ lb × /.test(liftRow.last) && / at \d+ lb/.test(liftRow.target));
-  check('a routine plan has no Regenerate, Lock or Swap', (await page.locator('button:has-text("Regenerate")').count()) === 0 && (await page.locator('.plan-row button').count()) === 0);
+  check('a routine plan has no Regenerate, Lock or Swap (Remove is allowed, #155)', (await page.locator('button:has-text("Regenerate")').count()) === 0 && (await page.locator('.plan-row button:not([aria-label^="Remove"])').count()) === 0);
   check('no sideways scrolling with a routine on Today', (await overflow()) <= 0);
   await shot('23-routine-on-today');
   await page.click('button:has-text("Save changes to this routine")');
@@ -1660,6 +1660,75 @@ console.log('Muscle illustrations (#150)');
   await page.click('button:has-text("Discard workout")');
   await page.click('.sheet button:has-text("Discard workout")');
   await page.waitForSelector('.plan-row');
+}
+
+console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  const settle = async () => { await page.waitForTimeout(300); await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelectorAll('.plan-row').length > 0); };
+  const names = () => page.$$eval('.plan-row h3', (els) => els.map((e) => e.textContent));
+  await page.selectOption('select[aria-label="Workout type"]', 'pick-muscles');
+  await page.waitForSelector('.muscle-tile');
+  const tiles = await page.$$eval('.muscle-tile', (ts) => ts.map((t) => [t.dataset.muscle, t.querySelector('.muscle-pct').textContent, t.querySelector('img').complete]));
+  check('Pick muscle groups shows all 13 with their recovery, most recovered first', tiles.length === 13 && tiles.every(([, p]) => /^\d+%/.test(p)) && tiles.map(([, p]) => parseInt(p, 10)).every((v, i, all) => i === 0 || all[i - 1] >= v), JSON.stringify(tiles));
+  await page.click('.muscle-tile[data-muscle="lats"]');
+  await page.click('.muscle-tile[data-muscle="biceps"]');
+  check('the build button counts the picks', (await page.textContent('.sheet button[type=submit]')).trim() === 'Build workout (2)');
+  await shot('44-pick-muscles');
+  await page.click('.sheet button[type=submit]');
+  await settle();
+  const arts = await page.$$eval('.plan-row img.muscle-art', (is) => is.map((i) => i.dataset.muscle));
+  check('the plan trains only the picked groups', arts.length >= 2 && arts.every((m) => ['lats', 'biceps'].includes(m)) && arts.includes('lats') && arts.includes('biceps'), arts.join());
+  check('the dropdown names the custom day', /Custom: Biceps, Lats/.test(await page.$eval('select[aria-label="Workout type"]', (s) => s.selectedOptions[0].textContent)));
+  // Edit before starting (#155).
+  const before = await names();
+  const gone = (await page.locator('.plan-row.has-art').first().locator('h3').textContent()).trim();
+  await page.locator('.plan-row.has-art').first().locator('button:has-text("Remove")').click();
+  check('a planned lift can be removed', (await names()).length === before.length - 1 && !(await names()).includes(gone));
+  await page.click('button:has-text("Add exercise")');
+  await page.selectOption('.sheet select[aria-label="Muscle group"]', 'chest');
+  await page.waitForTimeout(200);
+  check('the picker can narrow to a muscle group', (await page.locator('.sheet .pick').count()) > 0);
+  const added = (await page.locator('.sheet .pick .pick-name').first().textContent()).trim();
+  await page.locator('.sheet .pick').first().click();
+  await page.waitForFunction((n) => [...document.querySelectorAll('.plan-row h3')].some((e) => e.textContent === n), added);
+  check(`an added lift (${added}) joins the plan with a target`, /sets of/.test(await page.locator('.plan-row', { hasText: added }).locator('.target').textContent()));
+  await page.click('button:has-text("Regenerate")');
+  await settle();
+  const regen = await names();
+  check('Regenerate keeps the added lift and does not bring back the removed one', regen.includes(added) && !regen.includes(gone), JSON.stringify({ added, gone, regen }));
+  const planned = await names();
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  check('the workout starts with exactly the edited list', JSON.stringify(await page.$$eval('.lift h2', (els) => els.map((e) => e.textContent))) === JSON.stringify(planned));
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
+  // Quick Start (#127).
+  await page.click('button:has-text("Quick start")');
+  await page.waitForSelector('.sheet .pick');
+  check('Quick start opens an empty workout with the exercise picker', /#\/workout$/.test(await page.evaluate(() => location.hash)) && (await page.locator('.lift').count()) === 0);
+  const first = (await page.locator('.sheet .pick .pick-name').first().textContent()).trim();
+  await page.locator('.sheet .pick').first().click();
+  await page.waitForSelector('.lift');
+  const row = page.locator('.lift').first().locator('.set').first();
+  if (!(await row.locator('input').nth(0).inputValue())) await row.locator('input').nth(0).fill('40');
+  if (!(await row.locator('input').nth(1).inputValue())) await row.locator('input').nth(1).fill('10');
+  await row.locator('.plate').click();
+  await page.click('button:has-text("Finish workout")');
+  await page.waitForSelector('.sheet button:has-text("Finish and save")');
+  await page.click('.sheet button:has-text("Finish and save")');
+  await closeRecap(page);
+  const qs = (await api('history&limit=1')).workouts[0];
+  check('the quick-start session is in History with its lift', qs.exercises.includes(first) && qs.sets >= 1, JSON.stringify(qs));
+  await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, qs.id);
+  check('no sideways scrolling', (await overflow()) <= 0);
 }
 
 console.log('Send feedback');
