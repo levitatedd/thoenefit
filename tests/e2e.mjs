@@ -1305,6 +1305,8 @@ console.log('Pause and resume a workout');
   await page.click('button:has-text("Start workout")');
   await page.waitForSelector('.lift');
   const pauseTab = page.locator('.pause-tab');
+  const fin = await page.$eval('button.finish', (b) => { const s = getComputedStyle(b); return [s.color, s.backgroundColor, s.borderTopColor, s.borderRadius, b.textContent.trim()]; });
+  check('Finish workout has the Quick Start treatment in red (#164)', fin[0] === 'rgb(255, 107, 94)' && fin[1] === 'rgba(255, 107, 94, 0.1)' && fin[2] === 'rgba(255, 107, 94, 0.5)' && fin[4] === 'Finish workout', fin.join(' | '));
   check('during a workout the Today spot is a Pause button with an accessible label', (await pauseTab.getAttribute('aria-label')) === 'Pause workout' && (await pauseTab.locator('.tab-icon').count()) === 1);
   const strength = () => page.locator('.lift', { has: page.locator('.set:not(.cardio)') }).first();
   const first = strength().locator('.set').first();
