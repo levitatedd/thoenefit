@@ -882,7 +882,10 @@ function viewToday() {
   const gym = activeGym();
   const active = sync.active;
   refreshShares();
-  const head = h('header', { class: 'page-head today-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
+  // The wide logo sits top right, beside the heading.
+  const head = h('header', { class: 'page-head today-head' },
+    h('div', {}, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }))),
+    brandWide('head'));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {
@@ -916,7 +919,6 @@ function viewToday() {
           'Discard workout',
         ),
       ),
-      brandWide(),
     );
   }
 
@@ -1082,10 +1084,12 @@ function viewToday() {
           replanTime();
           pushSharedPlan();
           render();
-        }) }, icon('plus', 18), 'Add exercise'),
-        h('button', { class: 'btn block ghost', type: 'button', onclick: quickStart }, 'Quick start: an empty workout')),
+        }) }, icon('plus', 18), 'Add exercise')),
       d.exercises.length > 0 && h('button', { class: 'btn block', type: 'button', onclick: () => routineSheet(d.routine_name || dayLabel(d.day_type), planOf(d.day_type, d.exercises, (b) => b.target_sets)) }, icon('plus', 18), d.routine_id ? 'Save changes to this routine' : 'Save as routine'),
-      brandWide(),
+      // Quick Start (#127): an empty workout, built as you go.
+      h('div', { class: 'quick-start-box' },
+        h('button', { class: 'btn block quick-start', type: 'button', onclick: quickStart }, icon('bolt', 18), 'Quick Start'),
+        h('p', { class: 'muted small center' }, 'Start an empty workout')),
     );
   }
 
