@@ -1534,6 +1534,16 @@ console.log('Workout recap and records (#123)');
   check('the finished workout in History shows the same recap', (await page.locator('.recap .recap-record', { hasText: lift.name }).count()) === 1);
   check('no sideways scrolling on the recap', (await overflow()) <= 0);
   await shot('37-history-recap');
+  // Share as an image (#160): drawn on the phone when asked, released on close.
+  await page.click('.recap ~ button:has-text("Share workout"), button:has-text("Share workout")');
+  await page.waitForSelector('.sheet canvas.share-card');
+  const shareCard = await page.$eval('.sheet canvas.share-card', (cv) => ({ w: cv.width, h: cv.height, data: cv.toDataURL('image/png') }));
+  const save = await page.$eval('.sheet a:has-text("Save image")', (a) => [a.getAttribute('download'), a.getAttribute('href').slice(0, 22)]);
+  check('Share workout draws a phone-width PNG of the workout', shareCard.w === 1080 && shareCard.h > 900 && shareCard.data.startsWith('data:image/png'), `${shareCard.w}x${shareCard.h}`);
+  check('Save image downloads it as a PNG', /^thoenefit-\d{4}-\d\d-\d\d\.png$/.test(save[0]) && save[1] === 'data:image/png;base64,', save.join());
+  if (SHOTS) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${SHOTS}/45-share-card.png`, Buffer.from(shareCard.data.split(',')[1], 'base64')); }
+  await page.click('.sheet button:has-text("Close")');
+  check('closing releases the image', (await page.locator('canvas.share-card').count()) === 0);
   await page.evaluate(async (ids) => {
     const b = await (await fetch('api.php?a=bootstrap')).json();
     for (const id of ids) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
