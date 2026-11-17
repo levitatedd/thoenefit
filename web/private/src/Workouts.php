@@ -101,6 +101,8 @@ final class Workouts
                 'suggested_weight' => is_numeric($sugg) ? round((float) $sugg, 2) : null,
                 'reason' => isset($e['reason']) ? mb_substr((string) $e['reason'], 0, 1000) : null,
                 'target_seconds' => is_numeric($targetSeconds) ? max(0, min(86400, (int) $targetSeconds)) : null,
+                // Difficulty (#170): reps left at the end of a typical working set, 0-4 (4 = 4+).
+                'reps_left' => self::repsLeft($e['reps_left'] ?? null),
             ];
             $sets = is_array($e['sets'] ?? null) ? array_values($e['sets']) : [];
             if (count($sets) > 30) {
@@ -272,10 +274,21 @@ final class Workouts
                 'suggested_weight' => $e['suggested_weight'] === null ? null : (float) $e['suggested_weight'],
                 'reason' => $e['reason'],
                 'target_seconds' => $e['target_seconds'] === null ? null : (int) $e['target_seconds'],
+                'reps_left' => self::repsLeft($e['reps_left'] ?? null),
                 'sets' => $sets[$e['id']] ?? [],
             ];
         }
         return $out;
+    }
+
+    /** A difficulty rating (#170): 0-4 reps left (4 = 4 or more), or null for none. */
+    public static function repsLeft($v): ?int
+    {
+        if ($v === null || $v === '' || !is_numeric($v)) {
+            return null;
+        }
+        $n = (int) $v;
+        return $n >= 0 && $n <= 4 && (float) $v === (float) $n ? $n : null;
     }
 
     public function active(int $uid): ?array
