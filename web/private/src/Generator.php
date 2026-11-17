@@ -359,6 +359,100 @@ final class Generator
         ];
     }
 
+    /** How many recent sessions of one setup must agree before calling it a stall (#124). */
+    public const STALL_SESSIONS = 3;
+
+    /**
+     * Has this lift stalled (#124)? Looks at the last few finished sessions of
+     * the same setup (same exercise, and same gym for machines and cables): a
+     * stall is the same working weight every time, never reaching the top of
+     * the range, and no more reps at that weight in the newest session than in
+     * the oldest. Progress anywhere in that run, or a recent "3+ reps left"
+     * rating (#170), means it is not stalled. Weighted lifts only.
+     *
+     * @return array|null {sessions, weight, reps, repeat: {weight, reps}, lower: {weight, reps}} in $unit
+     */
+    public function stall(int $uid, string $variantKey, int $repMin, int $repMax, float $inc, string $unit): ?array
+    {
+        if ($inc <= 0) {
+            return null;
+        }
+        $rows = $this->db->all(
+            "SELECT we.id, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+             WHERE we.user_id=? AND we.variant_key=? AND w.status='completed'
+             ORDER BY w.started_at DESC LIMIT 10",
+            [$uid, $variantKey]
+        );
+        $runs = [];
+        foreach ($rows as $r) {
+            $sets = $this->db->all('SELECT weight, reps FROM workout_sets WHERE workout_exercise_id=? AND done=1 AND warmup=0 AND reps>0 ORDER BY pos', [$r['id']]);
+            if (!$sets) {
+                continue;
+            }
+            $conv = array_map(fn($s) => ['weight' => self::convert((float) $s['weight'], $r['unit'], $unit, $inc), 'reps' => (int) $s['reps']], $sets);
+            $runs[] = ['sets' => $conv] + self::workingSummary($conv, $repMax);
+            if (count($runs) === self::STALL_SESSIONS) {
+                break;
+            }
+        }
+        if (count($runs) < self::STALL_SESSIONS) {
+            return null;
+        }
+        $left = $this->db->val('SELECT reps_left FROM workout_exercises WHERE id=?', [$rows[0]['id']]);
+        if ($left !== null && $left !== false && (int) $left >= 3) {
+            return null;
+        }
+        $top = $runs[0]['top'];
+        foreach ($runs as $run) {
+            if ($top <= 0 || abs($run['top'] - $top) > 0.001 || $run['allTop']) {
+                return null;
+            }
+        }
+        $newest = $runs[0]['bestReps'];
+        $oldest = $runs[count($runs) - 1]['bestReps'];
+        if ($newest > $oldest) {
+            return null;
+        }
+        // About 10% lighter, on the gym's increments, and at least one increment down.
+        $lower = min($top - $inc, round($top * 0.9 / $inc) * $inc);
+        return [
+            'sessions' => count($runs),
+            'weight' => $top,
+            'reps' => $newest,
+            'repeat' => ['weight' => $top, 'reps' => max($repMin, min($repMax, $newest))],
+            'lower' => $lower > 0 ? ['weight' => $lower, 'reps' => $repMax] : null,
+        ];
+    }
+
+    /** Working weight (the weight used for most sets, heavier on a tie), best reps at it, and whether every set hit $repMax there. */
+    private static function workingSummary(array $sets, int $repMax): array
+    {
+        $counts = [];
+        foreach ($sets as $s) {
+            $k = self::fmt($s['weight']);
+            $counts[$k] = ($counts[$k] ?? 0) + 1;
+        }
+        $top = 0.0;
+        $best = 0;
+        foreach ($counts as $k => $n) {
+            if ($n > $best || ($n === $best && (float) $k > $top)) {
+                $best = $n;
+                $top = (float) $k;
+            }
+        }
+        $bestReps = 0;
+        $allTop = true;
+        foreach ($sets as $s) {
+            if (abs($s['weight'] - $top) < 0.001) {
+                $bestReps = max($bestReps, $s['reps']);
+            }
+            if ($s['weight'] < $top || $s['reps'] < $repMax) {
+                $allTop = false;
+            }
+        }
+        return ['top' => $top, 'bestReps' => $bestReps, 'allTop' => $allTop];
+    }
+
     public static function increment(array $gym, string $kind, string $unit): float
     {
         $defaults = Catalog::defaultIncrements($unit);
@@ -397,7 +491,10 @@ final class Generator
         $unit = $user['unit'];
         $variant = Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']);
         $last = $this->lastPerformance((int) $user['id'], $variant);
-        $p = self::progress($last, $repMin, $repMax, self::increment($gym, $ex['kind'], $unit), $unit);
+        $inc = self::increment($gym, $ex['kind'], $unit);
+        $p = self::progress($last, $repMin, $repMax, $inc, $unit);
+        // A stalled lift (#124) comes with choices; the usual suggestion stays the default.
+        $stall = $bodyweightOnly ? null : $this->stall((int) $user['id'], $variant, $repMin, $repMax, $inc, $unit);
         if ($bodyweightOnly) {
             $p = [
                 'weight' => null,
@@ -425,6 +522,7 @@ final class Generator
             'action' => $p['action'],
             'reason' => $p['why'],
             'previous' => $last,
+            'stall' => $stall,
             'minutes' => round(($sets * (45 + $rest) + 90) / 60, 1),
         ];
     }
