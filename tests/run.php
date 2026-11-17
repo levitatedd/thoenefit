@@ -1533,6 +1533,38 @@ $wk->save($ru, $rd2);
 $rb2 = $gen->block($ruser, $rg, $exById[$bench]);
 check('an unrated latest session uses the usual rules, not an older rating', $rb2['previous']['reps_left'] === null && $rb2['suggested_weight'] === 140.0, json_encode([$rb2['suggested_weight'], $rb2['previous']['reps_left'] ?? 'x']));
 
+echo "Stalled lifts (#124)\n";
+$su = $auth->createUser('staller', 'staller long password');
+$sg = $mkGym($su, 'Stall gym', Catalog::equipmentKeys());
+$suser = $db->one('SELECT * FROM users WHERE id=?', [$su]);
+$squatS = $bySlug['back-squat'];
+$stallBlock = fn() => $gen->block($suser, $sg, $exById[$squatS]);
+check('fewer than three sessions is never a stall', $stallBlock()['stall'] === null);
+foreach ([5, 4, 3] as $i => $d) {
+    $wk->save($su, $doc($sg, 'legs', [[$squatS, 6, 10, [[225, 8], [225, 7], [225, 6]]]], $ago($d)));
+}
+$sb = $stallBlock();
+check('three sessions at the same weight with no more reps is a stall, with repeat and lighter options', $sb['stall'] !== null && $sb['stall']['sessions'] === 3 && $sb['stall']['weight'] === 225.0 && $sb['stall']['repeat'] === ['weight' => 225.0, 'reps' => 8] && $sb['stall']['lower']['weight'] < 225.0 && $sb['stall']['lower']['weight'] >= 200.0, json_encode($sb['stall']));
+check('the usual suggestion stays the default alongside the stall', $sb['suggested_weight'] === 225.0 && $sb['action'] === 'stay');
+$wk->save($su, $doc($sg, 'legs', [[$squatS, 6, 10, [[225, 9], [225, 8], [225, 7]]]], $ago(2)));
+check('one more rep at that weight is progress, so the usual planner carries on', $stallBlock()['stall'] === null);
+$pu = $auth->createUser('progressor', 'progressor long password');
+$pg = $mkGym($pu, 'Progress gym', Catalog::equipmentKeys());
+$puser = $db->one('SELECT * FROM users WHERE id=?', [$pu]);
+foreach ([[5, 205], [4, 215], [3, 225]] as [$d, $w]) {
+    $wk->save($pu, $doc($pg, 'legs', [[$squatS, 6, 10, [[$w, 8], [$w, 8]]]], $ago($d)));
+}
+check('adding weight across sessions is not a stall', $gen->block($puser, $pg, $exById[$squatS])['stall'] === null);
+$eu = $auth->createUser('easyrater', 'easyrater long password');
+$eg = $mkGym($eu, 'Easy gym', Catalog::equipmentKeys());
+$euser = $db->one('SELECT * FROM users WHERE id=?', [$eu]);
+foreach ([5, 4, 3] as $d) {
+    $ed = $doc($eg, 'legs', [[$squatS, 6, 10, [[225, 8], [225, 8]]]], $ago($d));
+    $ed['exercises'][0]['reps_left'] = $d === 3 ? 4 : null;
+    $wk->save($eu, $ed);
+}
+check('a "4+ reps left" rating on the latest session means it is not a stall', $gen->block($euser, $eg, $exById[$squatS])['stall'] === null);
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

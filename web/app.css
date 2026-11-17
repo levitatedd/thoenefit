@@ -1602,6 +1602,44 @@ input[type="file"] {
   padding: 8px 18px 20px;
 }
 
+/* A stalled lift (#124): yellow, like other things that want attention. */
+.stall {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(245, 198, 60, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(245, 198, 60, 0.45);
+}
+
+.stall strong {
+  color: var(--yellow);
+}
+
+.stall-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stall-chosen {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.stall-change {
+  appearance: none;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* Difficulty (#170): mint once rated. */
 .btn.difficulty.rated {
   border-color: rgba(58, 242, 156, 0.45);

@@ -375,6 +375,7 @@ function render() {
   // back at the spot it was left.
   if (restoreY !== null) window.scrollTo(0, restoreY);
   else window.scrollTo(0, tab === S.lastTab && !S.backTo ? window.scrollY : 0);
+  markScrolled(); // the header shadow follows the new scroll position straight away
   S.lastTab = tab;
   startTicker();
   keepAwake();
@@ -1322,7 +1323,7 @@ function planRow(b, gym) {
     'li',
     { class: `plan-row${art ? ' has-art' : ''}` },
     art,
-    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason), !S.draft.share_id && stallBox(b, gym)),
     h(
       'div',
       { class: 'plan-actions' },
@@ -1356,6 +1357,54 @@ function planRow(b, gym) {
       } }, icon('trash', 18), 'Remove'),
     ),
   );
+}
+
+/**
+ * A stalled lift (#124): the same weight for several sessions without more
+ * reps. Offers to repeat the target, go lighter for today or swap the lift;
+ * keeping the usual suggestion just closes the prompt. A choice can be undone.
+ */
+function stallBox(b, gym) {
+  const st = b.stall;
+  if (!st) return null;
+  const unit = S.draft.unit;
+  const each = b.kind === 'dumbbell' ? ' each' : '';
+  const choose = (choice) => {
+    b.stallBefore ??= { suggested_weight: b.suggested_weight, suggested_reps: b.suggested_reps, reason: b.reason };
+    Object.assign(b, b.stallBefore);
+    b.stallChoice = choice;
+    const pick = choice === 'repeat' ? st.repeat : choice === 'lower' ? st.lower : null;
+    if (pick) {
+      b.suggested_weight = pick.weight;
+      b.suggested_reps = pick.reps;
+      b.reason = choice === 'repeat'
+        ? `Stalled at ${fmtW(st.weight)} ${unit}: you chose to repeat ${fmtW(pick.weight)} ${unit} × ${pick.reps} and own every rep.`
+        : `Stalled at ${fmtW(st.weight)} ${unit}: you chose a lighter day at ${fmtW(pick.weight)} ${unit} × ${pick.reps}, then build back up.`;
+      b.locked = true;
+    }
+    pushSharedPlan();
+    render();
+  };
+  if (b.stallChoice) {
+    return h('p', { class: 'stall-chosen' },
+      b.stallChoice === 'keep' ? 'Stalled: keeping the usual suggestion. ' : 'Stalled: changed for today. ',
+      h('button', { type: 'button', class: 'stall-change', onclick: () => {
+        if (b.stallBefore) Object.assign(b, b.stallBefore);
+        delete b.stallChoice;
+        render();
+      } }, 'Change'));
+  }
+  return h('div', { class: 'stall', role: 'group', 'aria-label': `${b.name} has stalled` },
+    h('p', {}, h('strong', {}, 'Stalled. '), `${fmtW(st.weight)} ${unit}${each} for ${st.sessions} sessions without more reps. What would you like to do today?`),
+    h('div', { class: 'stall-actions' },
+      h('button', { type: 'button', class: 'btn small', onclick: () => choose('repeat') }, `Repeat ${fmtW(st.repeat.weight)} × ${st.repeat.reps}`),
+      st.lower && h('button', { type: 'button', class: 'btn small', onclick: () => choose('lower') }, `Lower to ${fmtW(st.lower.weight)} × ${st.lower.reps}`),
+      !S.draft.routine_id && h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
+        Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in for a stalled lift. ${block.reason}` });
+        pushSharedPlan();
+        render();
+      }, S.draft.bodyweight_only) }, icon('swap', 18), 'Swap'),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => choose('keep') }, 'Keep suggestion')));
 }
 
 function recoveryPanel(recovery) {

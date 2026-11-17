@@ -1848,6 +1848,58 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   check('no sideways scrolling', (await overflow()) <= 0);
 }
 
+console.log('Stalled lifts (#124)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.click('button:has-text("Add exercise")');
+  await page.waitForSelector('.sheet .pick');
+  // A barbell lift this gym has, not already planned, and never done before.
+  const done = await page.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const { counts } = await (await fetch('api.php?a=exercise_counts')).json();
+    return b.exercises.filter((x) => counts[x.id]).map((x) => x.name);
+  });
+  const name = (await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent))).find((n) => /^Barbell /.test(n) && !done.includes(n));
+  await page.click('.sheet button:has-text("Close")');
+  const ids = await page.evaluate(async (n) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const ex = b.exercises.find((x) => x.name === n);
+    const out = [];
+    for (const days of [5, 4, 3]) {
+      const id = crypto.randomUUID();
+      const at = new Date(Date.now() - days * 86400000).toISOString();
+      const sets = [8, 7, 6].map((r) => ({ id: crypto.randomUUID(), weight: 100, reps: r, warmup: false, done: true, done_at: at }));
+      await fetch('api.php?a=save_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, gym_id: b.user.active_gym_id, day_type: 'custom', status: 'completed', unit: 'lb', started_at: at, completed_at: at, rev: 1, exercises: [{ id: crypto.randomUUID(), exercise_id: ex.id, rep_min: 6, rep_max: 10, target_sets: 3, sets }] } }) });
+      out.push(id);
+    }
+    return out;
+  }, name);
+  await page.click('button:has-text("Add exercise")');
+  await page.fill('.sheet input[type=search]', name);
+  await page.waitForTimeout(200);
+  await page.locator('.sheet .pick', { hasText: name }).first().click();
+  const row = page.locator('.plan-row', { has: page.locator('h3', { hasText: name }) });
+  await row.locator('.stall').waitFor();
+  const box = await row.locator('.stall').textContent();
+  check('a lift stuck at the same weight for 3 sessions offers repeat, lighter, swap or keep', /Stalled\. 100 lb for 3 sessions without more reps/.test(box) && /Repeat 100 × \d+/.test(box) && /Lower to 9\d × \d+/.test(box) && /Swap/.test(box) && /Keep suggestion/.test(box), box);
+  const usual = await row.locator('.target').textContent();
+  await row.locator('.stall button:has-text("Lower to")').click();
+  const lowered = await row.locator('.target').textContent();
+  check('choosing Lower changes today\'s target and says why', /at 9\d lb/.test(lowered) && /lighter day/.test(await row.locator('.why').textContent()) && (await row.locator('.stall').count()) === 0, lowered);
+  await row.locator('.stall-change').click();
+  check('Change brings back the choices and the usual suggestion', (await row.locator('.stall').count()) === 1 && (await row.locator('.target').textContent()) === usual);
+  await row.locator('.stall button:has-text("Keep suggestion")').click();
+  check('Keep suggestion leaves the usual target and closes the prompt', (await row.locator('.target').textContent()) === usual && (await row.locator('.stall').count()) === 0 && /keeping the usual suggestion/.test(await row.locator('.stall-chosen').textContent()));
+  await shot('48-stall');
+  await row.locator('button[aria-label^="Remove"]').click();
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, ids);
+}
+
 console.log('Fixed page headers (#175)');
 {
   await page.setViewportSize({ width: 402, height: 874 });
@@ -1868,12 +1920,14 @@ console.log('Fixed page headers (#175)');
   await page.goto(`${URL}#/today`);
   await page.waitForSelector('.top-head');
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(300); // let the header shadow finish fading out
   const today = await look();
   const screens = {};
   for (const tab of ['history', 'trends', 'exercises', 'settings']) {
     await page.goto(`${URL}#/${tab}`);
     await page.waitForSelector('main > .top-head');
     await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
     screens[tab] = await look();
   }
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
