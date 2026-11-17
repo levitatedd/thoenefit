@@ -1646,6 +1646,12 @@ input[type="file"] {
   color: var(--mint);
 }
 
+/* History's Other people slot takes no space until someone shares, so the
+   list starts the same distance under the header as other tabs' content. */
+[data-people]:empty {
+  display: none;
+}
+
 /* Estimated 1-rep max on an exercise's session list (#162). */
 .log-est {
   color: var(--mint);

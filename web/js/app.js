@@ -2549,12 +2549,15 @@ function workoutList(fetchPage, hrefOf, empty, { recentDays = null } = {}) {
 }
 
 function viewHistory() {
-  // Other people who share their history (#13). Nothing shows until someone does.
+  // Other people who share their history (#13): a dropdown to open one. Nothing shows until someone does.
   const people = h('div', { 'data-people': '' });
-  api.get('people_history').then(({ people: list }) => fill(people, list.length > 0 && h('section', { class: 'card stack people-card' },
-    h('h2', {}, 'Other people'),
-    h('ul', { class: 'log' }, list.map((p) => h('li', {}, h('a', { class: 'log-row', href: `#/people/${p.id}` }, h('span', { class: 'log-title' }, p.name), h('span', { class: 'log-meta' }, 'See their workouts'))))),
-    h('p', { class: 'muted small' }, S.user.history_visibility === 'members' ? 'They can see your history too.' : 'Your own history is private. You can share it in Settings.'))), () => {});
+  api.get('people_history').then(({ people: list }) => fill(people, list.length > 0 && h('select', {
+    class: 'people-pick',
+    'aria-label': "View other trainer's history",
+    onchange: (e) => {
+      if (e.target.value) location.hash = `#/people/${e.target.value}`;
+    },
+  }, h('option', { value: '', selected: true }, "View other trainer's history"), list.map((p) => h('option', { value: String(p.id) }, p.name)))), () => {});
   return h('main', { class: 'page' }, topHead('History', { sub: 'Last 8 weeks.' }), people,
     workoutList(
       (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
