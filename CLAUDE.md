@@ -63,12 +63,13 @@ php tests/run.php
 node tests/sync.test.mjs
 node tests/search.test.mjs
 node tests/strength.test.mjs
+node tests/plates.test.mjs
 node tests/install.test.mjs
 node tests/version.test.mjs
 node tests/changelog.test.mjs
 ```
 
-For anything touching the UI, also run the browser walk-through (instructions at the top of `tests/e2e.mjs`). The **Checks** job runs it on every PR too (#217), but run it locally first so failures show up before CI:
+For anything touching the UI, also run the browser walk-through (instructions at the top of `tests/e2e.mjs`). The **Checks** job runs it on every PR too (#217), but not again on the push after merging, to keep deploys quick. Run it locally first so failures show up before CI:
 
 ```sh
 php web/private/bin/create-user.php e2e "E2E"   # password: gym-test-password

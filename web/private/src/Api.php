@@ -11,6 +11,7 @@ final class Api
     private Auth $auth;
     private Workouts $workouts;
     private Generator $gen;
+    private Calendar $calendar;
     private Shares $shares;
     private Routines $routines;
     private Strava $strava;
@@ -40,6 +41,7 @@ final class Api
         $this->auth = new Auth($app->db, $app->config);
         $this->workouts = new Workouts($app->db);
         $this->gen = new Generator($app->db);
+        $this->calendar = new Calendar($app->db, $this->gen);
         $this->shares = new Shares($app->db);
         $this->routines = new Routines($app->db);
         $this->strava = new Strava($app->db, $app->config);
@@ -145,6 +147,8 @@ final class Api
                 'pins' => $this->workouts->pins($uid),
             ],
             'pins' => fn() => ['pins' => $this->workouts->pins($uid)],
+            // The calendar on History (#228): one month of finished and planned days.
+            'calendar' => fn() => $this->calendar->month($user, (string) ($_GET['month'] ?? ''), is_string($_GET['timezone'] ?? null) ? $_GET['timezone'] : 'UTC'),
             // Other people on this server, by display name only, for sharing a workout.
             'people' => fn() => ['people' => $this->people($user)],
             // Other people's workout history (#13), read-only, only for those who share it (#15).
@@ -356,6 +360,13 @@ final class Api
                 }
                 self::json($saved);
                 return;
+            case 'schedule_day':
+                // Rest, train, move or reset one day of the plan (#228); answers with that day's month.
+                $tz = is_string($in['timezone'] ?? null) ? $in['timezone'] : 'UTC';
+                $day = (string) ($in['day'] ?? '');
+                $this->calendar->setDay($user, $day, (string) ($in['action'] ?? ''), $tz);
+                self::json($this->calendar->month($user, substr($day, 0, 7), $tz));
+                return;
             case 'pin_exercise':
                 // Pinned exercises on Trends (#126).
                 $this->workouts->setPin($uid, (int) ($in['exercise_id'] ?? 0), !empty($in['pinned']));
@@ -429,6 +440,7 @@ final class Api
             'variety' => isset(Generator::VARIETY[$u['variety'] ?? '']) ? $u['variety'] : 'mixed',
             'minutes' => (int) $u['minutes'],
             'split_type' => $u['split_type'],
+            'training_days' => Calendar::parseDays($u['training_days'] ?? null),
             'active_gym_id' => $u['active_gym_id'] === null ? null : (int) $u['active_gym_id'],
             'onboarded' => (int) $u['onboarded'] === 1,
             'warm_up' => (int) ($u['warm_up'] ?? 0) === 1,
@@ -547,6 +559,9 @@ final class Api
         }
         if (isset($in['split_type']) && isset(Generator::SPLIT_DAYS[$in['split_type']])) {
             $set['split_type'] = $in['split_type'];
+        }
+        if (isset($in['training_days']) && is_array($in['training_days'])) {
+            $set['training_days'] = Calendar::storeDays($in['training_days']);
         }
         if (isset($in['history_visibility']) && in_array($in['history_visibility'], Auth::HISTORY_VISIBILITY, true)) {
             $set['history_visibility'] = $in['history_visibility'];

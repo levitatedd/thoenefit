@@ -1,6 +1,7 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises, byUsage } from './search.js';
 import { bestEstimate, estimateLabel, convertWeight, roundEstimate } from './strength.js';
+import { loadBar, plateHint, plateStep, sideText, BARS, PLATES } from './plates.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -570,7 +571,35 @@ function trainingFields(values, onChange) {
     field('Training experience', choices(LEVELS, values.experience, (v) => onChange('experience', v), { columns: 3 })),
     field('Usual workout length', stepper(values.minutes, { min: 15, max: 150, step: 5, suffix: ' min', onChange: (v) => onChange('minutes', v) })),
     field('Training split', choices(SPLITS, values.split_type, (v) => onChange('split_type', v), { columns: 1 })),
+    trainingDaysField(values.training_days || [], (v) => onChange('training_days', v)),
   ];
+}
+
+/** The weekdays someone usually trains (#228), Monday first. The calendar on History plans the split onto them. */
+const WEEKDAYS = [[1, 'M', 'Monday'], [2, 'T', 'Tuesday'], [3, 'W', 'Wednesday'], [4, 'T', 'Thursday'], [5, 'F', 'Friday'], [6, 'S', 'Saturday'], [7, 'S', 'Sunday']];
+
+function trainingDaysField(initial, onChange) {
+  let days = [...initial];
+  const hint = h('span', { class: 'field-hint' });
+  const say = () => {
+    hint.textContent = days.length
+      ? `${days.length} day${days.length === 1 ? '' : 's'} a week. The calendar on History plans your split onto these days.`
+      : 'Pick the days you usually train, and the calendar on History plans your split onto them.';
+  };
+  const picker = h('div', { class: 'dow-picker', role: 'group', 'aria-label': 'Training days' }, WEEKDAYS.map(([n, letter, name]) => h('button', {
+    type: 'button',
+    class: 'choice',
+    'aria-label': name,
+    'aria-pressed': String(days.includes(n)),
+    onclick: (e) => {
+      days = days.includes(n) ? days.filter((d) => d !== n) : [...days, n].sort((a, b) => a - b);
+      e.currentTarget.setAttribute('aria-pressed', String(days.includes(n)));
+      say();
+      onChange(days);
+    },
+  }, h('span', { class: 'choice-label' }, letter))));
+  say();
+  return h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Training days'), picker, hint);
 }
 
 function equipmentPicker(gym) {
@@ -609,7 +638,7 @@ function equipmentPicker(gym) {
 }
 
 function viewOnboarding() {
-  const profile = { unit: S.user.unit, goal: S.user.goal, variety: S.user.variety || 'mixed', experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type };
+  const profile = { unit: S.user.unit, goal: S.user.goal, variety: S.user.variety || 'mixed', experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type, training_days: S.user.training_days || [] };
   const gym = { name: 'My gym', equipment: S.vocab.presets[0].equipment.slice(), increments: {} };
   const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true });
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save and build my first workout');
@@ -651,7 +680,7 @@ function activeGym() {
 async function loadDraft({ regenerate = false } = {}) {
   const gym = activeGym();
   if (!gym) return;
-  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
+  const body = { gym_id: gym.id, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
   if (S.draftOpts.day_type === 'custom') body.muscles = S.draftOpts.muscles || []; // picked muscle groups (#154)
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
@@ -1767,6 +1796,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
   const stretch = isStretch(e);
   const needsWeight = !['bodyweight', 'band'].includes(e.kind);
   const perSide = e.kind === 'dumbbell' ? `${doc.unit} each` : doc.unit;
+  const barbell = e.kind === 'barbell'; // plate calculator (#227)
   let workingNo = 0;
 
   const cardioRow = (s, n) => {
@@ -1847,8 +1877,14 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       placeholder: needsWeight ? doc.unit : 'BW',
       value: fmtW(s.weight),
       onfocus: (ev) => ev.target.select(),
-      oninput: (ev) => edit((d) => (find(d, e.id, s.id).weight = parseNum(ev.target.value)), false),
+      oninput: (ev) => {
+        const v = parseNum(ev.target.value);
+        edit((d) => (find(d, e.id, s.id).weight = v), false);
+        if (plates) plates.textContent = plateHint(v, barFor(doc.unit), doc.unit);
+      },
     });
+    // Barbell sets show the plates for each side under the row, kept in step with the weight (#227).
+    const plates = barbell && h('span', { class: 'plate-hint' }, plateHint(s.weight, barFor(doc.unit), doc.unit));
     const reps = h('input', {
       class: 'num',
       type: 'text',
@@ -1927,6 +1963,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('span', { class: 'times', 'aria-hidden': 'true' }, '×'),
       reps,
       done,
+      plates,
     );
   });
 
@@ -2002,6 +2039,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
       } }, icon('minus', 18), stretch ? 'Remove hold' : cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
+      barbell && e.sets.length > 0 && h('button', { type: 'button', class: 'btn small plates-btn', 'aria-label': `Plates for ${e.name}`, onclick: () => platesSheet(doc, e, edit) }, icon('today', 18), 'Plates'),
       // Difficulty (#170): once every set is checked off, one optional rating for the exercise.
       !cardio && !stretch && e.sets.length > 0 && e.sets.every((s) => s.done) && h('button', {
         type: 'button',
@@ -2036,6 +2074,85 @@ function difficultySheet(e, onPick) {
       close();
       onPick(null);
     } }, 'Clear rating')));
+}
+
+/** The bar the lifter loads, remembered on this device (#227). Defaults to 45 lb or 20 kg. */
+function barFor(unit) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('tf.bar') || '{}')[unit];
+    if (BARS[unit]?.includes(saved)) return saved;
+  } catch (e) {
+    // no storage: use the default
+  }
+  return (BARS[unit] || BARS.lb)[0];
+}
+
+function saveBar(unit, bar) {
+  try {
+    const all = JSON.parse(localStorage.getItem('tf.bar') || '{}');
+    all[unit] = bar;
+    localStorage.setItem('tf.bar', JSON.stringify(all));
+  } catch (e) {
+    // not remembered; it still applies until the app reloads
+  }
+}
+
+/**
+ * Plate calculator (#227): the plates for the next set of a barbell lift, with
+ * a drawing of the loaded bar. The weight can be tried up and down and then
+ * used for that set. Standard plates at every gym for now.
+ */
+function platesSheet(doc, e, edit) {
+  const unit = doc.unit;
+  const list = PLATES[unit] || PLATES.lb;
+  let working = 0;
+  const numbered = e.sets.map((s) => ({ s, label: s.warmup ? 'warm-up set' : `set ${++working}` }));
+  const target = numbered.find((x) => !x.s.done && !x.s.warmup) || numbered.find((x) => !x.s.done) || numbered[numbered.length - 1];
+  let bar = barFor(unit);
+  let weight = target.s.weight ?? e.suggested_weight ?? bar;
+  const step = plateStep(unit);
+  const body = h('div', { class: 'stack plates-sheet' });
+  const disc = (p) => h('span', { class: `plate-disc r${Math.max(0, list.indexOf(p))}` }, String(p));
+  const paint = () => {
+    const r = loadBar(weight, bar, unit);
+    const each = r && r.perSide;
+    body.replaceChildren(...[
+      h('div', { class: 'plates-weight' },
+        h('button', { type: 'button', class: 'btn', 'aria-label': `${step} ${unit} less`, disabled: weight - step < 0, onclick: () => { weight = Math.max(0, weight - step); paint(); } }, `−${fmtW(step)}`),
+        h('span', { class: 'plates-total' }, `${fmtW(weight)} ${unit}`),
+        h('button', { type: 'button', class: 'btn', 'aria-label': `${step} ${unit} more`, onclick: () => { weight += step; paint(); } }, `+${fmtW(step)}`)),
+      h('div', { class: 'plates-bar', role: 'img', 'aria-label': each && each.length ? `${sideText(each)} on each side` : 'An empty bar' },
+        h('span', { class: 'plates-shaft' }),
+        h('span', { class: 'plates-side' }, [...(each || [])].reverse().map(disc)),
+        h('span', { class: 'plates-collar' }),
+        h('span', { class: 'plates-grip' }),
+        h('span', { class: 'plates-collar' }),
+        h('span', { class: 'plates-side' }, (each || []).map(disc))),
+      !r
+        ? h('p', { class: 'plates-each' }, weight > 0 ? `Lighter than the ${fmtW(bar)} ${unit} bar.` : 'Enter a weight.')
+        : h('div', { class: 'stack tight' },
+          h('p', { class: 'muted small' }, 'Each side'),
+          each.length
+            ? h('div', { class: 'plates-chips' }, each.map((p) => h('span', { class: 'plates-chip' }, String(p))))
+            : h('p', { class: 'plates-each' }, bar > 0 ? 'Just the bar.' : 'Nothing to load.'),
+          !r.exact && h('p', { class: 'plates-off' }, `${fmtW(weight)} can't be loaded with standard plates. The closest are ${fmtW(r.loaded)} and ${fmtW(r.up)}.`)),
+      h('p', { class: 'muted small' }, `${bar > 0 ? `On a ${fmtW(bar)} ${unit} bar` : 'No bar, plates only'}, with standard plates: ${list.map(String).join(', ')} ${unit}.`),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Bar'),
+        choices(BARS[unit].map((b, i) => [b, b ? `${fmtW(b)} ${unit}` : 'No bar', b ? (i === 0 ? 'Standard' : 'Lighter bar') : 'Plates only']), bar, (b) => {
+          bar = b;
+          saveBar(unit, b);
+          paint();
+        })),
+      h('button', { type: 'button', class: 'btn primary block', onclick: () => {
+        close();
+        edit((d) => (find(d, e.id, target.s.id).weight = weight));
+        toast(`${fmtW(weight)} ${unit} for ${target.label}.`);
+      } }, `Use ${fmtW(weight)} ${unit} for ${target.label}`),
+    ].filter(Boolean));
+  };
+  paint();
+  // Closing redraws the workout so the hints follow a new bar choice.
+  const close = sheet(`Plates for ${target.label}`, body, { onClose: () => render() });
 }
 
 function find(doc, exId, setId) {
@@ -2703,12 +2820,116 @@ function viewHistory() {
       if (e.target.value) location.hash = `#/people/${e.target.value}`;
     },
   }, h('option', { value: '', selected: true }, "View other trainer's history"), list.map((p) => h('option', { value: String(p.id) }, p.name)))), () => {});
-  return h('main', { class: 'page' }, topHead('History', { sub: 'Last 8 weeks.' }), people,
+  return h('main', { class: 'page' }, topHead('History', { sub: 'Last 8 weeks.' }), people, calendarCard(),
     workoutList(
       (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
       (w) => `#/history/${w.id}`,
       h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')),
       { recentDays: 56 }));
+}
+
+/**
+ * The calendar at the top of History (#228): finished workouts as filled days,
+ * the plan as dashed days. Tapping a day shows its workouts, or what is planned
+ * with ways to rest or move it. The server works out the plan.
+ */
+function calendarCard() {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const pad = (n) => String(n).padStart(2, '0');
+  const now = new Date();
+  let month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  let selected = null;
+  let data = null;
+  const card = h('section', { class: 'card stack cal-card' }, h('p', { class: 'muted pad' }, 'Loading'));
+  const shift = (ym, by) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + by, 1);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  };
+  const dateOf = (day) => new Date(`${day}T12:00:00`);
+  const load = async (ym) => {
+    try {
+      data = await api.get('calendar', `&month=${ym}&timezone=${encodeURIComponent(timezone)}`);
+      month = data.month;
+      if (!selected || selected.slice(0, 7) !== month) selected = month === data.today.slice(0, 7) ? data.today : null;
+      paint();
+    } catch (e) {
+      fill(card, h('p', { class: 'muted pad' }, e.offline ? 'The calendar needs a connection.' : e.message));
+    }
+  };
+  const change = (day, action, done) => act(async () => {
+    data = await api.post('schedule_day', { day, action, timezone });
+    paint();
+    toast(done);
+  });
+  const detail = () => {
+    if (!selected) return null;
+    const d = data.days[selected] || { done: [], plan: null, override: null };
+    const future = selected >= data.today;
+    const when = fmtDate(dateOf(selected), { weekday: 'short', month: 'short', day: 'numeric' });
+    const next = new Date(dateOf(selected).getTime() + 86400000);
+    const nextKey = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
+    const nextName = fmtDate(next, { weekday: 'short' });
+    const back = d.override && h('button', { type: 'button', class: 'btn small', onclick: () => change(selected, 'clear', 'Back to the plan.') }, 'Back to plan');
+    const parts = [];
+    if (d.done.length) {
+      parts.push(h('h3', {}, `${when} · ${d.done.map((w) => w.short).join(' + ')}`),
+        h('ul', { class: 'cal-done' }, d.done.map((w) => h('li', {}, h('a', { href: `#/history/${w.id}` }, `${w.label} at ${w.gym_name}`)))));
+    } else if (d.plan) {
+      parts.push(h('h3', {}, `${when} · ${d.plan.short}`),
+        h('p', { class: 'muted small' }, `Planned. ${d.plan.label} is built on the day from how your last sessions went. If you miss it, it moves to your next training day and the rest of the plan shifts after it.`),
+        h('div', { class: 'plan-actions' },
+          h('button', { type: 'button', class: 'btn small', onclick: () => change(selected, 'rest', `Rest on ${when}. The plan moves along.`) }, 'Rest that day'),
+          !(data.days[nextKey]?.plan) && h('button', { type: 'button', class: 'btn small', onclick: () => change(selected, 'move', `${d.plan.short} moved to ${nextName}.`) }, `Move to ${nextName}`),
+          back));
+    } else if (future) {
+      parts.push(h('h3', {}, `${when} · Rest`),
+        h('p', { class: 'muted small' }, d.override === 'rest' ? 'You took this day off the plan.' : 'Nothing planned.'),
+        h('div', { class: 'plan-actions' },
+          d.override !== 'rest' && h('button', { type: 'button', class: 'btn small', onclick: () => change(selected, 'train', `Training on ${when}.`) }, 'Train this day'),
+          back));
+    } else {
+      parts.push(h('h3', {}, when), h('p', { class: 'muted small' }, 'No workout.'));
+    }
+    return h('div', { class: 'cal-detail stack' }, parts);
+  };
+  const paint = () => {
+    const [y, m] = month.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const count = new Date(y, m, 0).getDate();
+    const cells = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((l) => h('span', { class: 'cal-dow', 'aria-hidden': 'true' }, l));
+    for (let i = 0; i < first.getDay(); i++) cells.push(h('span', { class: 'cal-blank' }));
+    for (let n = 1; n <= count; n++) {
+      const key = `${month}-${pad(n)}`;
+      const d = data.days[key];
+      const done = d && d.done.length > 0;
+      const plan = !done && d && d.plan;
+      const label = done ? d.done[0].short : plan ? plan.short : '';
+      cells.push(h('button', {
+        type: 'button',
+        class: `cal-day${done ? ' done' : ''}${plan ? ' plan' : ''}${key === data.today ? ' today' : ''}${key === selected ? ' sel' : ''}`,
+        'data-day': key,
+        'aria-pressed': String(key === selected),
+        'aria-label': `${fmtDate(dateOf(key), { weekday: 'long', month: 'long', day: 'numeric' })}${done ? `: ${d.done.map((w) => w.label).join(' and ')}, done` : plan ? `: ${plan.label}, planned` : ''}`,
+        onclick: () => {
+          selected = key;
+          paint();
+        },
+      }, h('span', { class: 'cal-num' }, String(n)), h('span', { class: 'cal-lbl' }, label)));
+    }
+    fill(card,
+      h('div', { class: 'cal-head' },
+        h('h2', {}, fmtDate(first, { month: 'long', year: 'numeric' })),
+        h('div', { class: 'cal-nav' },
+          h('button', { type: 'button', class: 'btn small', 'aria-label': 'Previous month', onclick: () => load(shift(month, -1)) }, icon('back', 18)),
+          h('button', { type: 'button', class: 'btn small cal-next', 'aria-label': 'Next month', onclick: () => load(shift(month, 1)) }, icon('back', 18)))),
+      h('div', { class: 'cal-grid' }, cells),
+      h('div', { class: 'cal-legend' }, h('span', {}, h('i', { class: 'd' }), 'Done'), data.has_plan && h('span', {}, h('i', { class: 'p' }), 'Planned')),
+      !data.has_plan && h('p', { class: 'muted small' }, 'Pick your training days in ', h('a', { href: '#/settings' }, 'Settings'), ' to see upcoming workouts here.'),
+      detail());
+  };
+  load(month);
+  return card;
 }
 
 /** Someone else's finished workouts (#13). Read-only; the server checks they share them (#15). */

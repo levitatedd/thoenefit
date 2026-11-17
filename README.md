@@ -12,7 +12,7 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 | Workout planner | Pick muscle groups | Workout in progress |
 | :---: | :---: | :---: |
-| <a href="docs/screenshots/workout-planner.jpg"><img src="docs/screenshots/workout-planner.jpg" width="250" alt="Today screen at Downtown Gym: a Push plan with a suggested weight, the last result and a muscle illustration for each lift"></a> | <a href="docs/screenshots/pick-muscle-groups.jpg"><img src="docs/screenshots/pick-muscle-groups.jpg" width="250" alt="The Pick muscle groups sheet: each muscle group with its illustration and recovery percentage, with the two most recovered groups selected"></a> | <a href="docs/screenshots/workout-in-progress.jpg"><img src="docs/screenshots/workout-in-progress.jpg" width="250" alt="Push workout in progress: two Barbell Bench Press sets done, the next set up, and the rest timer counting down"></a> |
+| <a href="docs/screenshots/workout-planner.jpg"><img src="docs/screenshots/workout-planner.jpg" width="250" alt="Today screen at Downtown Gym: a Push plan with a suggested weight, the last result and a muscle illustration for each lift"></a> | <a href="docs/screenshots/pick-muscle-groups.jpg"><img src="docs/screenshots/pick-muscle-groups.jpg" width="250" alt="The Pick muscle groups sheet: each muscle group with its illustration and recovery percentage, with the two most recovered groups selected"></a> | <a href="docs/screenshots/workout-in-progress.jpg"><img src="docs/screenshots/workout-in-progress.jpg" width="250" alt="Push workout in progress: two Barbell Bench Press sets done, the plates for each side under every set, and the rest timer counting down"></a> |
 
 | Exercise progress | Setup notes | Trends |
 | :---: | :---: | :---: |
@@ -21,6 +21,10 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 | Saved routines | Shared workout | Share your workout |
 | :---: | :---: | :---: |
 | <a href="docs/screenshots/saved-routines.jpg"><img src="docs/screenshots/saved-routines.jpg" width="250" alt="The Workout picker open on Your routines: Back and Biceps, Heavy Legs and Monday Push"></a> | <a href="docs/screenshots/shared-workout.jpg"><img src="docs/screenshots/shared-workout.jpg" width="250" alt="Sam's Today screen after accepting Alex Rivera's workout: Shared by Alex Rivera, with weights suggested from Sam's own history"></a> | <a href="docs/screenshots/share-image.jpg"><img src="docs/screenshots/share-image.jpg" width="250" alt="Share workout on a finished workout: a preview of the image with the date, minutes, sets, a new personal record and each exercise, with Share and Save image buttons"></a> |
+
+| Calendar | Plate calculator |
+| :---: | :---: |
+| <a href="docs/screenshots/calendar.jpg"><img src="docs/screenshots/calendar.jpg" width="250" alt="History's November calendar: finished Push, Pull and Legs days filled in, Monday, Wednesday and Friday planned ahead, and Wednesday's planned Legs selected with Rest that day and Move to Thu"></a> | <a href="docs/screenshots/plate-calculator.jpg"><img src="docs/screenshots/plate-calculator.jpg" width="250" alt="Plates for set 3 of Barbell Bench Press: 140 lb drawn as a 45 and a 2.5 on each side of a 45 lb bar, with the bar choices and Use 140 lb for set 3"></a> |
 
 Sample data: Alex Rivera and Sam Lee are made-up people at a made-up gym. Tap a preview to open it at full size. To refresh these, see the steps at the top of [`docs/screenshots/capture.mjs`](docs/screenshots/capture.mjs).
 

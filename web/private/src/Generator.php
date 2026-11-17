@@ -555,8 +555,23 @@ final class Generator
         return $efforts[0];
     }
 
+    /** Calendar days from $then to $now in $zone: 1 means yesterday there, whatever the hours. */
+    public static function daysBetween(int $then, int $now, \DateTimeZone $zone): int
+    {
+        $a = (new \DateTimeImmutable('@' . $then))->setTimezone($zone)->setTime(0, 0);
+        $b = (new \DateTimeImmutable('@' . $now))->setTimezone($zone)->setTime(0, 0);
+        return (int) round(($b->getTimestamp() - $a->getTimestamp()) / 86400);
+    }
+
     /** How many recent sessions of one setup must agree before calling it a stall (#124). */
     public const STALL_SESSIONS = 3;
+
+    /**
+     * A stall is about sessions close together. A gap longer than this between
+     * two of them, or since the newest, is a break: coming back from it lighter
+     * or with fewer reps is not a plateau.
+     */
+    public const STALL_GAP_DAYS = 21;
 
     /**
      * Has this lift stalled (#124)? Looks at the last few finished sessions of
@@ -564,17 +579,21 @@ final class Generator
      * stall is the same working weight every time, never reaching the top of
      * the range, and no more reps at that weight in the newest session than in
      * the oldest. Progress anywhere in that run, or a recent "3+ reps left"
-     * rating (#170), means it is not stalled. Weighted lifts only.
+     * rating (#170), means it is not stalled. Weighted lifts only. The sessions
+     * must be recent and close together (STALL_GAP_DAYS): after a long break
+     * there is no stall to report.
      *
      * @return array|null {sessions, weight, reps, repeat: {weight, reps}, lower: {weight, reps}} in $unit
      */
-    public function stall(int $uid, string $variantKey, int $repMin, int $repMax, float $inc, string $unit): ?array
+    public function stall(int $uid, string $variantKey, int $repMin, int $repMax, float $inc, string $unit, ?int $now = null): ?array
     {
         if ($inc <= 0) {
             return null;
         }
+        $gap = self::STALL_GAP_DAYS * 86400;
+        $after = $now ?? time(); // the newest session must be within the gap of now
         $rows = $this->db->all(
-            "SELECT we.id, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+            "SELECT we.id, w.unit, w.started_at FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
              WHERE we.user_id=? AND we.variant_key=? AND w.status='completed'
              ORDER BY w.started_at DESC LIMIT 10",
             [$uid, $variantKey]
@@ -585,6 +604,11 @@ final class Generator
             if (!$sets) {
                 continue;
             }
+            $at = strtotime($r['started_at'] . ' UTC');
+            if ($after - $at > $gap) {
+                break; // a long break before this session: older ones are not part of the run
+            }
+            $after = $at;
             $conv = array_map(fn($s) => ['weight' => self::convert((float) $s['weight'], $r['unit'], $unit, $inc), 'reps' => (int) $s['reps']], $sets);
             $runs[] = ['sets' => $conv] + self::workingSummary($conv, $repMax);
             if (count($runs) === self::STALL_SESSIONS) {
@@ -936,6 +960,12 @@ final class Generator
     {
         $uid = (int) $user['id'];
         $now = (int) ($opts['now'] ?? time());
+        // The lifter's time zone, so "yesterday" means their yesterday.
+        try {
+            $zone = new \DateTimeZone(is_string($opts['timezone'] ?? null) ? $opts['timezone'] : 'UTC');
+        } catch (\Exception $e) {
+            $zone = new \DateTimeZone('UTC');
+        }
         $minutes = max(15, min(180, (int) ($opts['minutes'] ?? $user['minutes'])));
         $dayType = $opts['day_type'] ?? null;
         // Muscle groups picked by the lifter (#154): a custom day built for just those.
@@ -1137,7 +1167,7 @@ final class Generator
                     ? 'A competition lift for powerlifting.'
                     : "The closest to the competition lift $equipmentContext.";
             } elseif ($how === 'recent') {
-                $days = (int) floor(($now - $recent[$pick['id']]) / 86400);
+                $days = self::daysBetween($recent[$pick['id']], $now, $zone);
                 $when = $days <= 0 ? 'today' : ($days === 1 ? 'yesterday' : "$days days ago");
                 $why = "You did this $when, so repeating it keeps your progression moving.";
             } elseif ($how === 'rotated') {
@@ -1146,7 +1176,7 @@ final class Generator
                 $why = "You've seen every $label option here, so this starts the list again.";
             } elseif ($how === 'variety') {
                 $last = $lastDone[$pick['id']] ?? null;
-                $days = $last ? (int) floor(($now - $last) / 86400) : null;
+                $days = $last ? self::daysBetween($last, $now, $zone) : null;
                 $why = 'Rotated in for variety' . ($days === null ? ': new to you.' : ($days <= 0 ? '.' : ", last done $days day" . ($days === 1 ? '' : 's') . ' ago.'));
             } elseif ($isRequired) {
                 $why = "First choice for $label $equipmentContext.";
