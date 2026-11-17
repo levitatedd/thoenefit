@@ -57,7 +57,6 @@ await context.addInitScript(() => {
   }
 });
 const page = await context.newPage();
-if (process.env.TF_SLOW) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.TF_SLOW) });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && !/Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(m.text()) && errors.push(m.text()));
@@ -131,7 +130,9 @@ const order = await page.evaluate(() => {
 });
 check('on Today, the wide logo sits top right beside the heading, and only there', !!order && order.slice(0, 4).every(Boolean) && order[4] === 1, JSON.stringify(order));
 check('Recovery estimate is no longer on Today', !(await page.textContent('.page')).includes('Recovery estimate'));
-const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
+// Scroll the page so the name sits mid-screen, clear of the action bar, and note the spot.
+// (A fixed scroll position put it behind the bar with some fonts, so the tap scrolled first, #217.)
+const y0 = await page.evaluate(() => { document.querySelector('.plan-row:nth-child(3) h3 a').scrollIntoView({ block: 'center' }); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
 check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
@@ -1358,19 +1359,23 @@ console.log("Seeing each other's history");
   await vctx.close();
 }
 
+// Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
+// which moves where taps land for the checks after this (#217).
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
-  await page.setViewportSize({ width: w, height: hgt });
+  const wp = await context.newPage();
+  await wp.setViewportSize({ width: w, height: hgt });
   let worst = 0;
   const plain = [];
   for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
-    await page.goto(`${URL}#/${tab}`);
-    await page.waitForSelector('.tabs');
-    await page.waitForTimeout(250);
-    worst = Math.max(worst, await overflow());
-    if ((await page.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
+    await wp.goto(`${URL}#/${tab}`);
+    await wp.waitForSelector('.tabs');
+    await wp.waitForTimeout(250);
+    worst = Math.max(worst, await wp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth));
+    if ((await wp.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
   }
   if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
+  await wp.close();
 }
 console.log('Tab bar while a tab loads (#112)');
 {
@@ -1393,12 +1398,6 @@ console.log('Tab bar while a tab loads (#112)');
     };
   });
   check('Today was scrolled down before switching', (await page.evaluate(() => scrollY)) > 300);
-  console.log('  tab bar', await page.evaluate(() => {
-    const t = document.querySelector('.tab[href="#/history"]').getBoundingClientRect();
-    const hit = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
-    const bar = document.querySelector('.tabs').getBoundingClientRect();
-    return JSON.stringify({ tab: [t.top, t.bottom], tabs: [bar.top, bar.bottom], vh: innerHeight, hit: hit && hit.outerHTML.slice(0, 80), y: scrollY });
-  }));
   await page.click('.tab:has-text("History")');
   await page.waitForSelector('.tab-home');
   const m = await page.evaluate(() => ({ swapY: window.__swapY, doc: document.documentElement.scrollHeight, vh: innerHeight, bottom: Math.round(document.querySelector('.tabs').getBoundingClientRect().bottom) }));
