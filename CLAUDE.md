@@ -77,9 +77,9 @@ NODE_PATH=$(npm root -g) node tests/e2e.mjs
 In Claude Code cloud sessions, there is no Chrome at the default path. Point the walk-through at the preinstalled Chromium with `CHROME=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` (check `ls /opt/pw-browsers` if the version differs).
 
 - Add a check for each new behaviour: server logic in `tests/run.php`, UI in `tests/e2e.mjs`. For a bug fix, confirm the new check fails on the old code.
-- Before calling a failure "known", re-run it on unchanged `staging`. These failed on unchanged `staging` in the cloud environment as of Nov 2026:
-  - four workout-sharing checks
-  - "the Trend link on a past workout is underlined", which is flaky (#84)
+- As of 17 Nov 2026 the walk-through passes every check on `staging` in the cloud environment (305/305), so there are no known failures. Treat any failure as real. Before blaming the environment, re-run it on unchanged `staging`.
+- Checks that mention the signed-in user use `myName` (their display name from `bootstrap`), never a hard-coded name (#178).
+- The walk-through needs a fresh database. Before each run, delete `data/` and create the `e2e` user again. A second run against the same database times out at "Where you train".
 - Delete the local `data/` folder after test runs.
 
 ## Things that have bitten us
