@@ -833,7 +833,7 @@ await partner.close();
 await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 await shot('11-settings');
-check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
+check('Settings shows the app version under its title, and no longer at the bottom', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.top-head a.app-version')) && !/Version /.test(await page.textContent('.page > :last-child')), await page.textContent('.top-head a.app-version'));
 // #103: one heading colour, Training and Gyms first, the rest behind links.
 {
   const heads = await page.$$eval('.settings-main .top-head h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
@@ -852,7 +852,8 @@ check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging
 }
 
 console.log("What's new");
-await page.click('.app-version a');
+check('the version under the Settings title is plain text, not underlined', (await page.$eval('.top-head a.app-version', (a) => getComputedStyle(a).textDecorationLine)) === 'none' && (await page.locator('.settings-main > .app-version, .settings-main p.app-version').count()) === 0);
+await page.click('.top-head a.app-version');
 await page.waitForSelector('h1:has-text("What\'s new")');
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
@@ -1821,6 +1822,25 @@ console.log('Fixed page headers (#175)');
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
   check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
   check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
+  check('all top-level headers are the same height', Object.values(screens).every((x) => Math.abs(x.bottom - today.bottom) < 0.5), JSON.stringify([today.bottom, ...Object.values(screens).map((x) => x.bottom)]));
+  {
+    await page.click('.tab:has-text("Exercises")');
+    await page.waitForSelector('[data-list=matches] .log-row');
+    const read = async () => [await page.textContent('main > .top-head .ex-count'), await page.locator('[data-list=matches] .log-row').count()];
+    await page.fill('input[aria-label="Search exercises"]', '');
+    await page.selectOption('select[aria-label="Muscle"]', '');
+    await page.waitForTimeout(150);
+    const [all, allRows] = await read();
+    await page.selectOption('select[aria-label="Muscle"]', 'biceps');
+    await page.waitForTimeout(150);
+    const [bi, biRows] = await read();
+    await page.fill('input[aria-label="Search exercises"]', 'curl');
+    await page.waitForTimeout(150);
+    const [cu, cuRows] = await read();
+    check('Exercises shows how many exercises are listed under its title, and it follows the filter and search', all === `${allRows} exercises` && bi === `${biRows} exercises` && cu === `${cuRows} exercise${cuRows === 1 ? '' : 's'}` && allRows > biRows && biRows >= cuRows, JSON.stringify([all, allRows, bi, biRows, cu, cuRows]));
+    await page.fill('input[aria-label="Search exercises"]', '');
+    await page.selectOption('select[aria-label="Muscle"]', '');
+  }
   check('the logo sits in exactly the same spot on every tab, with or without a line under the title', Object.values(screens).every((x) => Math.abs(x.logoTop - today.logoTop) < 0.5), JSON.stringify([today.logoTop, ...Object.values(screens).map((x) => x.logoTop)]));
   {
     await page.click('.tab:has-text("History")');
@@ -1834,7 +1854,20 @@ console.log('Fixed page headers (#175)');
     }
     check('switching tabs keeps the same header and logo on screen and only changes the title, so nothing blinks', kept.every(Boolean), kept.join());
   }
-  check('Trends says just "Last 8 weeks" under its title', screens.trends.sub === 'Last 8 weeks', screens.trends.sub);
+  check('Trends and History say "Last 8 weeks." under their titles', screens.trends.sub === 'Last 8 weeks.' && screens.history.sub === 'Last 8 weeks.', JSON.stringify([screens.trends.sub, screens.history.sub]));
+  check('Settings shows the version under its title', /^Version /.test(screens.settings.sub), screens.settings.sub);
+  {
+    await page.click('.tab:has-text("History")');
+    await page.waitForSelector('.log-row');
+    const all = (await page.evaluate(async () => (await (await fetch('api.php?a=history&limit=100')).json()).workouts)).map((w) => w.started_at);
+    const cutoff = Date.now() - 56 * 86400000;
+    const recent = all.filter((d) => new Date(d).getTime() >= cutoff).length;
+    const before = await page.locator('.log-row').count();
+    check('History opens on the last 8 weeks only, with Show older at the bottom', all.length > recent && before === recent && await page.locator('button:has-text("Show older workouts")').isVisible(), JSON.stringify({ all: all.length, recent, before }));
+    await page.click('button:has-text("Show older workouts")');
+    await page.waitForFunction((n) => document.querySelectorAll('.log-row').length > n, before);
+    check('Show older adds the workouts from before the 8 weeks', (await page.locator('.log-row').count()) === all.length && !(await page.locator('button:has-text("Show older workouts")').isVisible()));
+  }
   check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
   check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
   for (const tab of ['exercises', 'settings']) {

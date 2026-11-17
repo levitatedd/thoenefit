@@ -395,7 +395,8 @@ function page(title, ...kids) {
 
 /**
  * Make `live` match `next` by changing only what differs: text, attributes and
- * children. For plain markup only: event listeners on `next` are not copied.
+ * children. For plain markup only: event listeners on `next` are not copied, and
+ * code holding elements of `next` must look them up again once it is on screen.
  */
 function morph(live, next) {
   if (live.nodeType === Node.TEXT_NODE) {
@@ -2362,45 +2363,85 @@ function viewTrends() {
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
       recoveryPanel(recovery));
   });
-  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks' }), content);
+  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks.' }), content);
 }
 
 /**
  * A page-by-page list of finished workouts. fetchPage(offset, limit) returns
  * {workouts}; hrefOf(w) is where a row opens; empty is shown when there are none.
  */
-function workoutList(fetchPage, hrefOf, empty) {
+/**
+ * A list of finished workouts, newest first, with Show older at the bottom.
+ * With `recentDays`, it opens on just that window (History: the last 8 weeks);
+ * Show older then reveals everything before it, a page at a time.
+ */
+function workoutList(fetchPage, hrefOf, empty, { recentDays = null } = {}) {
   const PAGE = 50;
   const list = h('ul', { class: 'log' });
   const more = h('button', { class: 'btn block', type: 'button', hidden: true }, 'Show older workouts');
   const note = h('p', { class: 'muted pad' }, 'Loading');
-  let offset = 0;
-  const load = async () => {
+  const cutoff = recentDays ? Date.now() - recentDays * 86400000 : null;
+  let offset = 0; // how many the server has sent
+  let done = false; // the server has nothing older
+  let held = []; // fetched but older than the window, waiting for Show older
+  let shown = 0;
+  const row = (w, older) => h('li', {}, h('a', { class: 'log-row', href: hrefOf(w) },
+    h('span', { class: 'log-date' }, fmtDate(w.started_at, older || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
+    h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
+    h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
+    h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : ''))));
+  const fetchMore = async () => {
+    const data = await fetchPage(offset, PAGE);
+    offset += data.workouts.length;
+    done = data.workouts.length < PAGE;
+    return data.workouts;
+  };
+  const show = (ws) => {
+    list.append(...ws.map((w) => row(w, shown > 0 && !cutoff)));
+    shown += ws.length;
+  };
+  const first = async () => {
+    if (!cutoff) {
+      show(await fetchMore());
+    } else {
+      // Fetch until the window is covered; anything older waits for Show older.
+      while (!done && !held.length) {
+        const ws = await fetchMore();
+        show(ws.filter((w) => new Date(w.started_at).getTime() >= cutoff));
+        held = ws.filter((w) => new Date(w.started_at).getTime() < cutoff);
+      }
+    }
+    if (!shown && !held.length) {
+      list.replaceWith(empty);
+      return;
+    }
+    if (!shown) {
+      note.hidden = false;
+      note.textContent = `No workouts in the last ${Math.round(recentDays / 7)} weeks.`;
+    }
+  };
+  const older = async () => {
+    if (held.length) {
+      show(held);
+      held = [];
+    } else {
+      show(await fetchMore());
+    }
+  };
+  const load = async (step) => {
     more.disabled = true;
     try {
-      const data = await fetchPage(offset, PAGE);
       note.hidden = true;
-      if (!data.workouts.length && offset === 0) {
-        list.replaceWith(empty);
-        return;
-      }
-      list.append(...data.workouts.map((w) =>
-        h('li', {}, h('a', { class: 'log-row', href: hrefOf(w) },
-          h('span', { class: 'log-date' }, fmtDate(w.started_at, offset || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
-          h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
-          h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
-          h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : '')),
-        ))));
-      offset += data.workouts.length;
-      more.hidden = data.workouts.length < PAGE;
+      await step();
     } catch (e) {
       note.hidden = false;
       note.textContent = e.offline ? 'History needs a connection.' : e.message;
     }
+    more.hidden = done && !held.length;
     more.disabled = false;
   };
-  more.onclick = load;
-  load();
+  more.onclick = () => load(older);
+  load(first);
   return [note, list, more];
 }
 
@@ -2411,11 +2452,12 @@ function viewHistory() {
     h('h2', {}, 'Other people'),
     h('ul', { class: 'log' }, list.map((p) => h('li', {}, h('a', { class: 'log-row', href: `#/people/${p.id}` }, h('span', { class: 'log-title' }, p.name), h('span', { class: 'log-meta' }, 'See their workouts'))))),
     h('p', { class: 'muted small' }, S.user.history_visibility === 'members' ? 'They can see your history too.' : 'Your own history is private. You can share it in Settings.'))), () => {});
-  return h('main', { class: 'page' }, topHead('History'), people,
+  return h('main', { class: 'page' }, topHead('History', { sub: 'Last 8 weeks.' }), people,
     workoutList(
       (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
       (w) => `#/history/${w.id}`,
-      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today'))));
+      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')),
+      { recentDays: 56 }));
 }
 
 /** Someone else's finished workouts (#13). Read-only; the server checks they share them (#15). */
@@ -2655,6 +2697,8 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
 
 function viewExercises() {
   const results = h('div', { class: 'stack' });
+  // How many exercises the list shows, under the title; follows the search and muscle filter.
+  const count = h('span', { class: 'ex-count' });
   const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', value: S.exSearch || '', oninput: () => paint() });
   const muscle = h('select', { 'aria-label': 'Muscle', onchange: () => paint() }, h('option', { value: '' }, 'All muscles'), Object.entries(S.vocab.muscles).map(([k, v]) => h('option', { value: k, selected: S.exMuscle === k }, v)));
   const row = (x) => h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${x.id}` },
@@ -2666,6 +2710,10 @@ function viewExercises() {
     const q = search.value.trim();
     const pool = S.exercises.filter((x) => !muscle.value || x.muscles_main.includes(muscle.value) || x.muscles_assist.includes(muscle.value));
     const r = searchExercises(pool, q, S.vocab, { limit: q ? 60 : pool.length, similarLimit: 8 });
+    const n = r.closest ? 0 : r.matches.length;
+    // The header on screen is kept across tabs (#187), so update whichever count is showing.
+    const shown = count.isConnected ? count : document.querySelector('main > .top-head .ex-count') || count;
+    shown.textContent = `${n.toLocaleString()} exercise${n === 1 ? '' : 's'}`;
     fill(results,
       r.closest && h('p', { class: 'muted' }, `No exercise matches "${q}" exactly. Closest:`),
       r.matches.length > 0 && h('ul', { class: 'log', 'data-list': 'matches' }, r.matches.map(row)),
@@ -2675,7 +2723,7 @@ function viewExercises() {
     );
   };
   paint();
-  return h('main', { class: 'page' }, topHead('Exercises'), h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
+  return h('main', { class: 'page' }, topHead('Exercises', { sub: count }), h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
 }
 
 function equipLabel(key) {
@@ -3029,7 +3077,7 @@ function viewSettings() {
   const routineCount = (S.routines || []).length;
   // Headings are mint so the sections are easy to pick out (#103). What affects
   // the next workout comes first; setup and maintenance are one-line links.
-  return h('main', { class: 'page settings-main' }, topHead('Settings'),
+  return h('main', { class: 'page settings-main' }, topHead('Settings', { sub: h('a', { class: 'app-version', href: '#/settings/whats-new' }, `Version ${APP_VERSION}`) }),
     section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Gyms', linkList(
       ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),
@@ -3091,7 +3139,6 @@ function viewSettings() {
       } }, 'Sign out and clear this device'),
       h('p', { class: 'muted small' }, 'On a shared phone or computer, use Sign out and clear this device. It also removes your saved workouts, profile and rest timer from it.')),
     brandWide(),
-    h('p', { class: 'muted small center app-version' }, h('a', { href: '#/settings/whats-new' }, `Version ${APP_VERSION}`)),
   );
 }
 

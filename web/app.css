@@ -202,6 +202,12 @@ a {
   gap: 12px;
 }
 
+/* Every header is as tall as a title plus one line under it, so tabs without
+   that line (Exercises) match the rest. */
+.top-head-row > div:first-child {
+  min-height: calc(32px * 1.1 + 16px * 1.45);
+}
+
 /* The logo centres on the title line, not on the title and the line under it,
    so it sits in the same spot on every tab whether or not there is a subtitle. */
 .top-head-row > img.brand-wide {
@@ -1660,10 +1666,10 @@ input[type="file"] {
 }
 
 /* Settings: the version opens the release notes. */
-.app-version a {
+/* The version under the Settings title opens What's new; plain text, no underline. */
+a.app-version {
   color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration: none;
 }
 
 /* What's new */
