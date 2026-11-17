@@ -921,6 +921,15 @@ check('Settings shows the app version under its title, and no longer at the bott
     const sel = await page.$eval('.goal-picker .choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor]; });
     check('Other goals use the Pick muscle groups highlight too', sel[0] === 'rgb(58, 242, 156)' && sel[1] === 'rgba(58, 242, 156, 0.14)', JSON.stringify(sel));
     await shot('11c-other-goals');
+    // #211: Variety sits under Goal, Mixed by default.
+    const variety = page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) });
+    const vLabels = await variety.locator('.choice-label').allTextContents();
+    check('Variety offers Steady, Mixed and Varied, with Mixed chosen by default (#211)', vLabels.join() === 'Steady,Mixed,Varied' && (await variety.locator('.choice[aria-pressed="true"]').textContent()).startsWith('Mixed'), vLabels.join());
+    await variety.locator('.choice', { hasText: 'Varied' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'varied');
+    check('picking Varied saves it', (await api('bootstrap')).user.variety === 'varied');
+    await page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) }).locator('.choice', { hasText: 'Mixed' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'mixed');
     await page.locator('.goal-picker .choice', { hasText: 'Build Muscle' }).click();
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
   }
@@ -1929,6 +1938,27 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
     await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, qs.id);
   check('no sideways scrolling', (await overflow()) <= 0);
+}
+
+console.log('Regenerate walks down the list (#211)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', 'push');
+  const settled = () => page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await settled();
+  await page.waitForTimeout(300);
+  const lifts = () => page.$$eval('.plan-row h3', (els) => els.map((e) => e.textContent).filter((n) => !/Bike|Treadmill|Rower|Elliptical|Stair/.test(n)).sort().join('|'));
+  const plans = [await lifts()];
+  for (let i = 0; i < 2; i++) {
+    await page.click('button:has-text("Regenerate")');
+    await page.waitForTimeout(150);
+    await settled();
+    await page.waitForTimeout(300);
+    plans.push(await lifts());
+  }
+  check('three Regenerate taps give three different plans, not back to the first', new Set(plans).size === 3, JSON.stringify(plans));
 }
 
 console.log('Effort ratings plan the next workout (#198)');
