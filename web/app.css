@@ -15,6 +15,10 @@
   --yellow: #f5c63c;
   --red: #ff6b5e;
   --ink: #0e1115;
+  /* Selected options (#194): the Pick muscle groups tile highlight, used app-wide. */
+  --selected-border: var(--mint);
+  --selected-bg: rgba(58, 242, 156, 0.14);
+  --selected-text: var(--mint);
   --display: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
   --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", system-ui, sans-serif;
   --tabs-h: 62px;
@@ -387,8 +391,9 @@ body.scrolled .top-head {
 }
 
 .btn[aria-pressed="true"] {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
+  color: var(--selected-text);
 }
 
 /* ---- forms ---- */
@@ -480,13 +485,13 @@ textarea:focus {
 }
 
 .choice[aria-pressed="true"] {
-  border-color: var(--chalk);
-  background: var(--chalk);
-  color: var(--ink);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
+  color: var(--selected-text);
 }
 
 .choice[aria-pressed="true"] .choice-hint {
-  color: #3d4652;
+  color: var(--chalk);
 }
 
 .stepper {
@@ -1640,6 +1645,77 @@ input[type="file"] {
   cursor: pointer;
 }
 
+/* Detail pages (#202): back link left, title right, in the shared pinned header. */
+.detail-head .top-head-row {
+  align-items: flex-start;
+}
+
+.detail-back {
+  display: flex;
+  align-items: flex-start;
+  flex: none;
+}
+
+/* On the title line, whatever the title's size. */
+.detail-back .back {
+  min-height: calc(32px * 1.1);
+  margin: 0 0 0 -6px;
+}
+
+.detail-title {
+  min-width: 0;
+  text-align: right;
+  color: var(--mint);
+  overflow-wrap: anywhere;
+}
+
+/* Longer names step down so the header keeps close to its usual height. */
+.detail-title.mid {
+  font-size: 25px;
+  line-height: 1.15;
+  padding-top: 3px;
+}
+
+.detail-title.long {
+  font-size: 21px;
+  line-height: 1.2;
+  padding-top: 5px;
+}
+
+/* Exercise page (#202): mint subheadings, P1RM under the facts, charts in cards. */
+.exercise-page .section > h2,
+.exercise-page .session-count {
+  color: var(--mint);
+}
+
+.facts-row {
+  display: contents;
+}
+
+.p1rm-date {
+  display: block;
+  color: var(--chalk);
+}
+
+.p1rm-value {
+  align-self: end;
+  font-weight: 700;
+}
+
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.chart-card > h3 {
+  color: var(--mint);
+}
+
 /* Difficulty (#170): mint once rated. */
 .btn.difficulty.rated {
   border-color: rgba(58, 242, 156, 0.45);
@@ -2043,8 +2119,8 @@ button.setup-note {
 }
 
 .muscle-tile[aria-pressed="true"] {
-  border-color: var(--mint);
-  background: rgba(58, 242, 156, 0.14);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
 }
 
 .muscle-tile[aria-pressed="true"] img {
@@ -2052,7 +2128,7 @@ button.setup-note {
 }
 
 .muscle-tile[aria-pressed="true"] .muscle-name {
-  color: var(--mint);
+  color: var(--selected-text);
 }
 
 .plan-edit {

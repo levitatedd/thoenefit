@@ -8,7 +8,9 @@
 // same way as .github/scripts/app-version.sh. A release's notes are the titles
 // of the pull requests it brought in, taken from their merge commits
 // ("Merge pull request #66 from owner/feature/..." with the title below):
-//   feature/... branches are listed under New, fix/... under Fixed.
+//   feature/... branches are listed under New, improve/... under Improved
+//   (polish and style: a new look, clearer wording, things moved), fix/...
+//   under Fixed.
 // Everything else (chore/..., syncs between main and staging, the release pull
 // requests themselves) is left out, and a release with nothing to list is
 // left out too, so only releases worth noting appear.
@@ -51,10 +53,17 @@ const releasedAs = (ref) => { // same as released() in app-version.sh
 // Pull requests merged in a range, oldest first. The same work can be merged
 // twice (straight to main, then into staging too); both merges bring in the
 // same branch tip, so it is listed once, under the release that shipped it first.
-const MERGE = /^Merge pull request #(\d+) from [^/\s]+\/(feature|fix)\/\S+$/;
+const MERGE = /^Merge pull request #(\d+) from [^/\s]+\/(feature|improve|fix)\/\S+$/;
+// Pull requests merged from feature/ branches before improve/ existed that are
+// really polish, so they are listed under Improved. Merge commits can't be
+// renamed, so this list does it. TF_IMPROVED_PRS (comma-separated) replaces it.
+const IMPROVED_PRS = new Set((process.env.TF_IMPROVED_PRS ?? '5,105,108,109,116,139,151,165,180,182,183,185,190,203,204,205')
+  .split(',').map((s) => Number(s.trim())).filter(Boolean));
+const SECTION = { feature: 'new', improve: 'improved', fix: 'fixed' };
 const seen = new Set();
+const any = (c) => c.new.length || c.improved.length || c.fixed.length;
 const changesIn = (range) => {
-  const out = { new: [], fixed: [] };
+  const out = { new: [], improved: [], fixed: [] };
   const log = tryGit('log', '--merges', '--reverse', '--format=%P%x1f%s%x1f%b%x1e', range) || '';
   for (const entry of log.split('\x1e')) {
     const [parents = '', subject = '', body = ''] = entry.trim().split('\x1f');
@@ -64,7 +73,9 @@ const changesIn = (range) => {
     seen.add(tip);
     const title = body.split('\n').map((l) => l.trim()).find(Boolean);
     if (!title) continue;
-    out[m[2] === 'feature' ? 'new' : 'fixed'].push({ title, pr: Number(m[1]) });
+    const pr = Number(m[1]);
+    const section = m[2] === 'feature' && IMPROVED_PRS.has(pr) ? 'improved' : SECTION[m[2]];
+    out[section].push({ title, pr });
   }
   return out;
 };
@@ -77,7 +88,7 @@ for (let i = 0; i < line.length; i++) {
   const changes = changesIn(prev ? `${prev}..${sha}` : sha); // also for early releases, so their work counts as shipped
   const version = releasedAs(sha);
   if (!version) continue; // released before versions existed
-  if (!changes.new.length && !changes.fixed.length) continue;
+  if (!any(changes)) continue;
   releases.push({ version, date: git('show', '-s', '--format=%cs', sha), ...changes });
 }
 releases.reverse();
@@ -85,7 +96,7 @@ releases.reverse();
 let upcoming = null;
 if (branch === 'staging') {
   const changes = changesIn(`${mainRef}..HEAD`);
-  if (changes.new.length || changes.fixed.length) upcoming = { version: process.env.APP_VERSION || 'next', ...changes };
+  if (any(changes)) upcoming = { version: process.env.APP_VERSION || 'next', ...changes };
 }
 
 process.stdout.write(`${JSON.stringify({ upcoming, releases }, null, 1)}\n`);

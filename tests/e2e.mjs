@@ -509,6 +509,36 @@ await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');
 check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) >= 2);
+// #202: the exercise page uses the pinned header: back link left, name right, no logo.
+{
+  const head = await page.evaluate(() => {
+    const hd = document.querySelector('main > .top-head');
+    const back = hd?.querySelector('.detail-back a.back');
+    const title = hd?.querySelector('.detail-title');
+    return hd && { back: back?.textContent.trim(), backLeft: Math.round(back.getBoundingClientRect().left), title: title?.textContent, titleRight: Math.round(innerWidth - title.getBoundingClientRect().right), titleColor: getComputedStyle(title).color, logo: !!hd.querySelector('img.brand-wide'), h1s: document.querySelectorAll('h1').length, height: Math.round(hd.getBoundingClientRect().height), position: getComputedStyle(hd).position };
+  });
+  check('the exercise page pins the back link on the left and the exercise name on the right, once, with no logo (#202)', head && head.back === 'Exercises' && head.title === liftName && head.backLeft < 40 && head.titleRight < 40 && head.titleColor === 'rgb(58, 242, 156)' && !head.logo && head.h1s === 1 && head.position === 'sticky', JSON.stringify(head));
+  await page.evaluate(() => window.scrollTo(0, 800));
+  await page.waitForTimeout(250);
+  check('the header stays at the top while the history scrolls under it', await page.evaluate(() => Math.round(document.querySelector('main > .top-head').getBoundingClientRect().top) === 0 && !!document.querySelector('main > .top-head .detail-title')));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const sub = await page.$$eval('.exercise-page .section > h2, .chart-card > h3, .session-count', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('section headings, chart titles and the session count are mint', sub.length >= 5 && sub.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(sub));
+  const cards = await page.$$eval('.chart-card', (cs) => cs.map((c) => ({ title: c.querySelector('h3').textContent, chart: !!c.querySelector('.chart svg'), readout: !!c.querySelector('.chart-readout'), bg: getComputedStyle(c).backgroundColor, radius: getComputedStyle(c).borderTopLeftRadius })));
+  const gap = await page.evaluate(() => { const c = [...document.querySelectorAll('.chart-card')]; return c.length > 1 ? Math.round(c[1].getBoundingClientRect().top - c[0].getBoundingClientRect().bottom) : 0; });
+  check('Top weight, Best reps and Estimated 1-rep max each sit in their own rounded card, with a gap', ['Top weight', 'Best reps at top weight', 'Estimated 1-rep max'].every((t) => cards.some((c) => c.title === t && c.chart && c.readout && c.bg === 'rgb(27, 32, 39)' && c.radius === '16px')) && gap > 0, JSON.stringify({ cards, gap }));
+  check('the session count comes after the chart cards', await page.evaluate(() => { const n = document.querySelector('.session-count'); const last = [...document.querySelectorAll('.chart-card')].pop(); return !!(n && last && (last.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)); }));
+  const p1 = await page.evaluate(() => { const v = document.querySelector('.p1rm-value'); return v && !v.closest('[hidden]') ? [v.previousElementSibling.textContent, v.textContent] : null; });
+  const latestDate = await page.evaluate(async (name) => {
+    const { bestEstimate } = await import('./js/strength.js');
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.name === name);
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${ex.id}`)).json();
+    const key = sessions[sessions.length - 1].variant_key;
+    const s = [...sessions].reverse().find((x) => x.variant_key === key && bestEstimate(x.sets, ex));
+    return new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }, liftName);
+  check('under Secondary muscles, "P1RM as of:" shows the date of the workout the estimate comes from', !!p1 && p1[0].startsWith('P1RM as of:') && p1[0].includes(latestDate) && /^\d[\d,]* (lb|kg)$/.test(p1[1]) && (await page.evaluate(() => document.querySelector('.p1rm-value').closest('.facts-row').previousElementSibling.previousElementSibling.textContent)) === 'Secondary muscles', JSON.stringify([p1, latestDate]));
+}
 // #162: estimated 1-rep max per session, from the best working set of 10 reps or fewer.
 {
   const exId = Number((await page.evaluate(() => location.hash)).split('/').pop());
@@ -885,6 +915,15 @@ console.log("What's new");
 check('the version under the Settings title is plain text, not underlined', (await page.$eval('.top-head a.app-version', (a) => getComputedStyle(a).textDecorationLine)) === 'none' && (await page.locator('.settings-main > .app-version, .settings-main p.app-version').count()) === 0);
 await page.click('.top-head a.app-version');
 await page.waitForSelector('h1:has-text("What\'s new")');
+{
+  const wn = await page.evaluate(() => {
+    const hd = document.querySelector('main > .top-head');
+    const back = hd?.querySelector('.detail-back a.back');
+    const title = hd?.querySelector('.detail-title');
+    return hd && { back: back?.textContent.trim(), backLeft: Math.round(back.getBoundingClientRect().left), title: title?.textContent, titleRight: Math.round(innerWidth - title.getBoundingClientRect().right), logo: !!hd.querySelector('img.brand-wide'), h1s: document.querySelectorAll('h1').length };
+  });
+  check("What's new uses the exercise page header: Settings back link top left, the title top right", wn && wn.back === 'Settings' && wn.title === "What's new" && wn.backLeft < 40 && wn.titleRight < 40 && !wn.logo && wn.h1s === 1, JSON.stringify(wn));
+}
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
   check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
@@ -1241,6 +1280,16 @@ console.log("Seeing each other's history");
 
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('text=Who can see your history');
+  {
+    // #194: selected options use the Pick muscle groups highlight.
+    const sel = await page.$eval('.choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor, c.color]; });
+    check('selected options in Settings use the Pick muscle groups highlight (mint border, mint tint, mint text) (#194)', JSON.stringify(sel) === JSON.stringify(['rgb(58, 242, 156)', 'rgba(58, 242, 156, 0.14)', 'rgb(58, 242, 156)']), JSON.stringify(sel));
+    await page.focus('.choice[aria-pressed="false"]');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    const focus = await page.evaluate(() => { const c = getComputedStyle(document.activeElement); return [document.activeElement.className, c.outlineStyle, c.outlineColor]; });
+    check('keyboard focus on an option is still a distinct blue outline', focus[0] === 'choice' && focus[1] === 'solid' && focus[2] === 'rgb(90, 162, 255)', JSON.stringify(focus));
+  }
   check('Settings offers Only me and All signed-in users, starting at Only me', (await page.locator('.choice[aria-pressed="true"]:has-text("Only me")').count()) === 1 && (await page.locator('.choice:has-text("All signed-in users")').count()) === 1);
   await page.click('.choice:has-text("All signed-in users")');
   await waitForToast(page, /visible to signed-in users/);
@@ -1771,6 +1820,7 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.click('.muscle-tile[data-muscle="lats"]');
   await page.click('.muscle-tile[data-muscle="biceps"]');
   const picked = await buildLook();
+  const tileSel = await page.$eval('.muscle-tile[aria-pressed="true"]', (t) => { const c = getComputedStyle(t); return [c.borderTopColor, c.backgroundColor, getComputedStyle(t.querySelector('.muscle-name')).color]; });
   check('the build button counts the picks, filled mint', picked.text === 'Build (2)' && !picked.disabled && picked.bg === 'rgb(58, 242, 156)' && picked.color === 'rgb(14, 17, 21)', JSON.stringify(picked));
   await page.evaluate(() => document.querySelector('.sheet-body').scrollTo(0, 9999));
   const headFits = await page.evaluate(() => { const b = document.querySelector('.sheet-head .build-btn').getBoundingClientRect(); const c = [...document.querySelectorAll('.sheet-head button')].pop().getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight && c.right <= innerWidth && document.querySelector('.sheet-panel').scrollWidth <= innerWidth; });
@@ -1780,6 +1830,14 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await settle();
   const arts = await page.$$eval('.plan-row img.muscle-art', (is) => is.map((i) => i.dataset.muscle));
   check('the plan trains only the picked groups', arts.length >= 2 && arts.every((m) => ['lats', 'biceps'].includes(m)) && arts.includes('lats') && arts.includes('biceps'), arts.join());
+  {
+    // #194: a pressed toggle (Lock) uses exactly the picked-tile highlight.
+    const lockBtn = page.locator('.plan-row button[aria-pressed]').first();
+    await lockBtn.click();
+    const lockSel = await lockBtn.evaluate((b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor, c.color]; });
+    check('Locked uses the same highlight as a picked muscle tile (#194)', JSON.stringify(lockSel) === JSON.stringify(tileSel), JSON.stringify({ lockSel, tileSel }));
+    await lockBtn.click();
+  }
   check('the dropdown names the custom day', /Custom: Biceps, Lats/.test(await page.$eval('select[aria-label="Workout type"]', (s) => s.selectedOptions[0].textContent)));
   // Edit before starting (#155).
   const before = await names();
@@ -2086,6 +2144,12 @@ console.log('Sign out and clear local data');
   const keys = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tf.')).sort());
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('button:has-text("Sign out and clear this device")');
+  {
+    const look = (t) => page.$eval(`.settings-main button:text-is("${t}")`, (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.color]; });
+    const clear = await look('Sign out and clear this device');
+    const plain = await look('Sign out');
+    check('"Sign out and clear this device" has the red outline; plain Sign out keeps the standard one (#195)', clear[0] === 'rgb(255, 107, 94)' && clear[1] === 'rgb(255, 107, 94)' && plain[0] !== clear[0], JSON.stringify({ clear, plain }));
+  }
   await page.click('button:has-text("Sign out and clear this device")');
   await page.waitForSelector('.sheet');
   check('with everything synced, it asks plainly and says synced workouts stay on the server', /Sign out and clear this device\?/.test(await page.textContent('.sheet h2')) && /stays on the server/.test(await page.textContent('.sheet')));
