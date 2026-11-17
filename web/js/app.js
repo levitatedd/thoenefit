@@ -1,6 +1,7 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises, byUsage } from './search.js';
 import { bestEstimate, estimateLabel, convertWeight, roundEstimate } from './strength.js';
+import { loadBar, plateHint, plateStep, sideText, BARS, PLATES } from './plates.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -1767,6 +1768,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
   const stretch = isStretch(e);
   const needsWeight = !['bodyweight', 'band'].includes(e.kind);
   const perSide = e.kind === 'dumbbell' ? `${doc.unit} each` : doc.unit;
+  const barbell = e.kind === 'barbell'; // plate calculator (#227)
   let workingNo = 0;
 
   const cardioRow = (s, n) => {
@@ -1847,8 +1849,14 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       placeholder: needsWeight ? doc.unit : 'BW',
       value: fmtW(s.weight),
       onfocus: (ev) => ev.target.select(),
-      oninput: (ev) => edit((d) => (find(d, e.id, s.id).weight = parseNum(ev.target.value)), false),
+      oninput: (ev) => {
+        const v = parseNum(ev.target.value);
+        edit((d) => (find(d, e.id, s.id).weight = v), false);
+        if (plates) plates.textContent = plateHint(v, barFor(doc.unit), doc.unit);
+      },
     });
+    // Barbell sets show the plates for each side under the row, kept in step with the weight (#227).
+    const plates = barbell && h('span', { class: 'plate-hint' }, plateHint(s.weight, barFor(doc.unit), doc.unit));
     const reps = h('input', {
       class: 'num',
       type: 'text',
@@ -1927,6 +1935,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       h('span', { class: 'times', 'aria-hidden': 'true' }, '×'),
       reps,
       done,
+      plates,
     );
   });
 
@@ -2002,6 +2011,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
       } }, icon('minus', 18), stretch ? 'Remove hold' : cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
+      barbell && e.sets.length > 0 && h('button', { type: 'button', class: 'btn small plates-btn', 'aria-label': `Plates for ${e.name}`, onclick: () => platesSheet(doc, e, edit) }, icon('today', 18), 'Plates'),
       // Difficulty (#170): once every set is checked off, one optional rating for the exercise.
       !cardio && !stretch && e.sets.length > 0 && e.sets.every((s) => s.done) && h('button', {
         type: 'button',
@@ -2036,6 +2046,85 @@ function difficultySheet(e, onPick) {
       close();
       onPick(null);
     } }, 'Clear rating')));
+}
+
+/** The bar the lifter loads, remembered on this device (#227). Defaults to 45 lb or 20 kg. */
+function barFor(unit) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('tf.bar') || '{}')[unit];
+    if (BARS[unit]?.includes(saved)) return saved;
+  } catch (e) {
+    // no storage: use the default
+  }
+  return (BARS[unit] || BARS.lb)[0];
+}
+
+function saveBar(unit, bar) {
+  try {
+    const all = JSON.parse(localStorage.getItem('tf.bar') || '{}');
+    all[unit] = bar;
+    localStorage.setItem('tf.bar', JSON.stringify(all));
+  } catch (e) {
+    // not remembered; it still applies until the app reloads
+  }
+}
+
+/**
+ * Plate calculator (#227): the plates for the next set of a barbell lift, with
+ * a drawing of the loaded bar. The weight can be tried up and down and then
+ * used for that set. Standard plates at every gym for now.
+ */
+function platesSheet(doc, e, edit) {
+  const unit = doc.unit;
+  const list = PLATES[unit] || PLATES.lb;
+  let working = 0;
+  const numbered = e.sets.map((s) => ({ s, label: s.warmup ? 'warm-up set' : `set ${++working}` }));
+  const target = numbered.find((x) => !x.s.done && !x.s.warmup) || numbered.find((x) => !x.s.done) || numbered[numbered.length - 1];
+  let bar = barFor(unit);
+  let weight = target.s.weight ?? e.suggested_weight ?? bar;
+  const step = plateStep(unit);
+  const body = h('div', { class: 'stack plates-sheet' });
+  const disc = (p) => h('span', { class: `plate-disc r${Math.max(0, list.indexOf(p))}` }, String(p));
+  const paint = () => {
+    const r = loadBar(weight, bar, unit);
+    const each = r && r.perSide;
+    body.replaceChildren(...[
+      h('div', { class: 'plates-weight' },
+        h('button', { type: 'button', class: 'btn', 'aria-label': `${step} ${unit} less`, disabled: weight - step < 0, onclick: () => { weight = Math.max(0, weight - step); paint(); } }, `−${fmtW(step)}`),
+        h('span', { class: 'plates-total' }, `${fmtW(weight)} ${unit}`),
+        h('button', { type: 'button', class: 'btn', 'aria-label': `${step} ${unit} more`, onclick: () => { weight += step; paint(); } }, `+${fmtW(step)}`)),
+      h('div', { class: 'plates-bar', role: 'img', 'aria-label': each && each.length ? `${sideText(each)} on each side` : 'An empty bar' },
+        h('span', { class: 'plates-shaft' }),
+        h('span', { class: 'plates-side' }, [...(each || [])].reverse().map(disc)),
+        h('span', { class: 'plates-collar' }),
+        h('span', { class: 'plates-grip' }),
+        h('span', { class: 'plates-collar' }),
+        h('span', { class: 'plates-side' }, (each || []).map(disc))),
+      !r
+        ? h('p', { class: 'plates-each' }, weight > 0 ? `Lighter than the ${fmtW(bar)} ${unit} bar.` : 'Enter a weight.')
+        : h('div', { class: 'stack tight' },
+          h('p', { class: 'muted small' }, 'Each side'),
+          each.length
+            ? h('div', { class: 'plates-chips' }, each.map((p) => h('span', { class: 'plates-chip' }, String(p))))
+            : h('p', { class: 'plates-each' }, bar > 0 ? 'Just the bar.' : 'Nothing to load.'),
+          !r.exact && h('p', { class: 'plates-off' }, `${fmtW(weight)} can't be loaded with standard plates. The closest are ${fmtW(r.loaded)} and ${fmtW(r.up)}.`)),
+      h('p', { class: 'muted small' }, `${bar > 0 ? `On a ${fmtW(bar)} ${unit} bar` : 'No bar, plates only'}, with standard plates: ${list.map(String).join(', ')} ${unit}.`),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Bar'),
+        choices(BARS[unit].map((b, i) => [b, b ? `${fmtW(b)} ${unit}` : 'No bar', b ? (i === 0 ? 'Standard' : 'Lighter bar') : 'Plates only']), bar, (b) => {
+          bar = b;
+          saveBar(unit, b);
+          paint();
+        })),
+      h('button', { type: 'button', class: 'btn primary block', onclick: () => {
+        close();
+        edit((d) => (find(d, e.id, target.s.id).weight = weight));
+        toast(`${fmtW(weight)} ${unit} for ${target.label}.`);
+      } }, `Use ${fmtW(weight)} ${unit} for ${target.label}`),
+    ].filter(Boolean));
+  };
+  paint();
+  // Closing redraws the workout so the hints follow a new bar choice.
+  const close = sheet(`Plates for ${target.label}`, body, { onClose: () => render() });
 }
 
 function find(doc, exId, setId) {
