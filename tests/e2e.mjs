@@ -374,6 +374,53 @@ await shot('08-next-session');
 await page.click('.tab:has-text("History")');
 await page.waitForSelector('.log-row');
 check('the workout is in History', (await page.locator('.log-row').count()) === 1);
+// Calendar (#228): today's Push is a filled day; with no training days there is no plan yet.
+await page.waitForSelector('.cal-card .cal-day');
+{
+  const today = await page.evaluate(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  const cell = page.locator(`.cal-day[data-day="${today}"]`);
+  check('History opens on this month\'s calendar, with today\'s Push filled in and selected', (await page.locator('.cal-card h2').textContent()) === (await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))) && /\bdone\b/.test(await cell.getAttribute('class')) && /\btoday\b/.test(await cell.getAttribute('class')) && (await cell.locator('.cal-lbl').textContent()) === 'Push' && /Push at /.test(await page.textContent('.cal-detail')));
+  check('with no training days, nothing is planned and it says where to pick them', (await page.locator('.cal-day.plan').count()) === 0 && /Pick your training days in Settings/.test(await page.textContent('.cal-card')));
+  check('no sideways scrolling with the calendar', (await overflow()) <= 0);
+  // Every day a training day, so tomorrow is planned whatever today is.
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('.dow-picker');
+  check('Settings has Training days, Monday first, with none picked yet', (await page.$$eval('.dow-picker .choice', (els) => els.map((e) => e.getAttribute('aria-label') + ':' + e.getAttribute('aria-pressed')).join())) === 'Monday:false,Tuesday:false,Wednesday:false,Thursday:false,Friday:false,Saturday:false,Sunday:false');
+  for (let i = 0; i < 7; i++) {
+    await page.locator('.dow-picker .choice').nth(i).click();
+    await page.waitForFunction((n) => document.querySelectorAll('.dow-picker .choice[aria-pressed="true"]').length === n, i + 1);
+  }
+  await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.training_days.length === 7);
+  check('picking training days saves them and says how many', /7 days a week/.test(await page.textContent('.dow-picker + .field-hint')));
+  await page.click('.tab:has-text("History")');
+  await page.waitForSelector('.cal-card .cal-day');
+  const tomorrow = await page.evaluate(() => { const d = new Date(Date.now() + 86400000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  if (tomorrow.slice(0, 7) !== today.slice(0, 7)) {
+    await page.click('.cal-card button[aria-label="Next month"]');
+    await page.waitForSelector(`.cal-day[data-day="${tomorrow}"]`);
+  }
+  const t = page.locator(`.cal-day[data-day="${tomorrow}"]`);
+  const after = await page.evaluate((d) => { const x = new Date(`${d}T12:00:00`); x.setDate(x.getDate() + 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; }, tomorrow);
+  check('tomorrow is planned as the next day in the split (Pull), with a dashed day', /\bplan\b/.test(await t.getAttribute('class')) && (await t.locator('.cal-lbl').textContent()) === 'Pull');
+  await t.click();
+  await page.waitForSelector('.cal-detail button:has-text("Rest that day")');
+  check('tapping a planned day says what is planned and how it moves', /Pull/.test(await page.textContent('.cal-detail h3')) && /moves to your next training day/.test(await page.textContent('.cal-detail')));
+  await shot('09b-calendar');
+  await page.click('.cal-detail button:has-text("Rest that day")');
+  await page.waitForSelector('.cal-detail button:has-text("Back to plan")');
+  const nextLbl = after.slice(0, 7) === tomorrow.slice(0, 7) ? await page.locator(`.cal-day[data-day="${after}"] .cal-lbl`).textContent() : 'Pull';
+  check('resting that day moves Pull on to the next training day', !/\bplan\b/.test(await t.getAttribute('class')) && nextLbl === 'Pull' && /took this day off/.test(await page.textContent('.cal-detail')), nextLbl);
+  await page.click('.cal-detail button:has-text("Back to plan")');
+  await page.waitForFunction((d) => /\bplan\b/.test(document.querySelector(`.cal-day[data-day="${d}"]`).className), tomorrow);
+  check('Back to plan puts it back', (await t.locator('.cal-lbl').textContent()) === 'Pull');
+  // Leave no training days for the rest of the walk-through.
+  await page.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    await fetch('api.php?a=save_profile', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ training_days: [] }) });
+  });
+  await page.reload();
+  await page.waitForSelector('.log-row');
+}
 await shot('09-history');
 await page.click('.log-row');
 await page.waitForSelector('.lift');

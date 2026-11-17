@@ -2224,3 +2224,156 @@ button.setup-note {
   height: auto;
   border-radius: 14px;
 }
+
+/* ---- Calendar on History (#228) ----------------------------------------- */
+.cal-card .cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cal-card .cal-head h2 {
+  color: var(--mint);
+}
+
+.cal-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.cal-nav .cal-next .icon {
+  transform: rotate(180deg);
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  row-gap: 4px;
+  text-align: center;
+}
+
+.cal-dow {
+  padding-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 58px;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cal-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-lbl {
+  min-height: 11px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.cal-day.done .cal-num {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.cal-day.done .cal-lbl {
+  color: var(--mint);
+}
+
+.cal-day.plan .cal-num {
+  border: 2px dashed var(--mint);
+  color: var(--chalk);
+}
+
+.cal-day.today .cal-num {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--blue);
+}
+
+.cal-day.sel {
+  background: rgba(90, 162, 255, 0.14);
+}
+
+.cal-day:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.cal-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cal-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.cal-legend .d {
+  background: var(--mint);
+}
+
+.cal-legend .p {
+  border: 2px dashed var(--mint);
+}
+
+.cal-detail h3 {
+  font: 700 19px/1.2 var(--display);
+}
+
+.cal-done {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.cal-done a {
+  font-weight: 600;
+}
+
+/* Training days in Settings (#228): seven one-letter buttons in a row. */
+.dow-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dow-picker .choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  text-align: center;
+}
