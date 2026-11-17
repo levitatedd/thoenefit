@@ -1908,15 +1908,15 @@ button.setup-note {
 .today-head {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center; /* the logo centres on the heading and date together */
   justify-content: space-between;
   gap: 12px;
 }
 
 .brand-wide.head {
   flex: none;
-  width: min(150px, 38vw);
-  margin: 10px 0 0;
+  width: min(118px, 30vw);
+  margin: 0;
 }
 
 /* Quick Start (#127): a mint-tinted button with a caption, after the plan. */
