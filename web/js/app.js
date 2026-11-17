@@ -354,6 +354,14 @@ function render() {
   // bottom of the screen (#112).
   const toTop = restoreY === null && !(tab === S.lastTab && !S.backTo);
   if (toTop) window.scrollTo(0, 0);
+  // Keep the header that is already on screen and update it in place (#175), so
+  // switching tabs doesn't rebuild the logo and title and make them blink.
+  const liveHead = root.querySelector(':scope > main > .top-head');
+  const nextHead = view.querySelector(':scope > .top-head');
+  if (liveHead && nextHead) {
+    morph(liveHead, nextHead);
+    nextHead.replaceWith(liveHead);
+  }
   root.replaceChildren(view, restDock(), nav);
   if (tab === 'settings' && ['strava-connected', 'strava-denied', 'strava-error'].includes(arg)) {
     history.replaceState(null, '', '#/settings');
@@ -383,6 +391,27 @@ function topHead(title, { sub = null, right = brandWide('head'), rowClass = '' }
 
 function page(title, ...kids) {
   return h('main', { class: 'page' }, title && h('h1', {}, title), kids);
+}
+
+/**
+ * Make `live` match `next` by changing only what differs: text, attributes and
+ * children. For plain markup only: event listeners on `next` are not copied.
+ */
+function morph(live, next) {
+  if (live.nodeType === Node.TEXT_NODE) {
+    if (live.nodeValue !== next.nodeValue) live.nodeValue = next.nodeValue;
+    return;
+  }
+  for (const { name } of [...live.attributes]) if (!next.hasAttribute(name)) live.removeAttribute(name);
+  for (const { name, value } of [...next.attributes]) if (live.getAttribute(name) !== value) live.setAttribute(name, value);
+  const want = [...next.childNodes];
+  want.forEach((n, i) => {
+    const have = live.childNodes[i];
+    if (!have) live.append(n);
+    else if (have.nodeType === n.nodeType && have.nodeName === n.nodeName) morph(have, n);
+    else have.replaceWith(n);
+  });
+  while (live.childNodes.length > want.length) live.lastChild.remove();
 }
 
 /** Replace an element's children, skipping anything falsy (so `cond && node` is safe). */

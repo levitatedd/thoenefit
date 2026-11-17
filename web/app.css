@@ -197,9 +197,20 @@ a {
 
 .top-head-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* The logo centres on the title line, not on the title and the line under it,
+   so it sits in the same spot on every tab whether or not there is a subtitle. */
+.top-head-row > img.brand-wide {
+  margin-top: calc((32px * 1.1 - min(118px, 30vw) * 146 / 900) / 2);
+}
+
+/* The workout clock and save status still centre on the whole header. */
+.top-head-row > .workout-meta {
+  align-self: center;
 }
 
 .top-head h1 {
@@ -1992,14 +2003,6 @@ button.setup-note {
 }
 
 /* Today: heading and date on the left, the wide logo top right. */
-.today-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center; /* the logo centres on the heading and date together */
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .brand-wide.head {
   flex: none;
   width: min(118px, 30vw);
