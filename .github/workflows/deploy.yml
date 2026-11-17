@@ -40,6 +40,9 @@ jobs:
       # The browser walk-through (#217): the app on a fresh SQLite database with the e2e user,
       # clicked through at phone size in headless Chromium. Any failed check fails the job.
       - name: Browser walk-through
+        # Only on PRs (and manual runs). The push after a merge deploys code the PR already
+        # walked through, so it skips the ~2 minutes this takes.
+        if: github.event_name != 'push'
         run: |
           set -o pipefail
           npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
@@ -52,7 +55,7 @@ jobs:
           sleep 1
           node tests/e2e.mjs | tee "$RUNNER_TEMP/e2e.log"
       - name: List failed walk-through checks
-        if: failure()
+        if: failure() && github.event_name != 'push'
         run: |
           { echo '### Browser walk-through failures'; grep -E 'FAIL|Error' "$RUNNER_TEMP/e2e.log" || echo 'No walk-through output: it failed before or while starting.'; } >> "$GITHUB_STEP_SUMMARY"
           grep -E 'FAIL|Error' "$RUNNER_TEMP/e2e.log" || true
