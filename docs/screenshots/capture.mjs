@@ -80,6 +80,9 @@ for (let d = 56; d >= 2; d -= (n % 4 === 3 ? 3 : 2)) {
   plans[day] = await train(alex, gymA, day, at(d, 18), 60);
   n++;
 }
+// A pull session a few hours ago, so this week in Trends is never empty, whatever day it is.
+await train(alex, gymA, 'pull', Date.now() - 4 * 3600000, 60);
+n++;
 console.log('alex workouts', n);
 const routineOf = (p) => ({ day_type: p.day_type, exercises: p.exercises.map((e) => ({ exercise_id: e.exercise_id, target_sets: e.target_sets, rep_min: e.rep_min, rep_max: e.rep_max, rest_seconds: e.rest_seconds })) });
 await alex.call('save_routine', { name: 'Monday Push', plan: routineOf(plans.push) });
