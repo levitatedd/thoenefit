@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..', '.github', 'scripts');
 const dir = mkdtempSync(join(tmpdir(), 'tf-changelog-'));
-const env = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com', MAIN_REF: 'main' };
+const env = { ...process.env, TF_IMPROVED_PRS: '', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com', MAIN_REF: 'main' };
 const git = (...args) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim();
-const notes = (branch) => {
+const notes = (branch, extra = {}) => {
   git('checkout', '-q', branch);
   let version = 'dev';
   try {
@@ -21,7 +21,7 @@ const notes = (branch) => {
   } catch {
     // no VERSION yet
   }
-  return JSON.parse(execFileSync('node', [join(scripts, 'changelog.mjs'), branch], { cwd: dir, env: { ...env, APP_VERSION: version }, encoding: 'utf8' }));
+  return JSON.parse(execFileSync('node', [join(scripts, 'changelog.mjs'), branch], { cwd: dir, env: { ...env, APP_VERSION: version, ...extra }, encoding: 'utf8' }));
 };
 let n = 0;
 let pr = 0;
@@ -56,6 +56,7 @@ const check = (name, got, want) => {
   console.log(`  ${a === b ? 'ok   ' : 'FAIL '} ${name}${a === b ? '' : `\n          got  ${a}\n          want ${b}`}`);
 };
 const titles = (r) => r && { version: r.version, new: r.new.map((c) => c.title), fixed: r.fixed.map((c) => c.title) };
+const improvedTitles = (r) => r && r.improved.map((c) => c.title);
 
 try {
   git('init', '-q', '-b', 'main');
@@ -102,6 +103,18 @@ try {
   const after = notes('main').releases.map(titles);
   check('work released straight to main is listed under that release', after[1], { version: '0.1.103', new: ['Log cardio'], fixed: [] });
   check('merging the same work into staging later does not list it again', after[0], { version: '0.1.104', new: ['Estimate calories'], fixed: [] });
+
+  console.log('Improved');
+  pull('improve/mint', 'Highlight selected options in mint');
+  const oldStyle = pull('feature/old-style', 'Finish button matches Quick Start');
+  pull('fix/gap', 'Close the gap at the top of History');
+  check('improve/ branches are listed under Improved on staging, before the release', improvedTitles(notes('staging').upcoming), ['Highlight selected options in mint']);
+  release();
+  const r = notes('main').releases[0];
+  check('a release lists New, Improved and Fixed separately', [titles(r).new, improvedTitles(r), titles(r).fixed], [['Finish button matches Quick Start'], ['Highlight selected options in mint'], ['Close the gap at the top of History']]);
+  const moved = notes('main', { TF_IMPROVED_PRS: String(oldStyle) }).releases[0];
+  check('a feature/ pull request on the Improved list moves from New to Improved', [titles(moved).new, improvedTitles(moved)], [[], ['Highlight selected options in mint', 'Finish button matches Quick Start']]);
+  check('every release has an improved list, even when empty', notes('main').releases.every((x) => Array.isArray(x.improved)), true);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
