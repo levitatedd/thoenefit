@@ -80,6 +80,9 @@ for (let d = 56; d >= 2; d -= (n % 4 === 3 ? 3 : 2)) {
   plans[day] = await train(alex, gymA, day, at(d, 18), 60);
   n++;
 }
+// A pull session a few hours ago, so this week in Trends is never empty, whatever day it is.
+await train(alex, gymA, 'pull', Date.now() - 4 * 3600000, 60);
+n++;
 console.log('alex workouts', n);
 const routineOf = (p) => ({ day_type: p.day_type, exercises: p.exercises.map((e) => ({ exercise_id: e.exercise_id, target_sets: e.target_sets, rep_min: e.rep_min, rep_max: e.rep_max, rest_seconds: e.rest_seconds })) });
 await alex.call('save_routine', { name: 'Monday Push', plan: routineOf(plans.push) });
@@ -176,6 +179,40 @@ await A.evaluate(() => {
 });
 await A.waitForTimeout(300);
 await jpg(A, 'saved-routines');
+
+// 7. Pick muscle groups (#154): the picker with recovery, two groups chosen.
+await A.goto(URL + '#/today'); await A.reload(); await A.waitForSelector('.plan-row'); await ready(A);
+await A.selectOption('select[aria-label="Workout type"]', 'pick-muscles');
+await A.waitForSelector('.muscle-tile img');
+await A.waitForTimeout(500);
+// The two most recovered groups, which is what the picker is for.
+const fresh = await A.$$eval('.muscle-tile', (ts) => ts.slice(0, 2).map((t) => t.dataset.muscle));
+for (const m of fresh) await A.click(`.muscle-tile[data-muscle="${m}"]`);
+await A.waitForTimeout(300);
+await jpg(A, 'pick-muscle-groups');
+await A.click('.sheet button:has-text("Close")');
+
+// 8. Setup notes (#125): a note for one gym on the exercise page.
+await alex.call('save_note', { exercise_id: exId, gym_id: gymA.id, note: 'Bench on the 3rd hole, safeties at 5' });
+await A.goto(URL + `#/exercises/${exId}`); await A.reload();
+await A.waitForSelector('.note-row .setup-note');
+await A.evaluate(() => {
+  // Only as far as needed to show the note, keeping the exercise's name in view where it fits.
+  const note = document.querySelector('.note-row').getBoundingClientRect();
+  scrollTo(0, Math.max(0, note.bottom + scrollY - (innerHeight - 100)));
+});
+await A.waitForTimeout(400);
+await jpg(A, 'setup-notes');
+
+// 9. Share a finished workout as an image (#160): the preview with Share and Save image.
+const latest = (await alex.call('history&limit=1')).workouts[0];
+await A.goto(URL + `#/history/${latest.id}`); await A.reload();
+await A.waitForSelector('.recap');
+await A.click('button:has-text("Share workout")');
+await A.waitForSelector('.sheet canvas.share-card');
+await A.waitForTimeout(500);
+await jpg(A, 'share-image');
+await A.click('.sheet button:has-text("Close")');
 
 // 6. Shared workout: Alex shares the planned workout; Sam accepts it.
 await A.goto(URL + '#/today'); await A.reload(); await A.waitForSelector('.plan-row'); await ready(A);
