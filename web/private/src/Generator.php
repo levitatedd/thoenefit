@@ -482,6 +482,35 @@ final class Generator
     }
 
     /**
+     * Slots for a custom day of picked muscle groups (#154): a required first
+     * lift for each muscle, then a second optional one each, so the time limit
+     * trims the extras first. Each slot tries the movement patterns that work
+     * that muscle, compound ones first; "other" exercises come last, so a
+     * muscle like forearms still gets something.
+     *
+     * @param string[] $muscles
+     */
+    public static function customSlots(array $muscles): array
+    {
+        $first = [];
+        $second = [];
+        foreach ($muscles as $m) {
+            $patterns = [];
+            foreach (Catalog::exercises() as $e) {
+                if (in_array($m, $e[5], true) && !Catalog::isTimed($e[2]) && !in_array($e[4], ['cardio', 'other'], true)) {
+                    $patterns[$e[4]] = in_array($e[4], Catalog::COMPOUND, true) ? 0 : 1;
+                }
+            }
+            asort($patterns);
+            $patterns = array_keys($patterns);
+            $patterns[] = 'other';
+            $first[] = ["m_{$m}_1", $patterns, $m, true];
+            $second[] = ["m_{$m}_2", $patterns, $m, false];
+        }
+        return array_merge($first, $second);
+    }
+
+    /**
      * Stretches for a planned workout (#138): the ones that best cover the
      * muscles its lifts work, each a different area. With no lifts planned,
      * the usual first choices.
@@ -571,7 +600,12 @@ final class Generator
         $now = (int) ($opts['now'] ?? time());
         $minutes = max(15, min(180, (int) ($opts['minutes'] ?? $user['minutes'])));
         $dayType = $opts['day_type'] ?? null;
-        if (!is_string($dayType) || !isset(self::TEMPLATES[$dayType])) {
+        // Muscle groups picked by the lifter (#154): a custom day built for just those.
+        $muscles = array_values(array_intersect(array_keys(Catalog::MUSCLES), is_array($opts['muscles'] ?? null) ? $opts['muscles'] : []));
+        $template = null;
+        if ($dayType === 'custom' && $muscles) {
+            $template = self::customSlots($muscles);
+        } elseif (!is_string($dayType) || !isset(self::TEMPLATES[$dayType])) {
             $dayType = $this->nextDayType($uid, $user['split_type']);
         }
         $locked = is_array($opts['locked'] ?? null) ? $opts['locked'] : [];
@@ -592,7 +626,7 @@ final class Generator
         // first, then to whichever muscle has had the fewest sets this week.
         $required = [];
         $optional = [];
-        foreach (self::TEMPLATES[$dayType] as $i => $slot) {
+        foreach ($template ?? self::TEMPLATES[$dayType] as $i => $slot) {
             $slot[] = $i;
             if ($slot[3]) {
                 $required[] = $slot;
@@ -633,6 +667,7 @@ final class Generator
         }
         foreach (array_merge($required, $optional) as $slot) {
             [$key, $patterns, $muscle, $isRequired] = $slot;
+            $onlyMuscle = $template !== null; // a picked muscle slot only takes exercises that work it
             $pick = null;
             $how = 'default';
             $lockId = isset($locked[$key]) ? (int) $locked[$key] : 0;
@@ -643,7 +678,7 @@ final class Generator
                 $cands = [];
                 foreach ($patterns as $pi => $pattern) {
                     foreach ($by[$pattern] ?? [] as $ex) {
-                        if (isset($chosen[$ex['id']])) {
+                        if (isset($chosen[$ex['id']]) || ($onlyMuscle && !in_array($muscle, $ex['muscles_main'], true))) {
                             continue;
                         }
                         $cands[] = [
@@ -744,6 +779,7 @@ final class Generator
         return [
             'day_type' => $dayType,
             'day_label' => self::DAY_LABELS[$dayType],
+            'muscles' => $template !== null ? $muscles : [],
             'gym_id' => $gym['id'],
             'gym_name' => $gym['name'],
             'bodyweight_only' => $bodyweightOnly,

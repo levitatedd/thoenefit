@@ -1382,6 +1382,22 @@ check('the illustrations are small PNGs with a transparent background', $artInfo
 $sizes = array_unique(array_map(static fn($f) => implode('x', array_slice(getimagesize($f), 0, 2)), glob("$artDir/*.png")));
 check('every illustration has the same square size, so narrow ones (legs) line up with the rest', count($sizes) === 1 && reset($sizes) === '240x240', implode(' ', $sizes));
 
+echo "Picked muscle groups\n";
+$pGym = $mkGym($uid2, 'Pick gym', Catalog::presets()[0]['equipment']);
+$samUser = $db->one('SELECT * FROM users WHERE id=?', [$uid2]);
+$pick = $gen->generate($samUser, $pGym, ['day_type' => 'custom', 'muscles' => ['lats', 'biceps']]);
+$pLifts = array_values(array_filter($pick['exercises'], static fn($b) => !Catalog::isTimed($b['kind'])));
+$mainOf = array_column(Catalog::forUser($db, $uid2), 'muscles_main', 'id');
+check('picking lats and biceps plans only lifts whose main muscles include them (#154)', $pick['day_type'] === 'custom' && $pick['muscles'] === ['biceps', 'lats'] && count($pLifts) >= 2
+    && !array_filter($pLifts, static fn($b) => !array_intersect(['lats', 'biceps'], $mainOf[$b['exercise_id']])), json_encode(array_column($pLifts, 'name')));
+check('each picked muscle gets at least one lift', (bool) array_filter($pLifts, static fn($b) => in_array('lats', $mainOf[$b['exercise_id']], true)) && (bool) array_filter($pLifts, static fn($b) => in_array('biceps', $mainOf[$b['exercise_id']], true)));
+$fore = $gen->generate($samUser, $pGym, ['day_type' => 'custom', 'muscles' => ['forearms']]);
+check('even forearms gets a lift', (bool) array_filter($fore['exercises'], static fn($b) => in_array('forearms', $mainOf[$b['exercise_id']] ?? [], true)));
+$junk = $gen->generate($samUser, $pGym, ['day_type' => 'custom', 'muscles' => ['tail']]);
+check('unknown muscles fall back to the usual split day', $junk['day_type'] !== 'custom' && $junk['muscles'] === []);
+check('a custom day does not change the split rotation', $gen->nextDayType($uid2, 'ppl') === $gen->nextDayType($uid2, 'ppl'));
+$db->run('DELETE FROM gyms WHERE id=?', [$pGym['id']]);
+
 echo "Estimated calories\n";
 $kUid = $auth->createUser('calorie-user', 'calorie-user-123');
 $kGym = $mkGym($kUid, 'Calorie gym', ['barbell', 'bench', 'rack', 'stationary_bike']);
