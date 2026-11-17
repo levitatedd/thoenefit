@@ -908,6 +908,15 @@ console.log("What's new");
 check('the version under the Settings title is plain text, not underlined', (await page.$eval('.top-head a.app-version', (a) => getComputedStyle(a).textDecorationLine)) === 'none' && (await page.locator('.settings-main > .app-version, .settings-main p.app-version').count()) === 0);
 await page.click('.top-head a.app-version');
 await page.waitForSelector('h1:has-text("What\'s new")');
+{
+  const wn = await page.evaluate(() => {
+    const hd = document.querySelector('main > .top-head');
+    const back = hd?.querySelector('.detail-back a.back');
+    const title = hd?.querySelector('.detail-title');
+    return hd && { back: back?.textContent.trim(), backLeft: Math.round(back.getBoundingClientRect().left), title: title?.textContent, titleRight: Math.round(innerWidth - title.getBoundingClientRect().right), logo: !!hd.querySelector('img.brand-wide'), h1s: document.querySelectorAll('h1').length };
+  });
+  check("What's new uses the exercise page header: Settings back link top left, the title top right", wn && wn.back === 'Settings' && wn.title === "What's new" && wn.backLeft < 40 && wn.titleRight < 40 && !wn.logo && wn.h1s === 1, JSON.stringify(wn));
+}
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
   check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));

@@ -3316,7 +3316,8 @@ function viewWhatsNew() {
     if (!out.length) out.push(h('p', { class: 'muted pad' }, APP_VERSION === 'dev' ? 'Release notes are added when the app is deployed.' : 'No release notes yet.'));
     return out;
   });
-  return page("What's new", backLink('settings', 'Settings'), h('p', { class: 'muted' }, `You have version ${APP_VERSION}.`), content);
+  // Same pinned header as exercise pages (#202): back to Settings on the left, the title on the right.
+  return h('main', { class: 'page' }, detailHead(backLink('settings', 'Settings'), "What's new"), h('p', { class: 'muted' }, `You have version ${APP_VERSION}.`), content);
 }
 
 function viewImport() {
