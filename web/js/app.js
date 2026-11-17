@@ -3306,6 +3306,7 @@ function viewWhatsNew() {
   const release = (r, heading) => h('section', { class: 'card stack' },
     h('h2', {}, heading),
     list('New', r.new),
+    list('Improved', r.improved || []),
     list('Fixed', r.fixed));
   const content = asyncSection(loadChangelog, ({ upcoming, releases }) => {
     const out = [];

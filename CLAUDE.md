@@ -23,6 +23,7 @@ ThoeneFit is a workout planning and logging web app (PHP + SQLite/MySQL backend,
 
 1. Branch from **`staging`**, never from `main`:
    - `feature/...` for new things (listed under **New** in What's new)
+   - `improve/...` for polish to something that already exists: a new look, styling, clearer wording, moving things around (listed under **Improved**)
    - `fix/...` for bugs (listed under **Fixed**)
    - `chore/...` for anything users shouldn't see in What's new (tests, docs, tooling)
 2. Open a PR into `staging`. **The PR title is the release note shown to users** in What's new, so write it for the people using the app, e.g. "Offer Send to Strava when finishing a workout", not "Refactor finishSheet".
@@ -51,7 +52,7 @@ PR bodies follow this shape: `Refs #N. Part of #1.`, then **What changed**, **Ch
 - `VERSION` holds the starting number (currently `0.1.100`). `.github/scripts/app-version.sh` adds one for each commit on `main`'s first-parent line since `VERSION` last changed, so each release counts once. Staging shows the next number with `-staging`.
 - Never hand-edit version numbers in code. Only change `VERSION` to start a new minor or major version (e.g. `0.2.0`).
 - What's new (`web/changelog.json`) is generated on deploy from PR titles and branch names by `.github/scripts/changelog.mjs`. Nothing to write by hand, which is why branch names and PR titles matter.
-- The notes come from merge commits, so they can't be edited after merging. A `feature/` or `fix/` PR that a later PR replaces before release (like #114, replaced by #115) still appears. When reworking something already on staging, say so in the release PR.
+- The notes come from merge commits, so they can't be edited after merging. A `feature/` PR that turns out to be polish can be moved to **Improved** by adding its number to `IMPROVED_PRS` in `.github/scripts/changelog.mjs`. A `feature/` or `fix/` PR that a later PR replaces before release (like #114, replaced by #115) still appears. When reworking something already on staging, say so in the release PR.
 
 ## Checks
 
