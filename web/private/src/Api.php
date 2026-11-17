@@ -134,6 +134,7 @@ final class Api
             },
             'exercise_history' => fn() => ['sessions' => $this->workouts->exerciseHistory($uid, (int) ($_GET['id'] ?? 0))],
             'recovery' => fn() => ['recovery' => $this->gen->muscleStats($uid)],
+            'exercise_counts' => fn() => ['counts' => (object) $this->workouts->exerciseCounts($uid)],
             'trends' => fn() => [
                 'recovery' => $this->gen->muscleStats($uid),
                 'unit' => $user['unit'],
@@ -499,6 +500,8 @@ final class Api
             'pending_requests' => Auth::isAdmin($user) ? count($this->auth->pendingRequests()) : 0,
             'gyms' => $this->gyms($uid),
             'exercises' => Catalog::forUser($this->db, $uid, true),
+            // Most-performed first in Add exercise (#174). An object, so ids stay keys in JSON.
+            'exercise_counts' => (object) $this->workouts->exerciseCounts($uid),
             'active' => $active,
             'shares' => $this->shares->incoming($uid),
             'routines' => $this->routines->all($uid),

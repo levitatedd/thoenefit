@@ -149,6 +149,77 @@ a {
   gap: 2px;
 }
 
+/* Top-level screens (#175): Today's header, held at the top while the page
+   scrolls. It reaches the screen edges of the column and covers the safe area;
+   a drop shadow appears once content passes under it. */
+.top-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  gap: 10px;
+  margin: calc(-18px - env(safe-area-inset-top, 0px)) -16px 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) 16px 12px;
+  background: var(--bg);
+  transition: box-shadow 0.2s ease;
+}
+
+/* On wide screens the bar and its shadow run the full width of the window,
+   not just the content column. */
+@media (min-width: 600px) {
+  /* 100vw includes a desktop scrollbar; clip rather than scroll sideways. */
+  html {
+    overflow-x: clip;
+  }
+
+  .top-head {
+    background: transparent;
+  }
+
+  .top-head::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 50%;
+    width: 100vw;
+    transform: translateX(-50%);
+    z-index: -1;
+    background: var(--bg);
+    box-shadow: inherit;
+  }
+
+  body.scrolled .top-head {
+    box-shadow: none;
+  }
+
+  body.scrolled .top-head::before {
+    box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.9);
+  }
+}
+
+.top-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.top-head h1 {
+  color: var(--mint);
+}
+
+.top-head .back-to-workout {
+  position: static;
+}
+
+/* The first section under a header needs no divider above it (Settings). */
+main > .top-head + .section {
+  border-top: none;
+  padding-top: 0;
+}
+
+body.scrolled .top-head {
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.9);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -644,24 +715,6 @@ textarea:focus {
 }
 
 /* ---- active workout ---- */
-
-.workout-head {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
-  margin: calc(-18px - env(safe-area-inset-top, 0px)) -16px 0;
-  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-
-.workout-head h1 {
-  font-size: 26px;
-}
 
 .workout-meta {
   display: flex;
@@ -1490,6 +1543,40 @@ input[type="file"] {
   align-items: center;
   gap: 12px;
   padding: 14px 8px 6px 18px;
+}
+
+.sheet-head h2 {
+  min-width: 0;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.sheet-actions .btn.ghost {
+  padding: 0 12px;
+}
+
+/* Build (n) in the Pick muscle groups header (#169): filled mint once something is picked. */
+.btn.build-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border-color: var(--mint);
+  background: var(--mint);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.btn.build-btn:disabled {
+  opacity: 1;
+  background: var(--raised);
+  color: var(--mint);
 }
 
 .sheet-body {

@@ -836,10 +836,11 @@ await shot('11-settings');
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
 // #103: one heading colour, Training and Gyms first, the rest behind links.
 {
-  const heads = await page.$$eval('.settings-main > h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  const heads = await page.$$eval('.settings-main .top-head h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  check('no divider line between the Settings header and Training', (await page.$eval('.settings-main > .top-head + .section', (el) => getComputedStyle(el).borderTopStyle)) === 'none');
   const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
   check("Settings links to Routines, data, help and What's new instead of showing them inline", ['Manage routines', 'Export all sets as CSV', 'Import from Fitbod', 'Add to your Home Screen', "What's new"].every((t) => links.includes(t)) && (await page.locator('[data-list=routines]').count()) === 0 && !(await page.textContent('.page')).includes('Tap the Share button'), links.join());
   await page.click('.link-row:has-text("Add to your Home Screen")');
@@ -1331,6 +1332,7 @@ console.log('Pause and resume a workout');
   check('on other tabs the Today spot is a Workout tab with the barbell, not Pause or Play', (await page.locator('.pause-tab').count()) === 0 && (await page.locator('a.workout-tab[href="#/workout"]').textContent()) === 'Workout');
   check('while paused the Workout tab is yellow and still', (await page.$eval('a.workout-tab', (el) => [getComputedStyle(el).color, getComputedStyle(el.querySelector('.tab-icon')).animationName].join())) === 'rgb(245, 198, 60),none');
   check('no sideways scrolling with the way-back bar', (await overflow()) <= 0);
+  check('the way-back bar sits in the fixed header, under the History title (#175)', (await page.locator('main > .top-head .back-to-workout').count()) === 1 && (await page.evaluate(() => document.querySelector('.back-to-workout').getBoundingClientRect().top >= document.querySelector('.top-head h1').getBoundingClientRect().bottom)));
   await shot('30-history-during-workout');
   await page.click('.back-to-workout');
   await page.waitForSelector('.paused-banner');
@@ -1341,6 +1343,19 @@ console.log('Pause and resume a workout');
   await page.click('a.workout-tab');
   await page.waitForSelector('.lift');
   check('the Workout tab goes back to the workout and leaves it paused', (await page.evaluate(() => location.hash)) === '#/workout' && (await page.locator('.paused-banner').count()) === 1 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Resume workout');
+  {
+    const wh = await page.evaluate(() => {
+      const head = document.querySelector('main > .top-head');
+      const h1 = head?.querySelector('h1');
+      return head && { position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top), clock: !!head.querySelector('#elapsed'), sync: !!head.querySelector('#sync'), logo: !!head.querySelector('img.brand-wide') };
+    });
+    await page.goto(`${URL}#/history`);
+    await page.waitForSelector('main > .top-head');
+    const ref = await page.evaluate(() => { const h1 = document.querySelector('main > .top-head h1'); return { color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top) }; });
+    check('during a workout the header matches the other screens, with the clock and save status on the right (#175)', wh && wh.position === 'sticky' && wh.top === 0 && wh.color === 'rgb(58, 242, 156)' && wh.size === ref.size && wh.left === ref.left && wh.h1Top === ref.h1Top && wh.clock && wh.sync && !wh.logo, JSON.stringify({ wh, ref }));
+    await page.goto(`${URL}#/workout`);
+    await page.waitForSelector('.lift');
+  }
   await page.click('.paused-banner button:has-text("Resume")');
   await waitForToast(page, /Workout resumed/);
   check('Resume clears the pause', (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Pause workout');
@@ -1687,11 +1702,22 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.waitForSelector('.muscle-tile');
   const tiles = await page.$$eval('.muscle-tile', (ts) => ts.map((t) => [t.dataset.muscle, t.querySelector('.muscle-pct').textContent, t.querySelector('img').complete]));
   check('Pick muscle groups shows all 13 with their recovery, most recovered first', tiles.length === 13 && tiles.every(([, p]) => /^\d+%/.test(p)) && tiles.map(([, p]) => parseInt(p, 10)).every((v, i, all) => i === 0 || all[i - 1] >= v), JSON.stringify(tiles));
+  // #169: Build sits in the header next to Close, disabled and outlined until something is picked.
+  const buildBtn = page.locator('.sheet-head .build-btn');
+  const buildLook = () => buildBtn.evaluate((b) => { const s = getComputedStyle(b); return { text: b.textContent.trim(), disabled: b.disabled, bg: s.backgroundColor, color: s.color, border: s.borderTopColor, next: b.nextElementSibling?.textContent }; });
+  const empty = await buildLook();
+  check('Build sits in the muscle picker header, left of Close', empty.next === 'Close');
+  check('with nothing picked, Build is disabled, with mint text and outline on dark gray', empty.text === 'Build' && empty.disabled && empty.color === 'rgb(58, 242, 156)' && empty.border === 'rgb(58, 242, 156)' && empty.bg === 'rgb(38, 45, 55)', JSON.stringify(empty));
+  check('the old Build workout button at the bottom is gone', (await page.locator('.sheet-body button:has-text("Build workout")').count()) === 0);
   await page.click('.muscle-tile[data-muscle="lats"]');
   await page.click('.muscle-tile[data-muscle="biceps"]');
-  check('the build button counts the picks', (await page.textContent('.sheet button[type=submit]')).trim() === 'Build workout (2)');
+  const picked = await buildLook();
+  check('the build button counts the picks, filled mint', picked.text === 'Build (2)' && !picked.disabled && picked.bg === 'rgb(58, 242, 156)' && picked.color === 'rgb(14, 17, 21)', JSON.stringify(picked));
+  await page.evaluate(() => document.querySelector('.sheet-body').scrollTo(0, 9999));
+  const headFits = await page.evaluate(() => { const b = document.querySelector('.sheet-head .build-btn').getBoundingClientRect(); const c = [...document.querySelectorAll('.sheet-head button')].pop().getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight && c.right <= innerWidth && document.querySelector('.sheet-panel').scrollWidth <= innerWidth; });
+  check('Build and Close stay visible and fit after scrolling the tiles', headFits);
   await shot('44-pick-muscles');
-  await page.click('.sheet button[type=submit]');
+  await page.click('.sheet-head .build-btn');
   await settle();
   const arts = await page.$$eval('.plan-row img.muscle-art', (is) => is.map((i) => i.dataset.muscle));
   check('the plan trains only the picked groups', arts.length >= 2 && arts.every((m) => ['lats', 'biceps'].includes(m)) && arts.includes('lats') && arts.includes('biceps'), arts.join());
@@ -1722,9 +1748,28 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.click('.sheet button:has-text("Discard workout")');
   await page.waitForSelector('.plan-row');
   // Quick Start (#127).
+  const countsLoaded = page.waitForResponse((r) => r.url().includes('a=exercise_counts'));
   await page.click('button:has-text("Quick start")');
   await page.waitForSelector('.sheet .pick');
+  await countsLoaded;
+  await page.waitForTimeout(100);
   check('Quick start opens an empty workout with the exercise picker', /#\/workout$/.test(await page.evaluate(() => location.hash)) && (await page.locator('.lift').count()) === 0);
+  // #174: with no search, the lifter's most-performed exercises come first, ties and never-done alphabetical.
+  {
+    const listed = await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent.trim()));
+    const counts = await page.evaluate(async () => {
+      const b = await (await fetch('api.php?a=bootstrap')).json();
+      return Object.fromEntries(b.exercises.map((x) => [x.name, b.exercise_counts[x.id] || 0]));
+    });
+    const n = listed.map((name) => counts[name]);
+    const ordered = n.every((c, i) => i === 0 || n[i - 1] > c || (n[i - 1] === c && listed[i - 1].localeCompare(listed[i]) <= 0));
+    check('Add exercise lists the most-performed exercises first (#174)', n[0] > 0 && ordered, listed.slice(0, 6).map((x, i) => `${x}:${n[i]}`).join(', '));
+    await page.fill('.sheet input[type=search]', 'curl');
+    await page.waitForTimeout(150);
+    check('a search keeps relevance order rather than most-performed', /curl/i.test(await page.locator('.sheet .pick .pick-name').first().textContent()));
+    await page.fill('.sheet input[type=search]', '');
+    await page.waitForTimeout(150);
+  }
   const first = (await page.locator('.sheet .pick .pick-name').first().textContent()).trim();
   await page.locator('.sheet .pick').first().click();
   await page.waitForSelector('.lift');
@@ -1743,6 +1788,52 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
     await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, qs.id);
   check('no sideways scrolling', (await overflow()) <= 0);
+}
+
+console.log('Fixed page headers (#175)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  const look = () => page.evaluate(() => {
+    const head = document.querySelector('main > .top-head');
+    if (!head) return null;
+    const h1 = head.querySelector('h1');
+    const hs = getComputedStyle(h1);
+    const next = head.nextElementSibling;
+    return {
+      position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), bottom: head.getBoundingClientRect().bottom,
+      bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
+      font: `${hs.fontSize} ${hs.fontWeight} ${hs.fontFamily}`, color: hs.color, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top),
+      nextTop: next ? next.getBoundingClientRect().top : Infinity,
+      logo: !!head.querySelector('.top-head-row > img.brand-wide'), sub: head.querySelector('p.muted')?.textContent || '',
+    };
+  });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.top-head');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const today = await look();
+  const screens = {};
+  for (const tab of ['history', 'trends', 'exercises', 'settings']) {
+    await page.goto(`${URL}#/${tab}`);
+    await page.waitForSelector('main > .top-head');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    screens[tab] = await look();
+  }
+  const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
+  check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
+  check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
+  check('Trends says just "Last 8 weeks" under its title', screens.trends.sub === 'Last 8 weeks', screens.trends.sub);
+  check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
+  check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
+  for (const tab of ['exercises', 'settings']) {
+    await page.goto(`${URL}#/${tab}`);
+    await page.waitForSelector('main > .top-head');
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(300);
+    const s = await look();
+    check(`scrolling ${tab} keeps the header at the top with a drop shadow under it`, s.top === 0 && s.h1Top > 0 && s.shadow !== 'none', JSON.stringify(s));
+  }
+  await shot('47-fixed-header-scrolled');
+  await page.evaluate(() => window.scrollTo(0, 0));
 }
 
 console.log('Send feedback');

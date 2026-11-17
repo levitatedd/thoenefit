@@ -1,5 +1,5 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
-import { searchExercises } from './search.js';
+import { searchExercises, byUsage } from './search.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -50,6 +50,10 @@ api.onUnauthorized = () => {
     render();
   }
 };
+
+// Fixed headers (#175) cast a shadow once content scrolls under them.
+const markScrolled = () => document.body.classList.toggle('scrolled', window.scrollY > 2);
+window.addEventListener('scroll', markScrolled, { passive: true });
 
 async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -115,6 +119,7 @@ function applyBoot(data) {
   S.routines = data.routines || [];
   S.vocab = data.vocab;
   setExercises(data.exercises);
+  S.exerciseCounts = data.exercise_counts || {};
   if (data.csrf) api.csrf = data.csrf;
   if (!sync || sync.key !== `tf.docs.${S.user.id}`) {
     sync = new WorkoutSync({
@@ -337,7 +342,12 @@ function render() {
       : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24)), h('span', {}, label)))),
   );
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
-  if (sync?.active && tab !== 'workout') view.prepend(backToWorkoutBar());
+  // On a screen with a fixed header (#175) it rides along under the title.
+  if (sync?.active && tab !== 'workout') {
+    const top = view.querySelector(':scope > .top-head');
+    if (top) top.append(backToWorkoutBar());
+    else view.prepend(backToWorkoutBar());
+  }
   // Going to the top of a different screen: scroll there before swapping the
   // content in. Swapping a long page for a short one (History and Trends while
   // they load) while still scrolled down lets iPhones lift the tab bar off the
@@ -359,6 +369,16 @@ function render() {
   S.lastTab = tab;
   startTicker();
   keepAwake();
+}
+
+/**
+ * The header of a top-level screen (#175): Today's look (mint title, muted line
+ * under it, the wide logo on the right unless something else goes there, like
+ * the workout clock), held at the top while the page scrolls.
+ */
+function topHead(title, { sub = null, right = brandWide('head'), rowClass = '' } = {}) {
+  return h('header', { class: 'page-head top-head' },
+    h('div', { class: `top-head-row ${rowClass}`.trim() }, h('div', {}, h('h1', {}, title), sub && h('p', { class: 'muted' }, sub)), right));
 }
 
 function page(title, ...kids) {
@@ -883,9 +903,7 @@ function viewToday() {
   const active = sync.active;
   refreshShares();
   // The wide logo sits top right, beside the heading.
-  const head = h('header', { class: 'page-head today-head' },
-    h('div', {}, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }))),
-    brandWide('head'));
+  const head = topHead('Today', { sub: fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }), rowClass: 'today-head' });
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {
@@ -1546,12 +1564,12 @@ function viewWorkout() {
   const doneSets = doc.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0);
   const totalSets = doc.exercises.reduce((n, e) => n + e.sets.length, 0);
 
-  const head = h(
-    'header',
-    { class: 'workout-head' },
-    h('div', {}, h('h1', {}, dayLabel(doc.day_type)), h('p', { class: 'muted' }, `${doc.gym_name}, ${doneSets} of ${totalSets} sets`)),
-    h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: `elapsed ${doc.paused_at ? 'paused' : ''}` }, fmtClock(workoutSeconds(doc))), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
-  );
+  // Today's header (#175), with the clock and save status where Today has the logo.
+  const head = topHead(dayLabel(doc.day_type), {
+    sub: `${doc.gym_name}, ${doneSets} of ${totalSets} sets`,
+    right: h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: `elapsed ${doc.paused_at ? 'paused' : ''}` }, fmtClock(workoutSeconds(doc))), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
+    rowClass: 'workout-head',
+  });
   const paused = doc.paused_at && h('section', { class: 'paused-banner', role: 'status' },
     h('div', {}, h('strong', {}, 'Paused'), h('span', { class: 'muted small' }, 'The clock is stopped. Logging a set resumes it.')),
     h('button', { class: 'btn primary small', type: 'button', onclick: () => togglePause() }, icon('play', 18), 'Resume'));
@@ -1858,13 +1876,8 @@ function quickStart() {
 async function musclePicker() {
   const chosen = new Set(S.draftOpts.day_type === 'custom' ? S.draftOpts.muscles || [] : []);
   const grid = h('div', { class: 'muscle-grid' }, h('p', { class: 'muted' }, 'Loading'));
-  const build = h('button', { class: 'btn primary block', type: 'submit', disabled: true }, 'Build workout');
-  const refresh = () => {
-    build.disabled = chosen.size === 0;
-    build.textContent = chosen.size ? `Build workout (${chosen.size})` : 'Build workout';
-  };
-  const close = sheet('Pick muscle groups', h('form', { class: 'stack', onsubmit: (e) => {
-    e.preventDefault();
+  // Build (n) sits in the sheet header, next to Close, so it stays in reach while the tiles scroll (#169).
+  const build = h('button', { class: 'btn build-btn', type: 'button', disabled: true, onclick: () => {
     if (!chosen.size) return;
     close();
     S.draftOpts.day_type = 'custom';
@@ -1873,7 +1886,13 @@ async function musclePicker() {
     S.draftAdded = [];
     S.draftRemoved = [];
     loadDraft();
-  } }, h('p', { class: 'muted small' }, 'Recovery comes from the sets you logged in the last week, like on Trends. Below 50% is still recovering.'), grid, build));
+  } }, 'Build');
+  const refresh = () => {
+    build.disabled = chosen.size === 0;
+    build.textContent = chosen.size ? `Build (${chosen.size})` : 'Build';
+  };
+  const close = sheet('Pick muscle groups', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'Recovery comes from the sets you logged in the last week, like on Trends. Below 50% is still recovering.'), grid), { actions: [build] });
   refresh();
   try {
     const { recovery } = await api.get('recovery');
@@ -1932,7 +1951,8 @@ function addExerciseSheet(doc, onAdd) {
   const paint = () => {
     const q = search.value.trim();
     const pick = muscle.value ? pool.filter((x) => x.muscles_main.includes(muscle.value)) : pool;
-    const r = searchExercises(pick, q, S.vocab, { limit: 40, similarLimit: 6 });
+    // With no search, the lifter's most-performed exercises come first (#174); a search keeps relevance order.
+    const r = searchExercises(q ? pick : byUsage(pick, S.exerciseCounts), q, S.vocab, { limit: 40, similarLimit: 6 });
     fill(list,
       r.closest && h('p', { class: 'muted' }, `Nothing at this gym matches "${q}" exactly. Closest:`),
       ...r.matches.map(row),
@@ -1943,6 +1963,12 @@ function addExerciseSheet(doc, onAdd) {
   };
   close = sheet('Add exercise', h('div', { class: 'stack' }, h('div', { class: 'filters' }, search, muscle), list));
   paint();
+  // The counts from bootstrap can be days old in an installed app. Refresh them,
+  // and reorder only if nothing has been typed yet. Offline, the cached order stands.
+  api.get('exercise_counts').then(({ counts }) => {
+    S.exerciseCounts = counts || {};
+    if (list.isConnected && !search.value.trim()) paint();
+  }).catch(() => {});
 }
 
 // "Send to Strava" on the Finish sheet (#87): the choice is remembered on this device.
@@ -2307,7 +2333,7 @@ function viewTrends() {
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
       recoveryPanel(recovery));
   });
-  return page('Trends', h('p', { class: 'muted' }, 'Last 8 weeks, including this week.'), content);
+  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks' }), content);
 }
 
 /**
@@ -2356,7 +2382,7 @@ function viewHistory() {
     h('h2', {}, 'Other people'),
     h('ul', { class: 'log' }, list.map((p) => h('li', {}, h('a', { class: 'log-row', href: `#/people/${p.id}` }, h('span', { class: 'log-title' }, p.name), h('span', { class: 'log-meta' }, 'See their workouts'))))),
     h('p', { class: 'muted small' }, S.user.history_visibility === 'members' ? 'They can see your history too.' : 'Your own history is private. You can share it in Settings.'))), () => {});
-  return page('History', people,
+  return h('main', { class: 'page' }, topHead('History'), people,
     workoutList(
       (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
       (w) => `#/history/${w.id}`,
@@ -2620,7 +2646,7 @@ function viewExercises() {
     );
   };
   paint();
-  return page('Exercises', h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
+  return h('main', { class: 'page' }, topHead('Exercises'), h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
 }
 
 function equipLabel(key) {
@@ -2974,7 +3000,7 @@ function viewSettings() {
   const routineCount = (S.routines || []).length;
   // Headings are mint so the sections are easy to pick out (#103). What affects
   // the next workout comes first; setup and maintenance are one-line links.
-  return h('main', { class: 'page settings-main' }, h('h1', {}, 'Settings'),
+  return h('main', { class: 'page settings-main' }, topHead('Settings'),
     section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Gyms', linkList(
       ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),

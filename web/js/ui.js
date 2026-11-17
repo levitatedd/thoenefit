@@ -124,8 +124,8 @@ export function toast(message, kind = '', onTap = null) {
   toastTimer = setTimeout(() => (el.className = 'toast'), onTap ? 6000 : 3200);
 }
 
-/** Bottom sheet. Returns a close function. */
-export function sheet(title, body, { onClose } = {}) {
+/** Bottom sheet. Returns a close function. `actions` sit in the header, left of Close. */
+export function sheet(title, body, { onClose, actions = [] } = {}) {
   const close = () => {
     wrap.remove();
     document.removeEventListener('keydown', onKey);
@@ -135,7 +135,7 @@ export function sheet(title, body, { onClose } = {}) {
   const panel = h(
     'div',
     { class: 'sheet-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('div', { class: 'sheet-head' }, h('h2', {}, title), h('button', { class: 'btn ghost', type: 'button', onclick: close }, 'Close')),
+    h('div', { class: 'sheet-head' }, h('h2', {}, title), h('div', { class: 'sheet-actions' }, ...actions, h('button', { class: 'btn ghost', type: 'button', onclick: close }, 'Close'))),
     h('div', { class: 'sheet-body' }, body),
   );
   const wrap = h('div', { class: 'sheet', onclick: (e) => e.target === wrap && close() }, panel);
