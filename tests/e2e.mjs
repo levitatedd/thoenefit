@@ -171,6 +171,34 @@ check('weight field asks for a decimal keypad and reps for a number pad', (await
 const box = await lift.locator('.plate').first().boundingBox();
 check(`complete-set button is a large touch target (${Math.round(box.width)}px)`, box.width >= 56 && box.height >= 56);
 const setRows = await lift.locator('.set').count();
+// Plate calculator (#227): the first lift is a barbell press.
+{
+  const first = lift.locator('.set').first();
+  const hint = () => first.locator('.plate-hint').textContent();
+  await first.locator('input').nth(0).fill('185');
+  check(`a barbell set shows its plates for each side (${liftName})`, (await hint()) === 'Plates: 45 + 25 a side', await hint());
+  await first.locator('input').nth(0).fill('187');
+  check('a weight standard plates cannot make offers the closest one', (await hint()) === 'Closest: 185 (45 + 25 a side)', await hint());
+  await first.locator('input').nth(0).fill('185');
+  check('only barbell lifts get a Plates button', (await lift.locator('.plates-btn').count()) === 1 && (await page.locator('.lift').nth(1).locator('.plates-btn').count()) === 0 && !/Barbell/.test(await page.locator('.lift').nth(1).locator('h2').textContent()));
+  await lift.locator('.plates-btn').click();
+  await page.waitForSelector('.sheet .plates-sheet');
+  const chips = () => page.$$eval('.sheet .plates-chip', (els) => els.map((e) => e.textContent).join(','));
+  check('Plates opens on the next set, drawing 45 + 25 on each end of the bar', (await page.textContent('.sheet h2')) === 'Plates for set 1' && (await chips()) === '45,25' && (await page.locator('.sheet .plate-disc').count()) === 4, await chips());
+  await page.click('.sheet button[aria-label="5 lb more"]');
+  check('+5 adds a 2.5 to each side', (await page.textContent('.sheet .plates-total')) === '190 lb' && (await chips()) === '45,25,2.5', await chips());
+  await page.click('.sheet .choice:has-text("35 lb")');
+  check('a lighter bar changes the plates', (await chips()) === '45,25,5,2.5', await chips());
+  await shot('05c-plates');
+  await page.click('.sheet button:has-text("Use 190 lb for set 1")');
+  await page.waitForSelector('.sheet', { state: 'detached' });
+  check('Use puts the weight in the set, and the hint follows the chosen bar', (await first.locator('input').nth(0).inputValue()) === '190' && (await hint()) === 'Plates: 45 + 25 + 5 + 2.5 a side', await hint());
+  await lift.locator('.plates-btn').click();
+  await page.click('.sheet .choice:has-text("45 lb")');
+  await page.click('.sheet button:has-text("Close")');
+  await page.waitForSelector('.sheet', { state: 'detached' });
+  check('the bar choice is remembered on the device', (await page.evaluate(() => JSON.parse(localStorage.getItem('tf.bar')).lb)) === 45 && (await hint()) === 'Plates: 45 + 25 + 2.5 a side', await hint());
+}
 // Every working set at the top of the rep range, so the next session should go up.
 const repMax = Number((await lift.locator('.target').textContent()).match(/of \d+-(\d+)/)[1]);
 for (let i = 0; i < setRows; i++) {

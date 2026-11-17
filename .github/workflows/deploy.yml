@@ -31,6 +31,8 @@ jobs:
         run: node tests/search.test.mjs
       - name: Estimated 1-rep max checks
         run: node tests/strength.test.mjs
+      - name: Plate calculator checks
+        run: node tests/plates.test.mjs
       - name: Install reminder checks
         run: node tests/install.test.mjs
       - name: Version number checks
