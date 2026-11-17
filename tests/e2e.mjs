@@ -1236,7 +1236,7 @@ console.log("Seeing each other's history");
   await vp.reload();
   await vp.waitForSelector('.tabs');
   await vp.waitForTimeout(400);
-  check('history starts private: nobody else is listed on History', (await vp.locator('.people-card').count()) === 0);
+  check('history starts private: nobody else is listed on History', (await vp.locator('.people-pick').count()) === 0);
   check('a private history cannot be fetched by another account', (await viewerGet(`member_history&user=${myId}`)) === 404);
 
   await page.goto(`${URL}#/settings`);
@@ -1249,10 +1249,11 @@ console.log("Seeing each other's history");
 
   await vp.goto(`${URL}#/today`);
   await vp.goto(`${URL}#/history`);
-  await vp.waitForSelector('.people-card');
-  check('once shared, the other person sees them under Other people on History', (await vp.textContent('.people-card')).includes(myName));
+  await vp.waitForSelector('.people-pick');
+  const pick = await vp.$eval('.people-pick', (s) => [...s.options].map((o) => o.textContent));
+  check('once shared, History offers a "View other trainer\'s history" dropdown with them in it', pick[0] === "View other trainer's history" && pick.includes(myName), pick.join(' | '));
   if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18-history-other-people.png` });
-  await vp.click('.people-card .log-row');
+  await vp.selectOption('.people-pick', { label: myName });
   await vp.waitForFunction(() => /'s workouts/.test(document.querySelector('h1')?.textContent || '') && document.querySelectorAll('.log-row').length > 0);
   if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18b-history-their-list.png` });
   check("their list opens with the person's name and their workouts", (await vp.textContent('h1')).includes(`${myName}'s workouts`) && (await vp.locator('.log-row').count()) > 0);
@@ -1908,7 +1909,8 @@ console.log('Fixed page headers (#175)');
     if (!head) return null;
     const h1 = head.querySelector('h1');
     const hs = getComputedStyle(h1);
-    const next = head.nextElementSibling;
+    let next = head.nextElementSibling;
+    while (next && next.getBoundingClientRect().height === 0) next = next.nextElementSibling;
     return {
       position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), bottom: head.getBoundingClientRect().bottom,
       bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
@@ -1933,6 +1935,23 @@ console.log('Fixed page headers (#175)');
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
   check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
   check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
+  {
+    // The first thing under each header starts the same distance below it (History had an empty slot adding a gap).
+    const firstTop = async (tab) => {
+      await page.goto(`${URL}#/${tab}`);
+      await page.waitForSelector(tab === 'history' ? '.log-row' : 'main > .top-head');
+      await page.waitForTimeout(300);
+      return page.evaluate(() => {
+        const head = document.querySelector('main > .top-head');
+        let el = head.nextElementSibling;
+        while (el && el.getBoundingClientRect().height === 0) el = el.nextElementSibling;
+        return Math.round(el.getBoundingClientRect().top - head.getBoundingClientRect().bottom);
+      });
+    };
+    const gaps = {};
+    for (const t of ['today', 'history', 'trends', 'exercises', 'settings']) gaps[t] = await firstTop(t);
+    check('content starts the same distance under the header on every tab, History included', Object.values(gaps).every((g) => g === gaps.today), JSON.stringify(gaps));
+  }
   check('all top-level headers are the same height', Object.values(screens).every((x) => Math.abs(x.bottom - today.bottom) < 0.5), JSON.stringify([today.bottom, ...Object.values(screens).map((x) => x.bottom)]));
   {
     await page.click('.tab:has-text("Exercises")');
@@ -1969,15 +1988,15 @@ console.log('Fixed page headers (#175)');
   check('Settings shows the version under its title', /^Version /.test(screens.settings.sub), screens.settings.sub);
   {
     await page.click('.tab:has-text("History")');
-    await page.waitForSelector('.log-row');
+    await page.waitForSelector('a.log-row[href^="#/history/"]');
     const all = (await page.evaluate(async () => (await (await fetch('api.php?a=history&limit=100')).json()).workouts)).map((w) => w.started_at);
     const cutoff = Date.now() - 56 * 86400000;
     const recent = all.filter((d) => new Date(d).getTime() >= cutoff).length;
-    const before = await page.locator('.log-row').count();
+    const before = await page.locator('a.log-row[href^="#/history/"]').count();
     check('History opens on the last 8 weeks only, with Show older at the bottom', all.length > recent && before === recent && await page.locator('button:has-text("Show older workouts")').isVisible(), JSON.stringify({ all: all.length, recent, before }));
     await page.click('button:has-text("Show older workouts")');
-    await page.waitForFunction((n) => document.querySelectorAll('.log-row').length > n, before);
-    check('Show older adds the workouts from before the 8 weeks', (await page.locator('.log-row').count()) === all.length && !(await page.locator('button:has-text("Show older workouts")').isVisible()));
+    await page.waitForFunction((n) => document.querySelectorAll('a.log-row[href^="#/history/"]').length > n, before);
+    check('Show older adds the workouts from before the 8 weeks', (await page.locator('a.log-row[href^="#/history/"]').count()) === all.length && !(await page.locator('button:has-text("Show older workouts")').isVisible()));
   }
   check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
   check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
