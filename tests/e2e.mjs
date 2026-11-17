@@ -2086,6 +2086,12 @@ console.log('Sign out and clear local data');
   const keys = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tf.')).sort());
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('button:has-text("Sign out and clear this device")');
+  {
+    const look = (t) => page.$eval(`.settings-main button:text-is("${t}")`, (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.color]; });
+    const clear = await look('Sign out and clear this device');
+    const plain = await look('Sign out');
+    check('"Sign out and clear this device" has the red outline; plain Sign out keeps the standard one (#195)', clear[0] === 'rgb(255, 107, 94)' && clear[1] === 'rgb(255, 107, 94)' && plain[0] !== clear[0], JSON.stringify({ clear, plain }));
+  }
   await page.click('button:has-text("Sign out and clear this device")');
   await page.waitForSelector('.sheet');
   check('with everything synced, it asks plainly and says synced workouts stay on the server', /Sign out and clear this device\?/.test(await page.textContent('.sheet h2')) && /stays on the server/.test(await page.textContent('.sheet')));
