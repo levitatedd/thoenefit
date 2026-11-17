@@ -1620,6 +1620,23 @@ check('the three new goals are valid goals', isset(Generator::GOALS['starter'], 
 $sp = $lifts($gen->generate($su, $sg, ['day_type' => 'push', 'minutes' => 60]));
 check('Get started: at most 2 sets per lift and 6-8 reps on main lifts', $sp && max(array_column($sp, 'target_sets')) <= 2 && in_array([6, 8], array_map(static fn($b) => [$b['rep_min'], $b['rep_max']], $sp), true), json_encode(array_map(static fn($b) => [$b['name'], $b['target_sets'], $b['rep_min'], $b['rep_max']], $sp)));
 check('Get started: only machines, cables, dumbbells, bodyweight or bands', array_filter($sp, static fn($b) => !in_array($b['kind'], Generator::STARTER_KINDS, true)) === [], json_encode(array_column($sp, 'kind')));
+$beginner = function (array $p) use ($slugOf, $lifts) {
+    $bad = [];
+    foreach ($lifts($p) as $b) {
+        $slug = $slugOf($b['exercise_id']);
+        if (!in_array($slug, array_merge(...array_values(Generator::STARTER_LIFTS)), true)) {
+            $bad[] = $slug;
+        }
+    }
+    return $bad;
+};
+$starterPlans = array_map(fn($d) => $gen->generate($su, $sg, ['day_type' => $d, 'minutes' => 60]), ['push', 'pull', 'legs', 'upper', 'lower', 'full']);
+$badLifts = array_merge(...array_map($beginner, $starterPlans));
+check('Get started: every lift on every workout type is on the beginner list (no pull-ups, hanging leg raises, lunges, deadlifts)', $badLifts === [], json_encode($badLifts));
+check('Get started: at most 5 lifts in a session', max(array_map(fn($p) => count($lifts($p)), $starterPlans)) <= Generator::STARTER_MAX_LIFTS, json_encode(array_map(fn($p) => count($lifts($p)), $starterPlans)));
+check('Get started: the easiest option leads, e.g. the machine chest press on Push and the lat pulldown on Pull', $slugOf($lifts($starterPlans[0])[0]['exercise_id']) === 'machine-chest-press' && $slugOf($lifts($starterPlans[1])[0]['exercise_id']) === 'lat-pulldown');
+$bwStarter = $gen->generate($su, $sg, ['day_type' => 'legs', 'minutes' => 45, 'bodyweight_only' => true]);
+check('Get started with bodyweight only still sticks to beginner moves', $beginner($bwStarter) === [] && count($lifts($bwStarter)) > 0, json_encode(array_column($lifts($bwStarter), 'name')));
 [$wu, $wg] = $goalUser('goal-weight', 'weight_loss');
 $wp = $lifts($gen->generate($wu, $wg, ['day_type' => 'legs', 'minutes' => 60]));
 check('Reduce bodyweight: 12+ reps and short rests', $wp && min(array_column($wp, 'rep_min')) >= 12 && max(array_column($wp, 'rest_seconds')) <= 45, json_encode(array_map(static fn($b) => [$b['rep_min'], $b['rest_seconds']], $wp)));
@@ -1717,7 +1734,7 @@ check('Powerlifting keeps the bench press on Varied', $slugOf($bySlot($gen2($plU
 $stU = $varUser('var-starter', 'mixed', 'starter');
 $doPlan($stU, $gen2($stU, 'push'), 6);
 $stPlan = array_filter($gen2($stU, 'push')['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true));
-check('Get Started rotates only within manageable lifts', array_filter($stPlan, static fn($b) => !in_array($b['kind'], Generator::STARTER_KINDS, true)) === []);
+check('Get Started stays on its beginner lifts whatever the Variety setting', array_filter($stPlan, static fn($b) => !in_array($slugOf($b['exercise_id']), array_merge(...array_values(Generator::STARTER_LIFTS)), true)) === []);
 // Regenerate walks down the list: keep rejecting the flat press.
 $regU = $varUser('var-regen', 'mixed');
 $seen = [];

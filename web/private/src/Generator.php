@@ -142,8 +142,50 @@ final class Generator
     /** Get started (#192): at most this many working sets per lift. */
     public const STARTER_MAX_SETS = 2;
 
-    /** Get started (#192): equipment kinds that are manageable without coaching. Barbells and kettlebells wait. */
+    /** Get started (#192): equipment kinds of the beginner lifts below. Barbells and kettlebells wait. */
     public const STARTER_KINDS = ['machine', 'cable', 'dumbbell', 'bodyweight', 'band'];
+
+    /** Get started: at most this many lifts in a session, so a first workout stays short. */
+    public const STARTER_MAX_LIFTS = 5;
+
+    /**
+     * Get started: the lifts a new lifter can learn on their own, per movement,
+     * easiest first (mostly machines, which guide the movement). Anything not
+     * listed (pull-ups, hanging leg raises, lunges, one-arm rows, deadlifts...)
+     * waits until another goal is chosen. A slot with none of these is left out.
+     */
+    public const STARTER_LIFTS = [
+        'horizontal_push' => ['machine-chest-press', 'dumbbell-bench-press'],
+        'incline_push' => ['incline-dumbbell-press'],
+        'chest_fly' => ['pec-deck', 'cable-fly', 'dumbbell-fly'],
+        'vertical_push' => ['machine-shoulder-press', 'seated-dumbbell-press'],
+        'lateral_raise' => ['dumbbell-lateral-raise', 'cable-lateral-raise', 'band-lateral-raise'],
+        'triceps' => ['cable-pushdown', 'machine-triceps-extension', 'band-pushdown'],
+        'vertical_pull' => ['lat-pulldown', 'assisted-pull-up', 'band-pulldown'],
+        'horizontal_pull' => ['seated-cable-row', 'machine-row', 'chest-supported-row', 'band-row'],
+        'biceps' => ['dumbbell-curl', 'cable-curl', 'machine-biceps-curl', 'band-curl'],
+        'rear_delt' => ['reverse-pec-deck', 'face-pull', 'band-pull-apart'],
+        'squat' => ['leg-press', 'goblet-squat', 'bodyweight-squat'],
+        'hinge' => ['back-extension', 'cable-pull-through'],
+        'lunge' => ['bodyweight-step-up', 'dumbbell-step-up'],
+        'hip_thrust' => ['glute-bridge', 'dumbbell-hip-thrust'],
+        'knee_flexion' => ['leg-curl', 'lying-leg-curl'],
+        'knee_extension' => ['leg-extension'],
+        'calf' => ['machine-calf-raise', 'standing-bodyweight-calf-raise', 'dumbbell-calf-raise'],
+        'core' => ['dead-bug', 'crunch', 'ab-crunch-machine'],
+    ];
+
+    /** Get started: the beginner lifts for a slot, in order of preference across its movements. */
+    public static function starterPrefs(array $patterns): array
+    {
+        $out = [];
+        foreach ($patterns as $p) {
+            foreach (self::STARTER_LIFTS[$p] ?? [] as $slug) {
+                $out[] = $slug;
+            }
+        }
+        return array_values(array_unique($out));
+    }
 
     /**
      * Powerlifting (#192): the competition lift for a slot's movement, then
@@ -158,10 +200,10 @@ final class Generator
     ];
     public const POWER_LEGS_HINGE = ['romanian-deadlift', 'deadlift', 'dumbbell-rdl', 'kettlebell-suitcase-deadlift'];
 
-    /** Whether a lift suits Get started (#192). */
+    /** Whether a lift suits Get started (#192): it is on the beginner list for its movement. */
     public static function starterFriendly(array $ex): bool
     {
-        return in_array($ex['kind'], self::STARTER_KINDS, true);
+        return in_array($ex['slug'] ?? '', self::STARTER_LIFTS[$ex['pattern']] ?? [], true);
     }
 
     /** Powerlifting's preferred lifts for a slot (#192), most preferred first, or [] if none. */
@@ -959,7 +1001,9 @@ final class Generator
             } else {
                 $cands = [];
                 // Powerlifting (#192): the competition lift for this slot comes first, whatever else applies.
-                $power = $goalKey === 'powerlifting' && $template === null ? array_flip(self::powerPrefs($dayType, $patterns)) : [];
+                // Get started: the easiest beginner lift comes first in the same way, and nothing else is offered.
+                $power = $goalKey === 'powerlifting' && $template === null ? array_flip(self::powerPrefs($dayType, $patterns))
+                    : ($goalKey === 'starter' ? array_flip(self::starterPrefs($patterns)) : []);
                 // Variety (#211): steady slots repeat recent lifts so progression continues; rotating
                 // slots prefer the qualifying lift done least recently (never done first).
                 $rotate = $variety !== 'steady' && !isset($anchors[$key]);
@@ -985,10 +1029,10 @@ final class Generator
                 }
                 $cands = array_map(static fn($c) => $rank($c[0], $c[1], $rotate), $cands);
                 if ($goalKey === 'starter') {
-                    // Get started (#192): manageable lifts only, unless the slot has none.
-                    $easy = array_values(array_filter($cands, static fn($c) => self::starterFriendly($c[7])));
-                    if ($easy) {
-                        $cands = $easy;
+                    // Get started: beginner lifts only. A slot without one is left out rather than filled with something hard.
+                    $cands = array_values(array_filter($cands, static fn($c) => self::starterFriendly($c[7])));
+                    if (!$cands) {
+                        continue;
                     }
                 }
                 if ($cands) {
@@ -1005,10 +1049,10 @@ final class Generator
                         }
                     }
                     if ($power && isset($power[$pick['slug'] ?? ''])) {
-                        $how = 'power';
+                        $how = $goalKey === 'starter' ? 'starter' : 'power';
                     }
-                    if ($how === 'power') {
-                        // keeps its powerlifting reason
+                    if ($how === 'power' || $how === 'starter') {
+                        // keeps its goal's reason
                     } elseif ($avoid && isset($avoid[$pick['id']])) {
                         $how = 'cycled';
                     } elseif ($avoid) {
@@ -1038,6 +1082,9 @@ final class Generator
                 $effortChanged = true;
             }
             $block['minutes'] = round(($block['target_sets'] * (45 + $block['rest_seconds']) + 90) / 60, 1);
+            if ($goalKey === 'starter' && $how !== 'locked' && count($blocks) - ($warm ? 1 : 0) >= self::STARTER_MAX_LIFTS) {
+                continue; // Get started: a short first workout
+            }
             if (count($blocks) - ($warm ? 1 : 0) >= 3 && $total + $block['minutes'] > $minutes) {
                 if ($how === 'locked') {
                     // Locked exercises always stay, even if they run the session long.
@@ -1049,6 +1096,8 @@ final class Generator
             $mLabel = Catalog::MUSCLES[$muscle];
             if ($how === 'locked') {
                 $why = 'You locked this in.';
+            } elseif ($how === 'starter') {
+                $why = 'An easy lift to learn on your own, for getting started.';
             } elseif ($how === 'power') {
                 $why = $pick['slug'] === self::powerPrefs($dayType, $patterns)[0]
                     ? 'A competition lift for powerlifting.'
