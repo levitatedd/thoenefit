@@ -508,7 +508,37 @@ await shot('10a-search');
 await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');
-check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) === 2);
+check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) >= 2);
+// #162: estimated 1-rep max per session, from the best working set of 10 reps or fewer.
+{
+  const exId = Number((await page.evaluate(() => location.hash)).split('/').pop());
+  const expected = await page.evaluate(async (id) => {
+    const { bestEstimate, estimateLabel } = await import('./js/strength.js');
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${id}`)).json();
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.id === id);
+    return sessions.map((s) => { const e = bestEstimate(s.sets, ex); return e && `${estimateLabel(e, s.unit, s.unit)} from`; }).filter(Boolean);
+  }, exId);
+  const shareFrom = await page.evaluate(async (id) => {
+    const { bestEstimate, estimateLabel } = await import('./js/strength.js');
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${id}`)).json();
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.id === id);
+    const s = [...sessions].reverse().find((x) => bestEstimate(x.sets, ex));
+    return s && { workout: s.workout_id, label: estimateLabel(bestEstimate(s.sets, ex), s.unit) };
+  }, exId);
+  const shown = await page.$$eval('.log-est', (els) => els.map((e) => e.textContent));
+  if (shareFrom) {
+    const back = await page.evaluate(() => location.hash);
+    await page.goto(`${URL}#/history/${shareFrom.workout}`);
+    await page.click('button:has-text("Share workout")');
+    await page.waitForSelector('.sheet canvas.share-card');
+    const label = await page.getAttribute('.sheet canvas.share-card', 'aria-label');
+    check(`the share card shows the estimate next to the lift (${shareFrom.label})`, label.includes(`${liftName}, `) && label.includes(shareFrom.label), label);
+    await page.click('.sheet button:has-text("Close")');
+    await page.goto(`${URL}${back}`);
+    await page.waitForSelector('.chart');
+  }
+  check('exercise history shows an estimated 1-rep max chart and the estimate on each eligible session, with its source set', expected.length > 0 && (await page.locator('h3:has-text("Estimated 1-rep max")').count()) === 1 && shown.length === expected.length && shown.every((t) => /^Est\. 1RM · \d+ (lb|kg) from [\d.]+ (lb|kg) × \d+$/.test(t)) && [...expected].reverse().every((p, i) => shown[i].startsWith(p)), JSON.stringify({ expected, shown }));
+}
 // #11: tap a point for its details, open that workout, and filter by date range.
 {
   const exHash = await page.evaluate(() => location.hash);
@@ -833,7 +863,7 @@ await partner.close();
 await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 await shot('11-settings');
-check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
+check('Settings shows the app version under its title, and no longer at the bottom', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.top-head a.app-version')) && !/Version /.test(await page.textContent('.page > :last-child')), await page.textContent('.top-head a.app-version'));
 // #103: one heading colour, Training and Gyms first, the rest behind links.
 {
   const heads = await page.$$eval('.settings-main .top-head h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
@@ -852,7 +882,8 @@ check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging
 }
 
 console.log("What's new");
-await page.click('.app-version a');
+check('the version under the Settings title is plain text, not underlined', (await page.$eval('.top-head a.app-version', (a) => getComputedStyle(a).textDecorationLine)) === 'none' && (await page.locator('.settings-main > .app-version, .settings-main p.app-version').count()) === 0);
+await page.click('.top-head a.app-version');
 await page.waitForSelector('h1:has-text("What\'s new")');
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
@@ -1205,7 +1236,7 @@ console.log("Seeing each other's history");
   await vp.reload();
   await vp.waitForSelector('.tabs');
   await vp.waitForTimeout(400);
-  check('history starts private: nobody else is listed on History', (await vp.locator('.people-card').count()) === 0);
+  check('history starts private: nobody else is listed on History', (await vp.locator('.people-pick').count()) === 0);
   check('a private history cannot be fetched by another account', (await viewerGet(`member_history&user=${myId}`)) === 404);
 
   await page.goto(`${URL}#/settings`);
@@ -1218,10 +1249,11 @@ console.log("Seeing each other's history");
 
   await vp.goto(`${URL}#/today`);
   await vp.goto(`${URL}#/history`);
-  await vp.waitForSelector('.people-card');
-  check('once shared, the other person sees them under Other people on History', (await vp.textContent('.people-card')).includes(myName));
+  await vp.waitForSelector('.people-pick');
+  const pick = await vp.$eval('.people-pick', (s) => [...s.options].map((o) => o.textContent));
+  check('once shared, History offers a "View other trainer\'s history" dropdown with them in it', pick[0] === "View other trainer's history" && pick.includes(myName), pick.join(' | '));
   if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18-history-other-people.png` });
-  await vp.click('.people-card .log-row');
+  await vp.selectOption('.people-pick', { label: myName });
   await vp.waitForFunction(() => /'s workouts/.test(document.querySelector('h1')?.textContent || '') && document.querySelectorAll('.log-row').length > 0);
   if (SHOTS) await vp.screenshot({ path: `${SHOTS}/18b-history-their-list.png` });
   check("their list opens with the person's name and their workouts", (await vp.textContent('h1')).includes(`${myName}'s workouts`) && (await vp.locator('.log-row').count()) > 0);
@@ -1536,6 +1568,30 @@ console.log('Workout recap and records (#123)');
   await row.locator('input').nth(1).fill('30');
   await row.locator('.plate').click();
   await page.waitForTimeout(300);
+  // Difficulty (#170): only once every set of the exercise is checked off.
+  const diff = card.locator('button.difficulty');
+  check('Difficulty? stays hidden while the exercise has unchecked sets', (await card.locator('.set:not(.done)').count()) > 0 && (await diff.count()) === 0);
+  while ((await card.locator('.set:not(.done)').count()) > 0) {
+    await card.locator('button:has-text("Remove set")').click();
+    await page.waitForTimeout(150);
+  }
+  await diff.waitFor();
+  check('with every set checked off, Difficulty? appears in the action row', (await diff.textContent()) === 'Difficulty?' && (await card.locator('.set-actions button.difficulty').count()) === 1);
+  await diff.click();
+  await page.waitForSelector('.sheet .choices');
+  check('it asks how many more reps a typical working set had, with 0, 1, 2, 3 and 4+, without explaining the rules', /how many more reps could you have done with good form/.test(await page.textContent('.sheet')) && !/usual progression/.test(await page.textContent('.sheet')) && (await page.$$eval('.sheet .choice-label', (els) => els.map((e) => e.textContent).join())) === '0,1,2,3,4+');
+  await page.locator('.sheet .choice', { hasText: '4+' }).click();
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === 'Difficulty: 4+');
+  await diff.click();
+  await page.waitForSelector('.sheet .choices');
+  await page.locator('.sheet .choice[data-value="0"]').click();
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === 'Difficulty: 0');
+  const rated = await page.evaluate((id) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('tf.docs.'));
+    const st = JSON.parse(localStorage.getItem(key));
+    return st.docs.find((d) => d.id === st.activeId).exercises.find((e) => e.id === id).reps_left;
+  }, lift.id);
+  check('the rating can be changed, shows on the card and is saved on the workout on the phone', rated === 0 && /rated/.test(await diff.getAttribute('class')));
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
   await page.click('.sheet button:has-text("Finish and save")');
@@ -1548,6 +1604,8 @@ console.log('Workout recap and records (#123)');
   await page.waitForFunction((n) => document.querySelector('h1')?.textContent === n, lift.name);
   check('the record links to that exercise\'s history', /#\/exercises\/\d+/.test(await page.evaluate(() => location.hash)) && (await page.locator('.sheet').count()) === 0);
   const hist = (await api('history&limit=1')).workouts[0];
+  const saved = (await api(`workout&id=${hist.id}`)).workout;
+  check('the rating reached the server with the finished workout', saved.exercises.find((e) => e.exercise_id === lift.exercise_id)?.reps_left === 0, JSON.stringify(saved.exercises.map((e) => e.reps_left)));
   await page.goto(`${URL}#/history/${hist.id}`);
   await page.waitForSelector('.recap');
   check('the finished workout in History shows the same recap', (await page.locator('.recap .recap-record', { hasText: lift.name }).count()) === 1);
@@ -1559,6 +1617,7 @@ console.log('Workout recap and records (#123)');
   const shareCard = await page.$eval('.sheet canvas.share-card', (cv) => ({ w: cv.width, h: cv.height, data: cv.toDataURL('image/png') }));
   const save = await page.$eval('.sheet a:has-text("Save image")', (a) => [a.getAttribute('download'), a.getAttribute('href').slice(0, 22)]);
   check('Share workout draws a phone-width PNG of the workout', shareCard.w === 1080 && shareCard.h > 900 && shareCard.data.startsWith('data:image/png'), `${shareCard.w}x${shareCard.h}`);
+  check('a lift logged only above 10 reps gets no estimate on the share card', !(await page.getAttribute('.sheet canvas.share-card', 'aria-label')).includes('Est. 1RM'));
   check('Save image downloads it as a PNG', /^thoenefit-\d{4}-\d\d-\d\d\.png$/.test(save[0]) && save[1] === 'data:image/png;base64,', save.join());
   if (SHOTS) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${SHOTS}/45-share-card.png`, Buffer.from(shareCard.data.split(',')[1], 'base64')); }
   await page.click('.sheet button:has-text("Close")');
@@ -1790,6 +1849,58 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   check('no sideways scrolling', (await overflow()) <= 0);
 }
 
+console.log('Stalled lifts (#124)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.click('button:has-text("Add exercise")');
+  await page.waitForSelector('.sheet .pick');
+  // A barbell lift this gym has, not already planned, and never done before.
+  const done = await page.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const { counts } = await (await fetch('api.php?a=exercise_counts')).json();
+    return b.exercises.filter((x) => counts[x.id]).map((x) => x.name);
+  });
+  const name = (await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent))).find((n) => /^Barbell /.test(n) && !done.includes(n));
+  await page.click('.sheet button:has-text("Close")');
+  const ids = await page.evaluate(async (n) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const ex = b.exercises.find((x) => x.name === n);
+    const out = [];
+    for (const days of [5, 4, 3]) {
+      const id = crypto.randomUUID();
+      const at = new Date(Date.now() - days * 86400000).toISOString();
+      const sets = [8, 7, 6].map((r) => ({ id: crypto.randomUUID(), weight: 100, reps: r, warmup: false, done: true, done_at: at }));
+      await fetch('api.php?a=save_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, gym_id: b.user.active_gym_id, day_type: 'custom', status: 'completed', unit: 'lb', started_at: at, completed_at: at, rev: 1, exercises: [{ id: crypto.randomUUID(), exercise_id: ex.id, rep_min: 6, rep_max: 10, target_sets: 3, sets }] } }) });
+      out.push(id);
+    }
+    return out;
+  }, name);
+  await page.click('button:has-text("Add exercise")');
+  await page.fill('.sheet input[type=search]', name);
+  await page.waitForTimeout(200);
+  await page.locator('.sheet .pick', { hasText: name }).first().click();
+  const row = page.locator('.plan-row', { has: page.locator('h3', { hasText: name }) });
+  await row.locator('.stall').waitFor();
+  const box = await row.locator('.stall').textContent();
+  check('a lift stuck at the same weight for 3 sessions offers repeat, lighter, swap or keep', /Stalled\. 100 lb for 3 sessions without more reps/.test(box) && /Repeat 100 × \d+/.test(box) && /Lower to 9\d × \d+/.test(box) && /Swap/.test(box) && /Keep suggestion/.test(box), box);
+  const usual = await row.locator('.target').textContent();
+  await row.locator('.stall button:has-text("Lower to")').click();
+  const lowered = await row.locator('.target').textContent();
+  check('choosing Lower changes today\'s target and says why', /at 9\d lb/.test(lowered) && /lighter day/.test(await row.locator('.why').textContent()) && (await row.locator('.stall').count()) === 0, lowered);
+  await row.locator('.stall-change').click();
+  check('Change brings back the choices and the usual suggestion', (await row.locator('.stall').count()) === 1 && (await row.locator('.target').textContent()) === usual);
+  await row.locator('.stall button:has-text("Keep suggestion")').click();
+  check('Keep suggestion leaves the usual target and closes the prompt', (await row.locator('.target').textContent()) === usual && (await row.locator('.stall').count()) === 0 && /keeping the usual suggestion/.test(await row.locator('.stall-chosen').textContent()));
+  await shot('48-stall');
+  await row.locator('button[aria-label^="Remove"]').click();
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, ids);
+}
+
 console.log('Fixed page headers (#175)');
 {
   await page.setViewportSize({ width: 402, height: 874 });
@@ -1798,30 +1909,95 @@ console.log('Fixed page headers (#175)');
     if (!head) return null;
     const h1 = head.querySelector('h1');
     const hs = getComputedStyle(h1);
-    const next = head.nextElementSibling;
+    let next = head.nextElementSibling;
+    while (next && next.getBoundingClientRect().height === 0) next = next.nextElementSibling;
     return {
       position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), bottom: head.getBoundingClientRect().bottom,
       bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
       font: `${hs.fontSize} ${hs.fontWeight} ${hs.fontFamily}`, color: hs.color, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top),
       nextTop: next ? next.getBoundingClientRect().top : Infinity,
-      logo: !!head.querySelector('.top-head-row > img.brand-wide'), sub: head.querySelector('p.muted')?.textContent || '',
+      logo: !!head.querySelector('.top-head-row > img.brand-wide'), logoTop: head.querySelector('.top-head-row > img.brand-wide')?.getBoundingClientRect().top, sub: head.querySelector('p.muted')?.textContent || '',
     };
   });
   await page.goto(`${URL}#/today`);
   await page.waitForSelector('.top-head');
   await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(300); // let the header shadow finish fading out
   const today = await look();
   const screens = {};
   for (const tab of ['history', 'trends', 'exercises', 'settings']) {
     await page.goto(`${URL}#/${tab}`);
     await page.waitForSelector('main > .top-head');
     await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
     screens[tab] = await look();
   }
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
   check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
   check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
-  check('Trends says just "Last 8 weeks" under its title', screens.trends.sub === 'Last 8 weeks', screens.trends.sub);
+  {
+    // The first thing under each header starts the same distance below it (History had an empty slot adding a gap).
+    const firstTop = async (tab) => {
+      await page.goto(`${URL}#/${tab}`);
+      await page.waitForSelector(tab === 'history' ? '.log-row' : 'main > .top-head');
+      await page.waitForTimeout(300);
+      return page.evaluate(() => {
+        const head = document.querySelector('main > .top-head');
+        let el = head.nextElementSibling;
+        while (el && el.getBoundingClientRect().height === 0) el = el.nextElementSibling;
+        return Math.round(el.getBoundingClientRect().top - head.getBoundingClientRect().bottom);
+      });
+    };
+    const gaps = {};
+    for (const t of ['today', 'history', 'trends', 'exercises', 'settings']) gaps[t] = await firstTop(t);
+    check('content starts the same distance under the header on every tab, History included', Object.values(gaps).every((g) => g === gaps.today), JSON.stringify(gaps));
+  }
+  check('all top-level headers are the same height', Object.values(screens).every((x) => Math.abs(x.bottom - today.bottom) < 0.5), JSON.stringify([today.bottom, ...Object.values(screens).map((x) => x.bottom)]));
+  {
+    await page.click('.tab:has-text("Exercises")');
+    await page.waitForSelector('[data-list=matches] .log-row');
+    const read = async () => [await page.textContent('main > .top-head .ex-count'), await page.locator('[data-list=matches] .log-row').count()];
+    await page.fill('input[aria-label="Search exercises"]', '');
+    await page.selectOption('select[aria-label="Muscle"]', '');
+    await page.waitForTimeout(150);
+    const [all, allRows] = await read();
+    await page.selectOption('select[aria-label="Muscle"]', 'biceps');
+    await page.waitForTimeout(150);
+    const [bi, biRows] = await read();
+    await page.fill('input[aria-label="Search exercises"]', 'curl');
+    await page.waitForTimeout(150);
+    const [cu, cuRows] = await read();
+    check('Exercises shows how many exercises are listed under its title, and it follows the filter and search', all === `${allRows} exercises` && bi === `${biRows} exercises` && cu === `${cuRows} exercise${cuRows === 1 ? '' : 's'}` && allRows > biRows && biRows >= cuRows, JSON.stringify([all, allRows, bi, biRows, cu, cuRows]));
+    await page.fill('input[aria-label="Search exercises"]', '');
+    await page.selectOption('select[aria-label="Muscle"]', '');
+  }
+  check('the logo sits in exactly the same spot on every tab, with or without a line under the title', Object.values(screens).every((x) => Math.abs(x.logoTop - today.logoTop) < 0.5), JSON.stringify([today.logoTop, ...Object.values(screens).map((x) => x.logoTop)]));
+  {
+    await page.click('.tab:has-text("History")');
+    await page.waitForFunction(() => document.querySelector('main > .top-head h1')?.textContent === 'History');
+    await page.evaluate(() => { window.__head = document.querySelector('main > .top-head'); window.__logo = window.__head.querySelector('img.brand-wide'); });
+    const kept = [];
+    for (const t of ['Trends', 'Exercises', 'Settings']) {
+      await page.click(`.tab:has-text("${t}")`);
+      await page.waitForFunction((x) => document.querySelector('main > .top-head h1')?.textContent === x, t);
+      kept.push(await page.evaluate(() => document.querySelector('main > .top-head') === window.__head && document.querySelector('main > .top-head img.brand-wide') === window.__logo));
+    }
+    check('switching tabs keeps the same header and logo on screen and only changes the title, so nothing blinks', kept.every(Boolean), kept.join());
+  }
+  check('Trends and History say "Last 8 weeks." under their titles', screens.trends.sub === 'Last 8 weeks.' && screens.history.sub === 'Last 8 weeks.', JSON.stringify([screens.trends.sub, screens.history.sub]));
+  check('Settings shows the version under its title', /^Version /.test(screens.settings.sub), screens.settings.sub);
+  {
+    await page.click('.tab:has-text("History")');
+    await page.waitForSelector('a.log-row[href^="#/history/"]');
+    const all = (await page.evaluate(async () => (await (await fetch('api.php?a=history&limit=100')).json()).workouts)).map((w) => w.started_at);
+    const cutoff = Date.now() - 56 * 86400000;
+    const recent = all.filter((d) => new Date(d).getTime() >= cutoff).length;
+    const before = await page.locator('a.log-row[href^="#/history/"]').count();
+    check('History opens on the last 8 weeks only, with Show older at the bottom', all.length > recent && before === recent && await page.locator('button:has-text("Show older workouts")').isVisible(), JSON.stringify({ all: all.length, recent, before }));
+    await page.click('button:has-text("Show older workouts")');
+    await page.waitForFunction((n) => document.querySelectorAll('a.log-row[href^="#/history/"]').length > n, before);
+    check('Show older adds the workouts from before the 8 weeks', (await page.locator('a.log-row[href^="#/history/"]').count()) === all.length && !(await page.locator('button:has-text("Show older workouts")').isVisible()));
+  }
   check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
   check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
   for (const tab of ['exercises', 'settings']) {

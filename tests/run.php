@@ -1502,6 +1502,69 @@ check('an exercise with no logged sets, or only in an unfinished workout, is not
 check('a new lifter has no counts, so Add exercise stays alphabetical', $wk->exerciseCounts($auth->createUser('newbie', 'newbie long password')) === []);
 check('other lifters\' workouts are not counted', ($wk->exerciseCounts($uid)[$bench] ?? 0) === count($wk->exerciseHistory($uid, $bench)), json_encode([$wk->exerciseCounts($uid)[$bench] ?? 0, count($wk->exerciseHistory($uid, $bench))]));
 
+echo "Difficulty ratings (#170)\n";
+$lastAt = fn(array $reps, ?int $left, float $w = 135) => ['unit' => 'lb', 'sets' => array_map(static fn($r) => ['weight' => $w, 'reps' => $r], $reps), 'reps_left' => $left];
+$top0 = Generator::progress($lastAt([10, 10, 10], 0), 6, 10, 5, 'lb');
+$top4 = Generator::progress($lastAt([10, 10, 10], 4), 6, 10, 5, 'lb');
+$topN = Generator::progress($lastAt([10, 10, 10], null), 6, 10, 5, 'lb');
+$top2 = Generator::progress($lastAt([10, 10, 10], 2), 6, 10, 5, 'lb');
+check('the same completed target leads to different suggestions for 4+ and 0 reps left', $top4['weight'] === 140.0 && $top4['action'] === 'increase' && $top0['weight'] === 135.0 && $top0['reps'] === 10 && $top0['action'] === 'stay', json_encode([$top4, $top0]));
+check('no rating, or a rating of 2, keeps the usual progression', $topN['weight'] === $top2['weight'] && $topN['reps'] === $top2['reps'] && $topN['action'] === 'increase');
+$mid3 = Generator::progress($lastAt([8, 8, 7], 3), 6, 10, 5, 'lb');
+$mid1 = Generator::progress($lastAt([8, 8, 7], 1), 6, 10, 5, 'lb');
+$midN = Generator::progress($lastAt([8, 8, 7], null), 6, 10, 5, 'lb');
+check('short of the target, 3+ reps left aims two reps higher, 0-1 repeats, unrated adds one', $mid3['reps'] === 9 && $mid1['reps'] === 7 && $midN['reps'] === 8 && $mid3['weight'] === 135.0 && $mid1['weight'] === 135.0, json_encode([$mid3['reps'], $mid1['reps'], $midN['reps']]));
+$low0 = Generator::progress($lastAt([6, 5, 4], 0), 6, 10, 5, 'lb');
+$lowN = Generator::progress($lastAt([6, 5, 4], null), 6, 10, 5, 'lb');
+check('the load comes down only when it felt maxed out and the logged reps fell below the range', $low0['weight'] === 130.0 && $low0['action'] === 'decrease' && $lowN['weight'] === 135.0, json_encode([$low0, $lowN]));
+check('the reason mentions how it felt', strpos($top0['why'], 'only 0 reps left') !== false && strpos($mid3['why'], '3 reps left') !== false && strpos($top4['why'], '4 or more reps left') !== false, $top0['why']);
+check('only 0-4 are kept as ratings', Workouts::repsLeft(0) === 0 && Workouts::repsLeft('4') === 4 && Workouts::repsLeft(5) === null && Workouts::repsLeft(-1) === null && Workouts::repsLeft(2.5) === null && Workouts::repsLeft(null) === null);
+$ru = $auth->createUser('rater', 'rater long password');
+$rg = $mkGym($ru, 'Rate gym', Catalog::equipmentKeys());
+$rd = $doc($rg, 'push', [[$bench, 6, 10, [[135, 10], [135, 10], [135, 10]]]], $ago(2));
+$rd['exercises'][0]['reps_left'] = 0;
+$wk->save($ru, $rd);
+check('a rating saved with a finished workout comes back with it', $wk->get($ru, $rd['id'])['exercises'][0]['reps_left'] === 0);
+$ruser = $db->one('SELECT * FROM users WHERE id=?', [$ru]);
+$rb = $gen->block($ruser, $rg, $exById[$bench]);
+check('the next suggestion for the same setup uses the latest rating', $rb['suggested_weight'] === $top0['weight'] && $rb['previous']['reps_left'] === 0, json_encode([$rb['suggested_weight'], $rb['reason']]));
+$rd2 = $doc($rg, 'push', [[$bench, 6, 10, [[135, 10], [135, 10], [135, 10]]]], $ago(1));
+$wk->save($ru, $rd2);
+$rb2 = $gen->block($ruser, $rg, $exById[$bench]);
+check('an unrated latest session uses the usual rules, not an older rating', $rb2['previous']['reps_left'] === null && $rb2['suggested_weight'] === 140.0, json_encode([$rb2['suggested_weight'], $rb2['previous']['reps_left'] ?? 'x']));
+
+echo "Stalled lifts (#124)\n";
+$su = $auth->createUser('staller', 'staller long password');
+$sg = $mkGym($su, 'Stall gym', Catalog::equipmentKeys());
+$suser = $db->one('SELECT * FROM users WHERE id=?', [$su]);
+$squatS = $bySlug['back-squat'];
+$stallBlock = fn() => $gen->block($suser, $sg, $exById[$squatS]);
+check('fewer than three sessions is never a stall', $stallBlock()['stall'] === null);
+foreach ([5, 4, 3] as $i => $d) {
+    $wk->save($su, $doc($sg, 'legs', [[$squatS, 6, 10, [[225, 8], [225, 7], [225, 6]]]], $ago($d)));
+}
+$sb = $stallBlock();
+check('three sessions at the same weight with no more reps is a stall, with repeat and lighter options', $sb['stall'] !== null && $sb['stall']['sessions'] === 3 && $sb['stall']['weight'] === 225.0 && $sb['stall']['repeat'] === ['weight' => 225.0, 'reps' => 8] && $sb['stall']['lower']['weight'] < 225.0 && $sb['stall']['lower']['weight'] >= 200.0, json_encode($sb['stall']));
+check('the usual suggestion stays the default alongside the stall', $sb['suggested_weight'] === 225.0 && $sb['action'] === 'stay');
+$wk->save($su, $doc($sg, 'legs', [[$squatS, 6, 10, [[225, 9], [225, 8], [225, 7]]]], $ago(2)));
+check('one more rep at that weight is progress, so the usual planner carries on', $stallBlock()['stall'] === null);
+$pu = $auth->createUser('progressor', 'progressor long password');
+$pg = $mkGym($pu, 'Progress gym', Catalog::equipmentKeys());
+$puser = $db->one('SELECT * FROM users WHERE id=?', [$pu]);
+foreach ([[5, 205], [4, 215], [3, 225]] as [$d, $w]) {
+    $wk->save($pu, $doc($pg, 'legs', [[$squatS, 6, 10, [[$w, 8], [$w, 8]]]], $ago($d)));
+}
+check('adding weight across sessions is not a stall', $gen->block($puser, $pg, $exById[$squatS])['stall'] === null);
+$eu = $auth->createUser('easyrater', 'easyrater long password');
+$eg = $mkGym($eu, 'Easy gym', Catalog::equipmentKeys());
+$euser = $db->one('SELECT * FROM users WHERE id=?', [$eu]);
+foreach ([5, 4, 3] as $d) {
+    $ed = $doc($eg, 'legs', [[$squatS, 6, 10, [[225, 8], [225, 8]]]], $ago($d));
+    $ed['exercises'][0]['reps_left'] = $d === 3 ? 4 : null;
+    $wk->save($eu, $ed);
+}
+check('a "4+ reps left" rating on the latest session means it is not a stall', $gen->block($euser, $eg, $exById[$squatS])['stall'] === null);
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

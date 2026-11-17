@@ -29,6 +29,8 @@ jobs:
         run: node tests/sync.test.mjs
       - name: Exercise search checks
         run: node tests/search.test.mjs
+      - name: Estimated 1-rep max checks
+        run: node tests/strength.test.mjs
       - name: Install reminder checks
         run: node tests/install.test.mjs
       - name: Version number checks

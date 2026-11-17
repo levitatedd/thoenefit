@@ -14,6 +14,7 @@ const SHELL = [
   'js/app.js',
   'js/store.js',
   'js/search.js',
+  'js/strength.js',
   'js/ui.js',
   'js/install.js',
   'js/version.js',

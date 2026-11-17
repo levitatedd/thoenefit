@@ -213,7 +213,7 @@ final class Generator
     public function lastPerformance(int $uid, string $variantKey): ?array
     {
         $cands = $this->db->all(
-            "SELECT we.id, w.started_at, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+            "SELECT we.id, we.reps_left, w.started_at, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
              WHERE we.user_id=? AND we.variant_key=? AND w.status='completed'
              ORDER BY w.started_at DESC LIMIT 5",
             [$uid, $variantKey]
@@ -225,6 +225,8 @@ final class Generator
                     'date' => to_iso($c['started_at']),
                     'unit' => $c['unit'],
                     'sets' => array_map(static fn($s) => ['weight' => (float) $s['weight'], 'reps' => (int) $s['reps']], $sets),
+                    // How it felt (#170): reps left on a typical working set, or null if not rated.
+                    'reps_left' => Workouts::repsLeft($c['reps_left'] ?? null),
                 ];
             }
         }
@@ -251,6 +253,14 @@ final class Generator
      * weight and reached the top of the rep range, go up one increment and
      * restart at the bottom of the range. Otherwise keep the weight and add
      * reps.
+     *
+     * A difficulty rating on that session (#170, reps left on a typical working
+     * set) adjusts it; 2 or no rating keeps the rules above:
+     * - 3 or 4+ left: add load once the target is met (as usual); short of it,
+     *   aim for two more reps instead of one.
+     * - 0 or 1 left: at the top of the range, repeat it before adding load;
+     *   short of it, repeat the reps. Only when a set also fell below the
+     *   bottom of the range does the load come down one increment.
      *
      * @return array{weight: ?float, reps: int, action: string, why: string}
      */
@@ -291,8 +301,20 @@ final class Generator
             $minReps = min($minReps, $s['reps']);
         }
         $range = "$repMin-$repMax";
+        $left = $last['reps_left'] ?? null;
+        $leftText = $left === null ? '' : ($left >= 4 ? '4 or more reps' : ($left === 1 ? '1 rep' : "$left reps"));
+        $easy = $left !== null && $left >= 3;
+        $hard = $left !== null && $left <= 1;
+        // Short of the top: how many reps to aim for, by how it felt.
+        $aim = max($repMin, min($repMax, $minReps + ($easy ? 2 : ($hard ? 0 : 1))));
         if ($top <= 0 || $inc <= 0) {
             // Bodyweight or bands: progress by reps; the app cannot know what "heavier" is here.
+            if (!$allTop && ($easy || $hard)) {
+                return [
+                    'weight' => $top > 0 ? $top : null, 'reps' => $aim, 'action' => 'stay',
+                    'why' => "Last time you got $repsList reps with $leftText left. " . ($easy ? "Aim for $aim reps on every set." : "Repeat $aim reps on every set before adding more."),
+                ];
+            }
             if ($allTop) {
                 return [
                     'weight' => $top > 0 ? $top : null, 'reps' => $repMax, 'action' => 'stay',
@@ -305,17 +327,130 @@ final class Generator
             ];
         }
         $w = self::fmt($top);
+        if ($allTop && $hard) {
+            return [
+                'weight' => $top, 'reps' => $repMax, 'action' => 'stay',
+                'why' => "Last time you got $repsList reps at $w $unit, the top of $range, but with only $leftText left. Repeat $w $unit for $repMax reps before going up.",
+            ];
+        }
+        if (!$allTop && $hard && $minReps < $repMin && $top - $inc > 0) {
+            $lower = $top - $inc;
+            return [
+                'weight' => $lower, 'reps' => $repMin, 'action' => 'decrease',
+                'why' => "Last time you got $repsList reps at $w $unit with $leftText left, below the $range range, so drop to " . self::fmt($lower) . " $unit and build back up.",
+            ];
+        }
+        if (!$allTop && ($easy || $hard)) {
+            return [
+                'weight' => $top, 'reps' => $aim, 'action' => 'stay',
+                'why' => "Last time you got $repsList reps at $w $unit with $leftText left. " . ($easy ? "Stay at $w $unit and aim for $aim reps on every set." : "Stay at $w $unit and repeat $aim reps on every set before adding more."),
+            ];
+        }
         if ($allTop) {
             $next = $top + $inc;
             return [
                 'weight' => $next, 'reps' => $repMin, 'action' => 'increase',
-                'why' => "Last time you got $repsList reps at $w $unit, the top of $range on every set, so go up " . self::fmt($inc) . " $unit to " . self::fmt($next) . " $unit.",
+                'why' => "Last time you got $repsList reps at $w $unit, the top of $range on every set" . ($easy ? " with $leftText left" : '') . ", so go up " . self::fmt($inc) . " $unit to " . self::fmt($next) . " $unit.",
             ];
         }
         return [
             'weight' => $top, 'reps' => max($repMin, min($repMax, $minReps + 1)), 'action' => 'stay',
             'why' => "Last time you got $repsList reps at $w $unit. Stay at $w $unit and build toward $repMax reps on every set.",
         ];
+    }
+
+    /** How many recent sessions of one setup must agree before calling it a stall (#124). */
+    public const STALL_SESSIONS = 3;
+
+    /**
+     * Has this lift stalled (#124)? Looks at the last few finished sessions of
+     * the same setup (same exercise, and same gym for machines and cables): a
+     * stall is the same working weight every time, never reaching the top of
+     * the range, and no more reps at that weight in the newest session than in
+     * the oldest. Progress anywhere in that run, or a recent "3+ reps left"
+     * rating (#170), means it is not stalled. Weighted lifts only.
+     *
+     * @return array|null {sessions, weight, reps, repeat: {weight, reps}, lower: {weight, reps}} in $unit
+     */
+    public function stall(int $uid, string $variantKey, int $repMin, int $repMax, float $inc, string $unit): ?array
+    {
+        if ($inc <= 0) {
+            return null;
+        }
+        $rows = $this->db->all(
+            "SELECT we.id, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+             WHERE we.user_id=? AND we.variant_key=? AND w.status='completed'
+             ORDER BY w.started_at DESC LIMIT 10",
+            [$uid, $variantKey]
+        );
+        $runs = [];
+        foreach ($rows as $r) {
+            $sets = $this->db->all('SELECT weight, reps FROM workout_sets WHERE workout_exercise_id=? AND done=1 AND warmup=0 AND reps>0 ORDER BY pos', [$r['id']]);
+            if (!$sets) {
+                continue;
+            }
+            $conv = array_map(fn($s) => ['weight' => self::convert((float) $s['weight'], $r['unit'], $unit, $inc), 'reps' => (int) $s['reps']], $sets);
+            $runs[] = ['sets' => $conv] + self::workingSummary($conv, $repMax);
+            if (count($runs) === self::STALL_SESSIONS) {
+                break;
+            }
+        }
+        if (count($runs) < self::STALL_SESSIONS) {
+            return null;
+        }
+        $left = $this->db->val('SELECT reps_left FROM workout_exercises WHERE id=?', [$rows[0]['id']]);
+        if ($left !== null && $left !== false && (int) $left >= 3) {
+            return null;
+        }
+        $top = $runs[0]['top'];
+        foreach ($runs as $run) {
+            if ($top <= 0 || abs($run['top'] - $top) > 0.001 || $run['allTop']) {
+                return null;
+            }
+        }
+        $newest = $runs[0]['bestReps'];
+        $oldest = $runs[count($runs) - 1]['bestReps'];
+        if ($newest > $oldest) {
+            return null;
+        }
+        // About 10% lighter, on the gym's increments, and at least one increment down.
+        $lower = min($top - $inc, round($top * 0.9 / $inc) * $inc);
+        return [
+            'sessions' => count($runs),
+            'weight' => $top,
+            'reps' => $newest,
+            'repeat' => ['weight' => $top, 'reps' => max($repMin, min($repMax, $newest))],
+            'lower' => $lower > 0 ? ['weight' => $lower, 'reps' => $repMax] : null,
+        ];
+    }
+
+    /** Working weight (the weight used for most sets, heavier on a tie), best reps at it, and whether every set hit $repMax there. */
+    private static function workingSummary(array $sets, int $repMax): array
+    {
+        $counts = [];
+        foreach ($sets as $s) {
+            $k = self::fmt($s['weight']);
+            $counts[$k] = ($counts[$k] ?? 0) + 1;
+        }
+        $top = 0.0;
+        $best = 0;
+        foreach ($counts as $k => $n) {
+            if ($n > $best || ($n === $best && (float) $k > $top)) {
+                $best = $n;
+                $top = (float) $k;
+            }
+        }
+        $bestReps = 0;
+        $allTop = true;
+        foreach ($sets as $s) {
+            if (abs($s['weight'] - $top) < 0.001) {
+                $bestReps = max($bestReps, $s['reps']);
+            }
+            if ($s['weight'] < $top || $s['reps'] < $repMax) {
+                $allTop = false;
+            }
+        }
+        return ['top' => $top, 'bestReps' => $bestReps, 'allTop' => $allTop];
     }
 
     public static function increment(array $gym, string $kind, string $unit): float
@@ -356,7 +491,10 @@ final class Generator
         $unit = $user['unit'];
         $variant = Catalog::variantKey($ex['id'], $ex['kind'], $gym['id']);
         $last = $this->lastPerformance((int) $user['id'], $variant);
-        $p = self::progress($last, $repMin, $repMax, self::increment($gym, $ex['kind'], $unit), $unit);
+        $inc = self::increment($gym, $ex['kind'], $unit);
+        $p = self::progress($last, $repMin, $repMax, $inc, $unit);
+        // A stalled lift (#124) comes with choices; the usual suggestion stays the default.
+        $stall = $bodyweightOnly ? null : $this->stall((int) $user['id'], $variant, $repMin, $repMax, $inc, $unit);
         if ($bodyweightOnly) {
             $p = [
                 'weight' => null,
@@ -384,6 +522,7 @@ final class Generator
             'action' => $p['action'],
             'reason' => $p['why'],
             'previous' => $last,
+            'stall' => $stall,
             'minutes' => round(($sets * (45 + $rest) + 90) / 60, 1),
         ];
     }

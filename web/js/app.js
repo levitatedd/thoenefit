@@ -1,5 +1,6 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises, byUsage } from './search.js';
+import { bestEstimate, estimateLabel, convertWeight, roundEstimate } from './strength.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -354,6 +355,14 @@ function render() {
   // bottom of the screen (#112).
   const toTop = restoreY === null && !(tab === S.lastTab && !S.backTo);
   if (toTop) window.scrollTo(0, 0);
+  // Keep the header that is already on screen and update it in place (#175), so
+  // switching tabs doesn't rebuild the logo and title and make them blink.
+  const liveHead = root.querySelector(':scope > main > .top-head');
+  const nextHead = view.querySelector(':scope > .top-head');
+  if (liveHead && nextHead) {
+    morph(liveHead, nextHead);
+    nextHead.replaceWith(liveHead);
+  }
   root.replaceChildren(view, restDock(), nav);
   if (tab === 'settings' && ['strava-connected', 'strava-denied', 'strava-error'].includes(arg)) {
     history.replaceState(null, '', '#/settings');
@@ -366,6 +375,7 @@ function render() {
   // back at the spot it was left.
   if (restoreY !== null) window.scrollTo(0, restoreY);
   else window.scrollTo(0, tab === S.lastTab && !S.backTo ? window.scrollY : 0);
+  markScrolled(); // the header shadow follows the new scroll position straight away
   S.lastTab = tab;
   startTicker();
   keepAwake();
@@ -383,6 +393,28 @@ function topHead(title, { sub = null, right = brandWide('head'), rowClass = '' }
 
 function page(title, ...kids) {
   return h('main', { class: 'page' }, title && h('h1', {}, title), kids);
+}
+
+/**
+ * Make `live` match `next` by changing only what differs: text, attributes and
+ * children. For plain markup only: event listeners on `next` are not copied, and
+ * code holding elements of `next` must look them up again once it is on screen.
+ */
+function morph(live, next) {
+  if (live.nodeType === Node.TEXT_NODE) {
+    if (live.nodeValue !== next.nodeValue) live.nodeValue = next.nodeValue;
+    return;
+  }
+  for (const { name } of [...live.attributes]) if (!next.hasAttribute(name)) live.removeAttribute(name);
+  for (const { name, value } of [...next.attributes]) if (live.getAttribute(name) !== value) live.setAttribute(name, value);
+  const want = [...next.childNodes];
+  want.forEach((n, i) => {
+    const have = live.childNodes[i];
+    if (!have) live.append(n);
+    else if (have.nodeType === n.nodeType && have.nodeName === n.nodeName) morph(have, n);
+    else have.replaceWith(n);
+  });
+  while (live.childNodes.length > want.length) live.lastChild.remove();
 }
 
 /** Replace an element's children, skipping anything falsy (so `cond && node` is safe). */
@@ -1291,7 +1323,7 @@ function planRow(b, gym) {
     'li',
     { class: `plan-row${art ? ' has-art' : ''}` },
     art,
-    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
+    h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason), !S.draft.share_id && stallBox(b, gym)),
     h(
       'div',
       { class: 'plan-actions' },
@@ -1325,6 +1357,54 @@ function planRow(b, gym) {
       } }, icon('trash', 18), 'Remove'),
     ),
   );
+}
+
+/**
+ * A stalled lift (#124): the same weight for several sessions without more
+ * reps. Offers to repeat the target, go lighter for today or swap the lift;
+ * keeping the usual suggestion just closes the prompt. A choice can be undone.
+ */
+function stallBox(b, gym) {
+  const st = b.stall;
+  if (!st) return null;
+  const unit = S.draft.unit;
+  const each = b.kind === 'dumbbell' ? ' each' : '';
+  const choose = (choice) => {
+    b.stallBefore ??= { suggested_weight: b.suggested_weight, suggested_reps: b.suggested_reps, reason: b.reason };
+    Object.assign(b, b.stallBefore);
+    b.stallChoice = choice;
+    const pick = choice === 'repeat' ? st.repeat : choice === 'lower' ? st.lower : null;
+    if (pick) {
+      b.suggested_weight = pick.weight;
+      b.suggested_reps = pick.reps;
+      b.reason = choice === 'repeat'
+        ? `Stalled at ${fmtW(st.weight)} ${unit}: you chose to repeat ${fmtW(pick.weight)} ${unit} × ${pick.reps} and own every rep.`
+        : `Stalled at ${fmtW(st.weight)} ${unit}: you chose a lighter day at ${fmtW(pick.weight)} ${unit} × ${pick.reps}, then build back up.`;
+      b.locked = true;
+    }
+    pushSharedPlan();
+    render();
+  };
+  if (b.stallChoice) {
+    return h('p', { class: 'stall-chosen' },
+      b.stallChoice === 'keep' ? 'Stalled: keeping the usual suggestion. ' : 'Stalled: changed for today. ',
+      h('button', { type: 'button', class: 'stall-change', onclick: () => {
+        if (b.stallBefore) Object.assign(b, b.stallBefore);
+        delete b.stallChoice;
+        render();
+      } }, 'Change'));
+  }
+  return h('div', { class: 'stall', role: 'group', 'aria-label': `${b.name} has stalled` },
+    h('p', {}, h('strong', {}, 'Stalled. '), `${fmtW(st.weight)} ${unit}${each} for ${st.sessions} sessions without more reps. What would you like to do today?`),
+    h('div', { class: 'stall-actions' },
+      h('button', { type: 'button', class: 'btn small', onclick: () => choose('repeat') }, `Repeat ${fmtW(st.repeat.weight)} × ${st.repeat.reps}`),
+      st.lower && h('button', { type: 'button', class: 'btn small', onclick: () => choose('lower') }, `Lower to ${fmtW(st.lower.weight)} × ${st.lower.reps}`),
+      !S.draft.routine_id && h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
+        Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in for a stalled lift. ${block.reason}` });
+        pushSharedPlan();
+        render();
+      }, S.draft.bodyweight_only) }, icon('swap', 18), 'Swap'),
+      h('button', { type: 'button', class: 'btn small ghost', onclick: () => choose('keep') }, 'Keep suggestion')));
 }
 
 function recoveryPanel(recovery) {
@@ -1837,8 +1917,40 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
       } }, icon('minus', 18), stretch ? 'Remove hold' : cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
+      // Difficulty (#170): once every set is checked off, one optional rating for the exercise.
+      !cardio && !stretch && e.sets.length > 0 && e.sets.every((s) => s.done) && h('button', {
+        type: 'button',
+        class: `btn small difficulty${e.reps_left != null ? ' rated' : ''}`,
+        'aria-label': e.reps_left != null ? `Difficulty for ${e.name}: ${repsLeftLabel(e.reps_left)} reps left. Change` : `Rate how hard ${e.name} felt`,
+        onclick: () => difficultySheet(e, (v) => edit((d) => {
+          const t = d.exercises.find((x) => x.id === e.id);
+          if (v == null) delete t.reps_left;
+          else t.reps_left = v;
+        })),
+      }, e.reps_left != null ? `Difficulty: ${repsLeftLabel(e.reps_left)}` : 'Difficulty?'),
     ),
   );
+}
+
+/** 0-4 reps left, where 4 means 4 or more (#170). */
+function repsLeftLabel(v) {
+  return v >= 4 ? '4+' : String(v);
+}
+
+/** Ask how many more reps a typical working set had in it (#170). Optional; can be changed or cleared. */
+function difficultySheet(e, onPick) {
+  const close = sheet('Difficulty', h('div', { class: 'stack' },
+    h('p', {}, h('strong', {}, e.name)),
+    h('p', {}, 'At the end of a typical working set, how many more reps could you have done with good form?'),
+    choices([0, 1, 2, 3, 4].map((v) => [v, repsLeftLabel(v)]), e.reps_left ?? null, (v) => {
+      close();
+      onPick(v);
+    }, { columns: 5 }),
+    h('p', { class: 'muted small' }, 'Your next suggestion for this exercise takes it into account.'),
+    e.reps_left != null && h('button', { class: 'btn ghost block', type: 'button', onclick: () => {
+      close();
+      onPick(null);
+    } }, 'Clear rating')));
 }
 
 function find(doc, exId, setId) {
@@ -2126,7 +2238,10 @@ async function drawShareCard(workout, recap) {
   const seconds = Math.max(0, (new Date(workout.completed_at) - new Date(workout.started_at)) / 1000 - (workout.paused_s || 0));
   const sets = lifts.reduce((n, e) => n + e.sets.filter((s) => s.done && !s.warmup).length, 0);
   const stats = [seconds >= 60 && seconds <= 4 * 3600 && `${Math.round(seconds / 60)} min`, `${lifts.length} exercise${lifts.length === 1 ? '' : 's'}`, `${sets} working set${sets === 1 ? '' : 's'}`].filter(Boolean).join('  •  ');
-  const rowH = compact ? 92 : 168;
+  // Estimated 1-rep max per lift (#162), from this workout's sets, in its unit.
+  const ests = new Map(lifts.map((e) => [e, bestEstimate(e.sets, S.exById.get(e.exercise_id))]));
+  const anyEst = [...ests.values()].some(Boolean);
+  const rowH = compact ? (anyEst ? 128 : 92) : 168;
   const recordH = record ? 330 + (recap.records.length > 1 ? 52 : 0) : 0;
   const H = P + 90 + 120 + 70 + (record ? recordH + 40 : 0) + lifts.length * (rowH + 18) + 40 + P;
   const canvas = document.createElement('canvas');
@@ -2192,6 +2307,7 @@ async function drawShareCard(workout, recap) {
   for (const e of lifts) {
     box(P - 20, y, W - 2 * P + 40, rowH, 24, '#1b2027');
     const text = shareSets(e, unit);
+    const est = ests.get(e) && estimateLabel(ests.get(e), unit);
     if (compact) {
       c.font = `500 40px ${SHARE_BODY}`;
       const tw = Math.min(c.measureText(text).width, 470);
@@ -2202,17 +2318,34 @@ async function drawShareCard(workout, recap) {
       c.font = `500 40px ${SHARE_BODY}`;
       c.textAlign = 'right';
       c.fillText(fit(text, 470), W - P - 16, y + 26);
+      if (est) {
+        c.fillStyle = '#a6afbb';
+        c.font = `500 32px ${SHARE_BODY}`;
+        c.fillText(est, W - P - 16, y + 80);
+      }
       c.textAlign = 'left';
     } else {
+      c.font = `500 40px ${SHARE_BODY}`;
+      const ew = est ? c.measureText(est).width + 30 : 0;
       c.fillStyle = '#3af29c';
       c.font = `700 54px ${SHARE_FONT}`;
-      c.fillText(fit(e.name, W - 2 * P - 40), P + 16, y + 26);
+      c.fillText(fit(e.name, W - 2 * P - 40 - ew), P + 16, y + 26);
+      if (est) {
+        c.fillStyle = '#a6afbb';
+        c.font = `500 40px ${SHARE_BODY}`;
+        c.textAlign = 'right';
+        c.fillText(est, W - P - 16, y + 34);
+        c.textAlign = 'left';
+      }
       c.fillStyle = '#f4f2ec';
       c.font = `500 50px ${SHARE_BODY}`;
       c.fillText(fit(text, W - 2 * P - 40), P + 16, y + 96);
     }
     y += rowH + 18;
   }
+  // What the image shows, for screen readers.
+  canvas.dataset.summary = [fmtDate(workout.started_at, { month: 'long', day: 'numeric', year: 'numeric' }), stats,
+    ...lifts.map((e) => [e.name, shareSets(e, unit), ests.get(e) && estimateLabel(ests.get(e), unit)].filter(Boolean).join(', '))].join('. ');
   return canvas;
 }
 
@@ -2237,7 +2370,7 @@ async function shareWorkoutSheet(workout, recap) {
   file = new File([blob], name, { type: 'image/png' });
   canvas.classList.add('share-card');
   canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', 'Workout summary image');
+  canvas.setAttribute('aria-label', `Workout summary image. ${canvas.dataset.summary}`);
   fill(preview, canvas);
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   fill(actions,
@@ -2333,60 +2466,104 @@ function viewTrends() {
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
       recoveryPanel(recovery));
   });
-  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks' }), content);
+  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks.' }), content);
 }
 
 /**
  * A page-by-page list of finished workouts. fetchPage(offset, limit) returns
  * {workouts}; hrefOf(w) is where a row opens; empty is shown when there are none.
  */
-function workoutList(fetchPage, hrefOf, empty) {
+/**
+ * A list of finished workouts, newest first, with Show older at the bottom.
+ * With `recentDays`, it opens on just that window (History: the last 8 weeks);
+ * Show older then reveals everything before it, a page at a time.
+ */
+function workoutList(fetchPage, hrefOf, empty, { recentDays = null } = {}) {
   const PAGE = 50;
   const list = h('ul', { class: 'log' });
   const more = h('button', { class: 'btn block', type: 'button', hidden: true }, 'Show older workouts');
   const note = h('p', { class: 'muted pad' }, 'Loading');
-  let offset = 0;
-  const load = async () => {
+  const cutoff = recentDays ? Date.now() - recentDays * 86400000 : null;
+  let offset = 0; // how many the server has sent
+  let done = false; // the server has nothing older
+  let held = []; // fetched but older than the window, waiting for Show older
+  let shown = 0;
+  const row = (w, older) => h('li', {}, h('a', { class: 'log-row', href: hrefOf(w) },
+    h('span', { class: 'log-date' }, fmtDate(w.started_at, older || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
+    h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
+    h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
+    h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : ''))));
+  const fetchMore = async () => {
+    const data = await fetchPage(offset, PAGE);
+    offset += data.workouts.length;
+    done = data.workouts.length < PAGE;
+    return data.workouts;
+  };
+  const show = (ws) => {
+    list.append(...ws.map((w) => row(w, shown > 0 && !cutoff)));
+    shown += ws.length;
+  };
+  const first = async () => {
+    if (!cutoff) {
+      show(await fetchMore());
+    } else {
+      // Fetch until the window is covered; anything older waits for Show older.
+      while (!done && !held.length) {
+        const ws = await fetchMore();
+        show(ws.filter((w) => new Date(w.started_at).getTime() >= cutoff));
+        held = ws.filter((w) => new Date(w.started_at).getTime() < cutoff);
+      }
+    }
+    if (!shown && !held.length) {
+      list.replaceWith(empty);
+      return;
+    }
+    if (!shown) {
+      note.hidden = false;
+      note.textContent = `No workouts in the last ${Math.round(recentDays / 7)} weeks.`;
+    }
+  };
+  const older = async () => {
+    if (held.length) {
+      show(held);
+      held = [];
+    } else {
+      show(await fetchMore());
+    }
+  };
+  const load = async (step) => {
     more.disabled = true;
     try {
-      const data = await fetchPage(offset, PAGE);
       note.hidden = true;
-      if (!data.workouts.length && offset === 0) {
-        list.replaceWith(empty);
-        return;
-      }
-      list.append(...data.workouts.map((w) =>
-        h('li', {}, h('a', { class: 'log-row', href: hrefOf(w) },
-          h('span', { class: 'log-date' }, fmtDate(w.started_at, offset || new Date(w.started_at).getFullYear() !== new Date().getFullYear() ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' } : undefined)),
-          h('span', { class: 'log-title' }, `${dayLabel(w.day_type)} at ${w.gym_name}`),
-          h('span', { class: 'log-meta' }, `${w.exercises.length} exercises, ${w.sets} sets, ${Number(w.volume).toLocaleString()} ${w.unit} lifted`),
-          h('span', { class: 'log-names' }, w.exercises.slice(0, 4).join(', ') + (w.exercises.length > 4 ? ` and ${w.exercises.length - 4} more` : '')),
-        ))));
-      offset += data.workouts.length;
-      more.hidden = data.workouts.length < PAGE;
+      await step();
     } catch (e) {
       note.hidden = false;
       note.textContent = e.offline ? 'History needs a connection.' : e.message;
     }
+    more.hidden = done && !held.length;
     more.disabled = false;
   };
-  more.onclick = load;
-  load();
+  more.onclick = () => load(older);
+  load(first);
   return [note, list, more];
 }
 
 function viewHistory() {
-  // Other people who share their history (#13). Nothing shows until someone does.
+  // Other people who share their history (#13): a dropdown to open one. Nothing shows until someone does.
   const people = h('div', { 'data-people': '' });
-  api.get('people_history').then(({ people: list }) => fill(people, list.length > 0 && h('section', { class: 'card stack people-card' },
-    h('h2', {}, 'Other people'),
-    h('ul', { class: 'log' }, list.map((p) => h('li', {}, h('a', { class: 'log-row', href: `#/people/${p.id}` }, h('span', { class: 'log-title' }, p.name), h('span', { class: 'log-meta' }, 'See their workouts'))))),
-    h('p', { class: 'muted small' }, S.user.history_visibility === 'members' ? 'They can see your history too.' : 'Your own history is private. You can share it in Settings.'))), () => {});
-  return h('main', { class: 'page' }, topHead('History'), people,
+  api.get('people_history').then(({ people: list }) => fill(people, list.length > 0 && h('select', {
+    class: 'people-pick',
+    'aria-label': "View other trainer's history",
+    onchange: (e) => {
+      if (e.target.value) location.hash = `#/people/${e.target.value}`;
+    },
+  }, h('option', { value: '', selected: true }, "View other trainer's history"), list.map((p) => h('option', { value: String(p.id) }, p.name)))), () => {});
+  return h('main', { class: 'page' }, topHead('History', { sub: 'Last 8 weeks.' }), people,
     workoutList(
       (offset, limit) => api.get('history', `&limit=${limit}&offset=${offset}`),
       (w) => `#/history/${w.id}`,
-      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today'))));
+      h('section', { class: 'card' }, h('h2', {}, 'No workouts yet'), h('p', { class: 'muted' }, 'Finished workouts show up here, and you can correct any entry afterwards.'), h('a', { class: 'btn primary block', href: '#/today' }, 'Go to Today')),
+      { recentDays: 56 }));
 }
 
 /** Someone else's finished workouts (#13). Read-only; the server checks they share them (#15). */
@@ -2626,6 +2803,8 @@ function workoutStrava(workout, connection, exported, hasUnsavedChanges) {
 
 function viewExercises() {
   const results = h('div', { class: 'stack' });
+  // How many exercises the list shows, under the title; follows the search and muscle filter.
+  const count = h('span', { class: 'ex-count' });
   const search = h('input', { type: 'search', placeholder: 'Search exercises', 'aria-label': 'Search exercises', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', value: S.exSearch || '', oninput: () => paint() });
   const muscle = h('select', { 'aria-label': 'Muscle', onchange: () => paint() }, h('option', { value: '' }, 'All muscles'), Object.entries(S.vocab.muscles).map(([k, v]) => h('option', { value: k, selected: S.exMuscle === k }, v)));
   const row = (x) => h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${x.id}` },
@@ -2637,6 +2816,10 @@ function viewExercises() {
     const q = search.value.trim();
     const pool = S.exercises.filter((x) => !muscle.value || x.muscles_main.includes(muscle.value) || x.muscles_assist.includes(muscle.value));
     const r = searchExercises(pool, q, S.vocab, { limit: q ? 60 : pool.length, similarLimit: 8 });
+    const n = r.closest ? 0 : r.matches.length;
+    // The header on screen is kept across tabs (#187), so update whichever count is showing.
+    const shown = count.isConnected ? count : document.querySelector('main > .top-head .ex-count') || count;
+    shown.textContent = `${n.toLocaleString()} exercise${n === 1 ? '' : 's'}`;
     fill(results,
       r.closest && h('p', { class: 'muted' }, `No exercise matches "${q}" exactly. Closest:`),
       r.matches.length > 0 && h('ul', { class: 'log', 'data-list': 'matches' }, r.matches.map(row)),
@@ -2646,7 +2829,7 @@ function viewExercises() {
     );
   };
   paint();
-  return h('main', { class: 'page' }, topHead('Exercises'), h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
+  return h('main', { class: 'page' }, topHead('Exercises', { sub: count }), h('div', { class: 'filters' }, search, muscle), h('a', { class: 'btn block', href: '#/exercises/new' }, icon('plus', 18), 'Add your own exercise'), results);
 }
 
 function equipLabel(key) {
@@ -2709,10 +2892,25 @@ function viewExercise(id) {
         // Opening a workout from the chart comes back to this exercise.
         const onOpen = (p) => (S.backTo = { to: `history/${p.s.workout_id}`, path: `exercises/${id}`, label: ex.name, y: window.scrollY });
         const where = (s) => (variants.length > 1 ? [] : [s.gym_name]);
+        // Estimated 1-rep max (#162): the best from each session's working sets, in the lifter's unit.
+        const prefUnit = S.user.unit;
+        const estOf = (s) => bestEstimate(s.sets, ex);
+        const estLine = (s) => {
+          const e = estOf(s);
+          return e && `${estimateLabel(e, s.unit, prefUnit)} from ${fmtW(e.weight)} ${s.unit} × ${e.reps}`;
+        };
         const sessionList = () => [
           h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
-          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), estLine(s) && h('span', { class: 'log-est' }, estLine(s)), h('span', { class: 'log-meta' }, s.gym_name))))),
         ];
+        const estChart = () => {
+          const epts = pts.map((p) => ({ ...p, est: estOf(p.s) })).filter((p) => p.est);
+          if (!epts.length) return [];
+          return [
+            h('h3', {}, 'Estimated 1-rep max'),
+            lineChart(epts.map((p) => ({ ...p, value: roundEstimate(convertWeight(p.est.value, p.s.unit, prefUnit)), lines: [`From ${fmtW(p.est.weight)} ${p.s.unit} × ${p.est.reps}`, ...where(p.s)] })), { unit: prefUnit, onOpen, hint: 'Estimated from your best working set of 10 reps or fewer.' }),
+          ];
+        };
         if (isStretch(ex)) {
           // Stretches (#138): seconds held per session.
           const spts = mine.map((s) => ({
@@ -2759,6 +2957,7 @@ function viewExercise(id) {
           lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' }),
           h('h3', {}, 'Best reps at top weight'),
           lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' }),
+          ...estChart(),
           ...sessionList(),
         );
       };
@@ -3000,7 +3199,7 @@ function viewSettings() {
   const routineCount = (S.routines || []).length;
   // Headings are mint so the sections are easy to pick out (#103). What affects
   // the next workout comes first; setup and maintenance are one-line links.
-  return h('main', { class: 'page settings-main' }, topHead('Settings'),
+  return h('main', { class: 'page settings-main' }, topHead('Settings', { sub: h('a', { class: 'app-version', href: '#/settings/whats-new' }, `Version ${APP_VERSION}`) }),
     section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Gyms', linkList(
       ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),
@@ -3062,7 +3261,6 @@ function viewSettings() {
       } }, 'Sign out and clear this device'),
       h('p', { class: 'muted small' }, 'On a shared phone or computer, use Sign out and clear this device. It also removes your saved workouts, profile and rest timer from it.')),
     brandWide(),
-    h('p', { class: 'muted small center app-version' }, h('a', { href: '#/settings/whats-new' }, `Version ${APP_VERSION}`)),
   );
 }
 
