@@ -26,49 +26,27 @@ let ticker = null;
 let wakeLock = null;
 let audio = null;
 
-// Goals (#192): four in the grid, the rest under Other goals.
+// Goals (#192, #216): one dropdown, in this order, with the chosen goal's short description under it.
 const GOALS = [
   ['starter', 'Get Started', 'Fewer reps, easier workouts'],
-  ['strength', 'Get Stronger', '4-6 reps, longer rests'],
   ['general', 'General Fitness', '8-12 reps, steady pace'],
-  ['endurance', 'Muscular Endurance', '12-15 reps, short rests'],
-];
-const OTHER_GOALS = [
   ['weight_loss', 'Reduce Bodyweight', 'Higher reps, faster pace'],
-  ['powerlifting', 'Powerlifting', 'Squat, bench, and deadlift'],
   ['muscle', 'Build Muscle', '6-10 reps on big lifts'],
+  ['strength', 'Get Stronger', '4-6 reps, longer rests'],
+  ['endurance', 'Muscular Endurance', '12-15 reps, short rests'],
+  ['powerlifting', 'Powerlifting', 'Squat, bench, and deadlift'],
 ];
 
-/**
- * Goal picker (#192): the main goals in a grid, then a collapsed Other goals
- * row with the rest. One choice across both; the row names an Other goal when
- * it's the one chosen. Starts open when it is.
- */
+/** The training goal (#216): a dropdown, used in Settings and onboarding, with the goal's description below it. */
 function goalPicker(value, onPick) {
-  let current = value;
-  const label = () => OTHER_GOALS.find(([k]) => k === current)?.[1];
-  const sync = () => {
-    for (const b of wrap.querySelectorAll('.choice')) b.setAttribute('aria-pressed', String(b.dataset.value === current));
-    rowValue.textContent = label() || '';
-  };
-  const pick = (v) => {
-    current = v;
-    sync();
-    onPick(v);
-  };
-  const main = choices(GOALS, value, pick, { columns: 2 });
-  const other = choices(OTHER_GOALS, value, pick, { columns: 1 });
-  const rowValue = h('span', { class: 'other-goals-value' });
-  const open = !!OTHER_GOALS.find(([k]) => k === value);
-  other.hidden = !open;
-  const row = h('button', { type: 'button', class: 'other-goals-row', 'aria-expanded': String(open), onclick: () => {
-    other.hidden = !other.hidden;
-    row.setAttribute('aria-expanded', String(!other.hidden));
-  } }, h('span', { class: 'other-goals-label' }, 'Other Goals'), rowValue, icon('back', 18));
-  const wrap = h('div', { class: 'stack goal-picker' }, main, row, other);
-  sync();
-  return wrap;
+  const hint = h('span', { class: 'field-hint goal-hint' });
+  const paint = (v) => { hint.textContent = (GOALS.find(([k]) => k === v) || [])[2] || ''; };
+  const select = h('select', { 'aria-label': 'Goal', onchange: (e) => { paint(e.target.value); onPick(e.target.value); } },
+    GOALS.map(([k, label]) => h('option', { value: k, selected: k === value }, label)));
+  paint(value);
+  return h('div', { class: 'goal-picker' }, select, hint);
 }
+
 // Variety (#211): how much generated workouts rotate their exercises.
 const VARIETY = [
   ['steady', 'Steady', 'Same lifts each time'],
