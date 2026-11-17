@@ -1931,3 +1931,19 @@ button.setup-note {
   background: rgba(58, 242, 156, 0.08);
   color: var(--mint);
 }
+
+/* ---- Share a workout as an image (#160) -------------------------------- */
+.share-preview {
+  display: flex;
+  justify-content: center;
+  max-height: 62vh;
+  overflow-y: auto;
+  border-radius: 14px;
+}
+
+.share-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+}

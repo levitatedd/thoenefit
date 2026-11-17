@@ -2056,6 +2056,172 @@ function recapBody(recap, path, label) {
       link(f), h('span', { class: 'recap-detail' }, `${liftResult(f.weight, f.reps, recap.unit)}, the result to beat next time`))))]);
 }
 
+// ---------------------------------------------------------------- share as an image (#160)
+
+const SHARE_FONT = '"Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", system-ui, sans-serif';
+const SHARE_BODY = '-apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", system-ui, sans-serif';
+
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+/** "140 lb × 10 / 9 / 8", "140×10, 135×8 lb", "10 min · 1.7 mi" or "30 s / 30 s". */
+function shareSets(e, unit) {
+  const sets = e.sets.filter((s) => s.done && !s.warmup);
+  if (!sets.length) return '';
+  if (sets.every((s) => s.duration_s != null && s.reps == null)) return sets.map((s) => fmtCardio(s, unit)).join(' / ');
+  const same = sets.every((s) => s.weight === sets[0].weight);
+  if (same) return sets[0].weight > 0 ? `${fmtW(sets[0].weight)} ${unit} × ${sets.map((s) => s.reps).join(' / ')}` : `${sets.map((s) => s.reps).join(' / ')} reps`;
+  return `${sets.map((s) => `${fmtW(s.weight)}×${s.reps}`).join(', ')} ${unit}`;
+}
+
+/**
+ * Draws a finished workout as a phone-friendly PNG card: logo, date, time and
+ * set counts, the top new record, then each exercise. Long workouts switch to
+ * one-line rows and the image grows taller. No names, gym or notes on it.
+ */
+async function drawShareCard(workout, recap) {
+  const W = 1080;
+  const P = 64;
+  const unit = workout.unit;
+  const lifts = workout.exercises.filter((e) => e.sets.some((s) => s.done && !s.warmup));
+  const compact = lifts.length > 4;
+  const record = recap && recap.records[0];
+  const [logo, art] = await Promise.all([
+    loadImage('icons/logo-wide.png'),
+    record ? loadImage(`icons/muscles/${(S.exById.get(record.exercise_id)?.muscles_main || [])[0]}.png`) : null,
+  ]);
+  const seconds = Math.max(0, (new Date(workout.completed_at) - new Date(workout.started_at)) / 1000 - (workout.paused_s || 0));
+  const sets = lifts.reduce((n, e) => n + e.sets.filter((s) => s.done && !s.warmup).length, 0);
+  const stats = [seconds >= 60 && seconds <= 4 * 3600 && `${Math.round(seconds / 60)} min`, `${lifts.length} exercise${lifts.length === 1 ? '' : 's'}`, `${sets} working set${sets === 1 ? '' : 's'}`].filter(Boolean).join('  •  ');
+  const rowH = compact ? 92 : 168;
+  const recordH = record ? 330 + (recap.records.length > 1 ? 52 : 0) : 0;
+  const H = P + 90 + 120 + 70 + (record ? recordH + 40 : 0) + lifts.length * (rowH + 18) + 40 + P;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const c = canvas.getContext('2d');
+  const box = (x, y, w, h, r, fill, stroke) => {
+    c.beginPath();
+    c.roundRect(x, y, w, h, r);
+    c.fillStyle = fill;
+    c.fill();
+    if (stroke) { c.lineWidth = 4; c.strokeStyle = stroke; c.stroke(); }
+  };
+  const fit = (text, max) => {
+    let t = text;
+    while (c.measureText(t).width > max && t.length > 1) t = t.slice(0, -2) + '…';
+    return t;
+  };
+  c.fillStyle = '#0f1216';
+  c.fillRect(0, 0, W, H);
+  let y = P;
+  if (logo) c.drawImage(logo, P, y, 360, 360 * logo.height / logo.width);
+  y += 90;
+  c.fillStyle = '#f4f2ec';
+  c.font = `800 italic 92px ${SHARE_FONT}`;
+  c.textBaseline = 'top';
+  c.fillText(fit(fmtDate(workout.started_at, { month: 'long', day: 'numeric', year: 'numeric' }), W - 2 * P), P, y);
+  y += 120;
+  c.font = `500 40px ${SHARE_BODY}`;
+  c.fillStyle = '#d9dde3';
+  c.fillText(stats, P, y);
+  y += 70;
+  if (record) {
+    box(P - 20, y, W - 2 * P + 40, recordH, 32, '#163026', '#3af29c');
+    if (art) {
+      c.save();
+      c.globalAlpha = 0.35;
+      const ah = recordH - 30;
+      c.drawImage(art, W - P - ah + 30, y + 15, ah, ah);
+      c.restore();
+    }
+    let ry = y + 34;
+    c.fillStyle = '#3af29c';
+    c.font = `800 italic 52px ${SHARE_FONT}`;
+    c.fillText('🏆  NEW PERSONAL RECORD', P + 12, ry);
+    ry += 80;
+    c.fillStyle = '#f4f2ec';
+    c.font = `700 50px ${SHARE_FONT}`;
+    c.fillText(fit(record.name, W - 2 * P - 260), P + 12, ry);
+    ry += 66;
+    c.font = `800 italic 96px ${SHARE_FONT}`;
+    c.fillText(liftResult(record.weight, record.reps, unit) + (record.weight > 0 ? ' reps' : ''), P + 12, ry);
+    ry += 108;
+    c.fillStyle = '#a6afbb';
+    c.font = `500 36px ${SHARE_BODY}`;
+    c.fillText(record.type === 'weight' ? `Heaviest set, up from ${fmtW(record.previous_weight)} ${unit}` : `Most reps at that weight, up from ${record.previous_reps}`, P + 12, ry);
+    if (recap.records.length > 1) {
+      c.fillStyle = '#3af29c';
+      c.fillText(`+ ${recap.records.length - 1} more: ${recap.records.slice(1).map((r) => r.name).join(', ')}`.slice(0, 60), P + 12, ry + 52);
+    }
+    y += recordH + 40;
+  }
+  for (const e of lifts) {
+    box(P - 20, y, W - 2 * P + 40, rowH, 24, '#1b2027');
+    const text = shareSets(e, unit);
+    if (compact) {
+      c.font = `500 40px ${SHARE_BODY}`;
+      const tw = Math.min(c.measureText(text).width, 470);
+      c.fillStyle = '#3af29c';
+      c.font = `700 44px ${SHARE_FONT}`;
+      c.fillText(fit(e.name, W - 2 * P - tw - 60), P + 16, y + 24);
+      c.fillStyle = '#f4f2ec';
+      c.font = `500 40px ${SHARE_BODY}`;
+      c.textAlign = 'right';
+      c.fillText(fit(text, 470), W - P - 16, y + 26);
+      c.textAlign = 'left';
+    } else {
+      c.fillStyle = '#3af29c';
+      c.font = `700 54px ${SHARE_FONT}`;
+      c.fillText(fit(e.name, W - 2 * P - 40), P + 16, y + 26);
+      c.fillStyle = '#f4f2ec';
+      c.font = `500 50px ${SHARE_BODY}`;
+      c.fillText(fit(text, W - 2 * P - 40), P + 16, y + 96);
+    }
+    y += rowH + 18;
+  }
+  return canvas;
+}
+
+/**
+ * Share workout (#160): a preview of the card, with Share (the device's share
+ * sheet, when it can share files) and Save image outside it. Drawn on the
+ * phone only now; nothing is uploaded or kept, and it is released on close.
+ */
+async function shareWorkoutSheet(workout, recap) {
+  const preview = h('div', { class: 'share-preview' }, h('p', { class: 'muted' }, 'Drawing…'));
+  const actions = h('div', { class: 'stack' });
+  let canvas = null;
+  let file = null;
+  const close = sheet('Share workout', h('div', { class: 'stack' }, preview, actions), { onClose: () => {
+    if (canvas) { canvas.width = 0; canvas.height = 0; }
+    canvas = null;
+    file = null;
+  } });
+  canvas = await drawShareCard(workout, recap);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  const name = `thoenefit-${(workout.started_at || '').slice(0, 10)}.png`;
+  file = new File([blob], name, { type: 'image/png' });
+  canvas.classList.add('share-card');
+  canvas.setAttribute('role', 'img');
+  canvas.setAttribute('aria-label', 'Workout summary image');
+  fill(preview, canvas);
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  fill(actions,
+    canShare && h('button', { class: 'btn primary block', type: 'button', onclick: async () => {
+      try { await navigator.share({ files: [file], title: 'My ThoeneFit workout' }); } catch (e) { /* cancelled */ }
+    } }, icon('share', 18), 'Share'),
+    h('a', { class: `btn block${canShare ? '' : ' primary'}`, href: canvas.toDataURL('image/png'), download: name }, 'Save image'),
+    h('p', { class: 'muted small center' }, 'Only your lifts and the date are on the image.'));
+  return close;
+}
+
 /**
  * Shown on finishing. The working sets are counted on the phone, so they show
  * straight away, even offline; records need the server, so they follow once
@@ -2078,7 +2244,12 @@ function recapSheet(id, sets) {
     if (!pending) {
       try {
         const { recap } = await api.get('recap', `&id=${encodeURIComponent(id)}`);
-        box.replaceChildren(recapBody(recap, 'today', 'Workout'));
+        box.replaceChildren(recapBody(recap, 'today', 'Workout'),
+          h('button', { class: 'btn primary block', type: 'button', onclick: async () => {
+            const { workout } = await api.get('workout', `&id=${encodeURIComponent(id)}`);
+            close();
+            shareWorkoutSheet(workout, recap);
+          } }, icon('share', 18), 'Share workout'));
         return;
       } catch (e) {
         if (!e.offline && e.status !== 404) {
@@ -2321,7 +2492,8 @@ function viewHistoryDetail(id) {
         }, save);
         return [
           h('header', { class: 'page-head' }, h('h1', {}, `${dayLabel(workout.day_type)} at ${workout.gym_name}`), h('p', { class: 'muted' }, `${fmtDate(workout.started_at, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, ${fmtTime(workout.started_at)}. Weights in ${workout.unit}.`), workout.notes && h('p', { class: 'muted', 'data-notes': '' }, workout.notes)),
-          recap && h('section', { class: 'card stack' }, h('h2', {}, 'Recap'), recapBody(recap, `history/${id}`, 'Workout History')),
+          recap && h('section', { class: 'card stack' }, h('h2', {}, 'Recap'), recapBody(recap, `history/${id}`, 'Workout History'),
+            h('button', { class: 'btn block', type: 'button', onclick: () => shareWorkoutSheet(workout, recap) }, icon('share', 18), 'Share workout')),
           h('section', { class: 'card stack' }, caloriesLine, effortBox),
           box,
           save,
