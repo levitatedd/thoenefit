@@ -373,9 +373,10 @@ function render() {
 
 /**
  * The header of a top-level screen (#175): Today's look (mint title, muted line
- * under it, optional item on the right), held at the top while the page scrolls.
+ * under it, the wide logo on the right unless something else goes there, like
+ * the workout clock), held at the top while the page scrolls.
  */
-function topHead(title, { sub = null, right = null, rowClass = '' } = {}) {
+function topHead(title, { sub = null, right = brandWide('head'), rowClass = '' } = {}) {
   return h('header', { class: 'page-head top-head' },
     h('div', { class: `top-head-row ${rowClass}`.trim() }, h('div', {}, h('h1', {}, title), sub && h('p', { class: 'muted' }, sub)), right));
 }
@@ -902,7 +903,7 @@ function viewToday() {
   const active = sync.active;
   refreshShares();
   // The wide logo sits top right, beside the heading.
-  const head = topHead('Today', { sub: fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }), right: brandWide('head'), rowClass: 'today-head' });
+  const head = topHead('Today', { sub: fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }), rowClass: 'today-head' });
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {
@@ -2332,7 +2333,7 @@ function viewTrends() {
           : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
       recoveryPanel(recovery));
   });
-  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks, including this week.' }), content);
+  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks' }), content);
 }
 
 /**

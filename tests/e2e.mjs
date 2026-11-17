@@ -1347,12 +1347,12 @@ console.log('Pause and resume a workout');
     const wh = await page.evaluate(() => {
       const head = document.querySelector('main > .top-head');
       const h1 = head?.querySelector('h1');
-      return head && { position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top), clock: !!head.querySelector('#elapsed'), sync: !!head.querySelector('#sync') };
+      return head && { position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top), clock: !!head.querySelector('#elapsed'), sync: !!head.querySelector('#sync'), logo: !!head.querySelector('img.brand-wide') };
     });
     await page.goto(`${URL}#/history`);
     await page.waitForSelector('main > .top-head');
     const ref = await page.evaluate(() => { const h1 = document.querySelector('main > .top-head h1'); return { color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top) }; });
-    check('during a workout the header matches the other screens, with the clock and save status on the right (#175)', wh && wh.position === 'sticky' && wh.top === 0 && wh.color === 'rgb(58, 242, 156)' && wh.size === ref.size && wh.left === ref.left && wh.h1Top === ref.h1Top && wh.clock && wh.sync, JSON.stringify({ wh, ref }));
+    check('during a workout the header matches the other screens, with the clock and save status on the right (#175)', wh && wh.position === 'sticky' && wh.top === 0 && wh.color === 'rgb(58, 242, 156)' && wh.size === ref.size && wh.left === ref.left && wh.h1Top === ref.h1Top && wh.clock && wh.sync && !wh.logo, JSON.stringify({ wh, ref }));
     await page.goto(`${URL}#/workout`);
     await page.waitForSelector('.lift');
   }
@@ -1804,6 +1804,7 @@ console.log('Fixed page headers (#175)');
       bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
       font: `${hs.fontSize} ${hs.fontWeight} ${hs.fontFamily}`, color: hs.color, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top),
       nextTop: next ? next.getBoundingClientRect().top : Infinity,
+      logo: !!head.querySelector('.top-head-row > img.brand-wide'), sub: head.querySelector('p.muted')?.textContent || '',
     };
   });
   await page.goto(`${URL}#/today`);
@@ -1819,6 +1820,8 @@ console.log('Fixed page headers (#175)');
   }
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
   check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
+  check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
+  check('Trends says just "Last 8 weeks" under its title', screens.trends.sub === 'Last 8 weeks', screens.trends.sub);
   check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
   check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
   for (const tab of ['exercises', 'settings']) {
