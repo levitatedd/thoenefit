@@ -16,7 +16,7 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 | Exercise progress | Setup notes | Trends |
 | :---: | :---: | :---: |
-| <a href="docs/screenshots/exercise-progress.jpg"><img src="docs/screenshots/exercise-progress.jpg" width="250" alt="Barbell Bench Press history: the top weight rising over eight weeks, with one session selected showing its weight and reps"></a> | <a href="docs/screenshots/setup-notes.jpg"><img src="docs/screenshots/setup-notes.jpg" width="250" alt="Barbell Bench Press exercise page with a setup note saved for Downtown Gym: bench on the 3rd hole, safeties at 5"></a> | <a href="docs/screenshots/trends.jpg"><img src="docs/screenshots/trends.jpg" width="250" alt="Trends: weekly lifting volume and workout time over eight weeks, and the recovery estimate for each muscle group"></a> |
+| <a href="docs/screenshots/exercise-progress.jpg"><img src="docs/screenshots/exercise-progress.jpg" width="250" alt="Barbell Bench Press history under the pinned exercise header: the top weight rising over eight weeks in its own chart card, with one session selected showing its weight and reps"></a> | <a href="docs/screenshots/setup-notes.jpg"><img src="docs/screenshots/setup-notes.jpg" width="250" alt="Barbell Bench Press exercise page: the pinned header, an estimated 1-rep max of 173 lb, and a setup note saved for Downtown Gym: bench on the 3rd hole, safeties at 5"></a> | <a href="docs/screenshots/trends.jpg"><img src="docs/screenshots/trends.jpg" width="250" alt="Trends: weekly lifting volume and workout time over eight weeks, and the recovery estimate for each muscle group"></a> |
 
 | Saved routines | Shared workout | Share your workout |
 | :---: | :---: | :---: |
