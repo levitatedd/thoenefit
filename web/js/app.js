@@ -26,12 +26,49 @@ let ticker = null;
 let wakeLock = null;
 let audio = null;
 
+// Goals (#192): four in the grid, the rest under Other goals.
 const GOALS = [
-  ['muscle', 'Build muscle', '6-10 reps on big lifts'],
-  ['strength', 'Get stronger', '4-6 reps, longer rests'],
-  ['general', 'General fitness', '8-12 reps, steady pace'],
-  ['endurance', 'Muscular endurance', '12-15 reps, short rests'],
+  ['starter', 'Get Started', 'Fewer reps, easier workouts'],
+  ['strength', 'Get Stronger', '4-6 reps, longer rests'],
+  ['general', 'General Fitness', '8-12 reps, steady pace'],
+  ['endurance', 'Muscular Endurance', '12-15 reps, short rests'],
 ];
+const OTHER_GOALS = [
+  ['weight_loss', 'Reduce Bodyweight', 'Higher reps, faster pace'],
+  ['powerlifting', 'Powerlifting', 'Squat, bench, and deadlift'],
+  ['muscle', 'Build Muscle', '6-10 reps on big lifts'],
+];
+
+/**
+ * Goal picker (#192): the main goals in a grid, then a collapsed Other goals
+ * row with the rest. One choice across both; the row names an Other goal when
+ * it's the one chosen. Starts open when it is.
+ */
+function goalPicker(value, onPick) {
+  let current = value;
+  const label = () => OTHER_GOALS.find(([k]) => k === current)?.[1];
+  const sync = () => {
+    for (const b of wrap.querySelectorAll('.choice')) b.setAttribute('aria-pressed', String(b.dataset.value === current));
+    rowValue.textContent = label() || '';
+  };
+  const pick = (v) => {
+    current = v;
+    sync();
+    onPick(v);
+  };
+  const main = choices(GOALS, value, pick, { columns: 2 });
+  const other = choices(OTHER_GOALS, value, pick, { columns: 1 });
+  const rowValue = h('span', { class: 'other-goals-value' });
+  const open = !!OTHER_GOALS.find(([k]) => k === value);
+  other.hidden = !open;
+  const row = h('button', { type: 'button', class: 'other-goals-row', 'aria-expanded': String(open), onclick: () => {
+    other.hidden = !other.hidden;
+    row.setAttribute('aria-expanded', String(!other.hidden));
+  } }, h('span', { class: 'other-goals-label' }, 'Other Goals'), rowValue, icon('back', 18));
+  const wrap = h('div', { class: 'stack goal-picker' }, main, row, other);
+  sync();
+  return wrap;
+}
 const LEVELS = [
   ['beginner', 'Beginner', 'Under a year'],
   ['intermediate', 'Intermediate', '1-3 years'],
@@ -522,7 +559,7 @@ function viewLogin() {
 function trainingFields(values, onChange) {
   return [
     field('Weight unit', choices([['lb', 'Pounds'], ['kg', 'Kilograms']], values.unit, (v) => onChange('unit', v), { columns: 2 })),
-    field('Goal', choices(GOALS, values.goal, (v) => onChange('goal', v), { columns: 2 })),
+    field('Goal', goalPicker(values.goal, (v) => onChange('goal', v))),
     field('Training experience', choices(LEVELS, values.experience, (v) => onChange('experience', v), { columns: 3 })),
     field('Usual workout length', stepper(values.minutes, { min: 15, max: 150, step: 5, suffix: ' min', onChange: (v) => onChange('minutes', v) })),
     field('Training split', choices(SPLITS, values.split_type, (v) => onChange('split_type', v), { columns: 1 })),

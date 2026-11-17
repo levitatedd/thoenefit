@@ -611,6 +611,7 @@ final class Catalog
     {
         return [
             'id' => (int) $r['id'],
+            'slug' => $r['slug'] ?? null,
             'custom' => $r['user_id'] !== null,
             // In the default library because the admin's own exercise was moved there, not from the built-in catalog.
             'shared' => $r['user_id'] === null && ($r['promoted_from'] ?? null) !== null,
