@@ -1607,6 +1607,39 @@ $latestOf = fn(string $name) => (function () use ($wk, $db, $name) {
 })();
 check('whether the effort was chosen comes back with the workout', $latestOf('effort-hard')['effort_rated'] === true && $latestOf('effort-none')['effort_rated'] === false && $latestOf('effort-none')['effort'] === 'hard');
 
+echo "Other goals (#192)\n";
+$goalUser = function (string $name, string $goal) use ($auth, $mkGym, $db) {
+    $id = $auth->createUser($name, "$name long password");
+    $db->run('UPDATE users SET goal=? WHERE id=?', [$goal, $id]);
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $mkGym($id, 'Goal gym', Catalog::equipmentKeys())];
+};
+$lifts = fn(array $p) => array_values(array_filter($p['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true)));
+$slugOf = fn(int $id) => (string) $db->val('SELECT slug FROM exercises WHERE id=?', [$id]);
+check('the three new goals are valid goals', isset(Generator::GOALS['starter'], Generator::GOALS['weight_loss'], Generator::GOALS['powerlifting']));
+[$su, $sg] = $goalUser('goal-starter', 'starter');
+$sp = $lifts($gen->generate($su, $sg, ['day_type' => 'push', 'minutes' => 60]));
+check('Get started: at most 2 sets per lift and 6-8 reps on main lifts', $sp && max(array_column($sp, 'target_sets')) <= 2 && in_array([6, 8], array_map(static fn($b) => [$b['rep_min'], $b['rep_max']], $sp), true), json_encode(array_map(static fn($b) => [$b['name'], $b['target_sets'], $b['rep_min'], $b['rep_max']], $sp)));
+check('Get started: only machines, cables, dumbbells, bodyweight or bands', array_filter($sp, static fn($b) => !in_array($b['kind'], Generator::STARTER_KINDS, true)) === [], json_encode(array_column($sp, 'kind')));
+[$wu, $wg] = $goalUser('goal-weight', 'weight_loss');
+$wp = $lifts($gen->generate($wu, $wg, ['day_type' => 'legs', 'minutes' => 60]));
+check('Reduce bodyweight: 12+ reps and short rests', $wp && min(array_column($wp, 'rep_min')) >= 12 && max(array_column($wp, 'rest_seconds')) <= 45, json_encode(array_map(static fn($b) => [$b['rep_min'], $b['rest_seconds']], $wp)));
+[$pu, $pg] = $goalUser('goal-power', 'powerlifting');
+$pp = fn(string $day) => array_map(static fn($b) => $b, $lifts($gen->generate($pu, $pg, ['day_type' => $day, 'minutes' => 75])));
+$push = $pp('push');
+$pull = $pp('pull');
+$legs = $pp('legs');
+$lower = $pp('lower');
+check('Powerlifting: Push starts with the barbell bench press, 3-5 reps', $slugOf($push[0]['exercise_id']) === 'barbell-bench-press' && $push[0]['rep_min'] === 3 && $push[0]['rep_max'] === 5, $push[0]['name']);
+check('Powerlifting: Pull leads with the deadlift', $slugOf($pull[0]['exercise_id']) === 'deadlift', $pull[0]['name']);
+check('Powerlifting: Legs has the back squat and a Romanian deadlift, not a second heavy deadlift', in_array('back-squat', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true) && in_array('romanian-deadlift', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true) && !in_array('deadlift', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true));
+check('Powerlifting: Lower body has the squat and the deadlift', count(array_intersect(['back-squat', 'deadlift'], array_map(static fn($b) => $slugOf($b['exercise_id']), $lower))) === 2);
+check('Powerlifting says why the competition lift is there', strpos($push[0]['reason'], 'competition lift') !== false, $push[0]['reason']);
+$dbOnly = $mkGym((int) $pu['id'], 'Dumbbells only', ['dumbbells', 'bench']);
+$dpush = $lifts($gen->generate($pu, $dbOnly, ['day_type' => 'push', 'minutes' => 60]));
+check('Powerlifting without a barbell uses the closest variation', $slugOf($dpush[0]['exercise_id']) === 'dumbbell-bench-press' && strpos($dpush[0]['reason'], 'closest to the competition lift') !== false, $dpush[0]['name'] . ' / ' . $dpush[0]['reason']);
+$plain = $lifts($gen->generate($pu, $pg, ['day_type' => 'custom', 'muscles' => ['chest'], 'minutes' => 45]));
+check('picked-muscle days keep their own rules for powerlifting too', $plain !== []);
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');
