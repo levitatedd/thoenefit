@@ -836,7 +836,7 @@ await shot('11-settings');
 check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.page > :last-child')), await page.textContent('.page > :last-child'));
 // #103: one heading colour, Training and Gyms first, the rest behind links.
 {
-  const heads = await page.$$eval('.settings-main > h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  const heads = await page.$$eval('.settings-main .top-head h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
@@ -1331,6 +1331,7 @@ console.log('Pause and resume a workout');
   check('on other tabs the Today spot is a Workout tab with the barbell, not Pause or Play', (await page.locator('.pause-tab').count()) === 0 && (await page.locator('a.workout-tab[href="#/workout"]').textContent()) === 'Workout');
   check('while paused the Workout tab is yellow and still', (await page.$eval('a.workout-tab', (el) => [getComputedStyle(el).color, getComputedStyle(el.querySelector('.tab-icon')).animationName].join())) === 'rgb(245, 198, 60),none');
   check('no sideways scrolling with the way-back bar', (await overflow()) <= 0);
+  check('the way-back bar sits in the fixed header, under the History title (#175)', (await page.locator('main > .top-head .back-to-workout').count()) === 1 && (await page.evaluate(() => document.querySelector('.back-to-workout').getBoundingClientRect().top >= document.querySelector('.top-head h1').getBoundingClientRect().bottom)));
   await shot('30-history-during-workout');
   await page.click('.back-to-workout');
   await page.waitForSelector('.paused-banner');
@@ -1773,6 +1774,49 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
     await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, qs.id);
   check('no sideways scrolling', (await overflow()) <= 0);
+}
+
+console.log('Fixed page headers (#175)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  const look = () => page.evaluate(() => {
+    const head = document.querySelector('main > .top-head');
+    if (!head) return null;
+    const h1 = head.querySelector('h1');
+    const hs = getComputedStyle(h1);
+    const next = head.nextElementSibling;
+    return {
+      position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), bottom: head.getBoundingClientRect().bottom,
+      bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
+      font: `${hs.fontSize} ${hs.fontWeight} ${hs.fontFamily}`, color: hs.color, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top),
+      nextTop: next ? next.getBoundingClientRect().top : Infinity,
+    };
+  });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.top-head');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const today = await look();
+  const screens = {};
+  for (const tab of ['history', 'trends', 'exercises', 'settings']) {
+    await page.goto(`${URL}#/${tab}`);
+    await page.waitForSelector('main > .top-head');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    screens[tab] = await look();
+  }
+  const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
+  check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
+  check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
+  check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
+  for (const tab of ['exercises', 'settings']) {
+    await page.goto(`${URL}#/${tab}`);
+    await page.waitForSelector('main > .top-head');
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(300);
+    const s = await look();
+    check(`scrolling ${tab} keeps the header at the top with a drop shadow under it`, s.top === 0 && s.h1Top > 0 && s.shadow !== 'none', JSON.stringify(s));
+  }
+  await shot('47-fixed-header-scrolled');
+  await page.evaluate(() => window.scrollTo(0, 0));
 }
 
 console.log('Send feedback');
