@@ -1241,6 +1241,16 @@ console.log("Seeing each other's history");
 
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('text=Who can see your history');
+  {
+    // #194: selected options use the Pick muscle groups highlight.
+    const sel = await page.$eval('.choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor, c.color]; });
+    check('selected options in Settings use the Pick muscle groups highlight (mint border, mint tint, mint text) (#194)', JSON.stringify(sel) === JSON.stringify(['rgb(58, 242, 156)', 'rgba(58, 242, 156, 0.14)', 'rgb(58, 242, 156)']), JSON.stringify(sel));
+    await page.focus('.choice[aria-pressed="false"]');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    const focus = await page.evaluate(() => { const c = getComputedStyle(document.activeElement); return [document.activeElement.className, c.outlineStyle, c.outlineColor]; });
+    check('keyboard focus on an option is still a distinct blue outline', focus[0] === 'choice' && focus[1] === 'solid' && focus[2] === 'rgb(90, 162, 255)', JSON.stringify(focus));
+  }
   check('Settings offers Only me and All signed-in users, starting at Only me', (await page.locator('.choice[aria-pressed="true"]:has-text("Only me")').count()) === 1 && (await page.locator('.choice:has-text("All signed-in users")').count()) === 1);
   await page.click('.choice:has-text("All signed-in users")');
   await waitForToast(page, /visible to signed-in users/);
@@ -1771,6 +1781,7 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.click('.muscle-tile[data-muscle="lats"]');
   await page.click('.muscle-tile[data-muscle="biceps"]');
   const picked = await buildLook();
+  const tileSel = await page.$eval('.muscle-tile[aria-pressed="true"]', (t) => { const c = getComputedStyle(t); return [c.borderTopColor, c.backgroundColor, getComputedStyle(t.querySelector('.muscle-name')).color]; });
   check('the build button counts the picks, filled mint', picked.text === 'Build (2)' && !picked.disabled && picked.bg === 'rgb(58, 242, 156)' && picked.color === 'rgb(14, 17, 21)', JSON.stringify(picked));
   await page.evaluate(() => document.querySelector('.sheet-body').scrollTo(0, 9999));
   const headFits = await page.evaluate(() => { const b = document.querySelector('.sheet-head .build-btn').getBoundingClientRect(); const c = [...document.querySelectorAll('.sheet-head button')].pop().getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight && c.right <= innerWidth && document.querySelector('.sheet-panel').scrollWidth <= innerWidth; });
@@ -1780,6 +1791,14 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await settle();
   const arts = await page.$$eval('.plan-row img.muscle-art', (is) => is.map((i) => i.dataset.muscle));
   check('the plan trains only the picked groups', arts.length >= 2 && arts.every((m) => ['lats', 'biceps'].includes(m)) && arts.includes('lats') && arts.includes('biceps'), arts.join());
+  {
+    // #194: a pressed toggle (Lock) uses exactly the picked-tile highlight.
+    const lockBtn = page.locator('.plan-row button[aria-pressed]').first();
+    await lockBtn.click();
+    const lockSel = await lockBtn.evaluate((b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor, c.color]; });
+    check('Locked uses the same highlight as a picked muscle tile (#194)', JSON.stringify(lockSel) === JSON.stringify(tileSel), JSON.stringify({ lockSel, tileSel }));
+    await lockBtn.click();
+  }
   check('the dropdown names the custom day', /Custom: Biceps, Lats/.test(await page.$eval('select[aria-label="Workout type"]', (s) => s.selectedOptions[0].textContent)));
   // Edit before starting (#155).
   const before = await names();

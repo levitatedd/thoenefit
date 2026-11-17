@@ -15,6 +15,10 @@
   --yellow: #f5c63c;
   --red: #ff6b5e;
   --ink: #0e1115;
+  /* Selected options (#194): the Pick muscle groups tile highlight, used app-wide. */
+  --selected-border: var(--mint);
+  --selected-bg: rgba(58, 242, 156, 0.14);
+  --selected-text: var(--mint);
   --display: "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
   --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", system-ui, sans-serif;
   --tabs-h: 62px;
@@ -387,8 +391,9 @@ body.scrolled .top-head {
 }
 
 .btn[aria-pressed="true"] {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
+  color: var(--selected-text);
 }
 
 /* ---- forms ---- */
@@ -480,13 +485,13 @@ textarea:focus {
 }
 
 .choice[aria-pressed="true"] {
-  border-color: var(--chalk);
-  background: var(--chalk);
-  color: var(--ink);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
+  color: var(--selected-text);
 }
 
 .choice[aria-pressed="true"] .choice-hint {
-  color: #3d4652;
+  color: var(--chalk);
 }
 
 .stepper {
@@ -2043,8 +2048,8 @@ button.setup-note {
 }
 
 .muscle-tile[aria-pressed="true"] {
-  border-color: var(--mint);
-  background: rgba(58, 242, 156, 0.14);
+  border-color: var(--selected-border);
+  background: var(--selected-bg);
 }
 
 .muscle-tile[aria-pressed="true"] img {
@@ -2052,7 +2057,7 @@ button.setup-note {
 }
 
 .muscle-tile[aria-pressed="true"] .muscle-name {
-  color: var(--mint);
+  color: var(--selected-text);
 }
 
 .plan-edit {
