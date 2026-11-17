@@ -490,8 +490,89 @@ check('the Trends tab shows weekly lifting volume, weekly workout time and Recov
   check(`tapping a week on Trends shows that week's total and workouts (${weekText.replace(/\s+/g, ' ').trim()})`, /Week of/.test(weekText) && /workout/.test(weekText) && (await page.locator('.chart-readout').first().locator('a').count()) === 0);
   check('no stray text on Trends', !/\b(undefined|null|NaN|false)\b/.test(await page.textContent('.page')));
 }
+// #166: Recovery estimate as Pick muscle groups tiles, each opening its details.
+{
+  const tiles = await page.$$eval('.recovery-card .muscle-tile', (ts) => ts.map((t) => [t.dataset.muscle, t.querySelector('.muscle-pct').textContent, !!t.querySelector('img'), t.classList.contains('tired')]));
+  check('Recovery estimate shows a tile for every muscle group, with its illustration and percentage, most recovered first (#166)', tiles.length === 13 && tiles.every(([, p, img]) => /^\d+%/.test(p) && img) && tiles.map(([, p]) => parseInt(p, 10)).every((v, i, a) => i === 0 || a[i - 1] >= v), JSON.stringify(tiles));
+  check('below 50% the tile says it is still recovering', tiles.every(([, p, , tired]) => (parseInt(p, 10) < 50) === tired && (tired ? /recovering/.test(p) : true)));
+  const last = (await page.evaluate(async () => (await (await fetch(`api.php?a=trends&timezone=UTC`)).json()).muscle_last));
+  const trained = Object.keys(last)[0];
+  await page.click(`.recovery-card .muscle-tile[data-muscle="${trained}"]`);
+  await page.waitForSelector('.sheet .muscle-detail');
+  const sheetText = await page.textContent('.sheet');
+  check('tapping a trained muscle shows its recovery, when it was last trained, the exercises and a link to the workout', /%/.test(sheetText) && /Last trained/.test(sheetText) && last[trained].exercises.every((n) => sheetText.includes(n)) && (await page.getAttribute('.sheet a:has-text("Open workout")', 'href')) === `#/history/${last[trained].workout_id}`, sheetText.slice(0, 200));
+  await shot('19-trends-muscle');
+  await page.click('.sheet button:has-text("Close")');
+  const untrained = tiles.map(([m]) => m).find((m) => !last[m]);
+  if (untrained) {
+    await page.click(`.recovery-card .muscle-tile[data-muscle="${untrained}"]`);
+    await page.waitForSelector('.sheet .muscle-detail');
+    check('a muscle with no recent training still opens, showing just its estimate', /No training logged/.test(await page.textContent('.sheet')) && (await page.locator('.sheet a:has-text("Open workout")').count()) === 0);
+    await page.click('.sheet button:has-text("Close")');
+  }
+}
+// #184: the line under the title picks the range, and it is remembered.
+{
+  const range = page.locator('main > .top-head select.trends-range');
+  check('the Trends range is the line under the title, starting at Last 8 weeks (#184)', (await range.evaluate((s) => s.selectedOptions[0].textContent)) === 'Last 8 weeks' && (await range.locator('option').allTextContents()).join() === 'Last 8 weeks,Last month,Last 2 months,Last 3 months,Last 6 months,Last year');
+  await range.selectOption('52');
+  await page.waitForSelector('h2:has-text("Monthly lifting volume")');
+  const year = await page.evaluate(async () => (await (await fetch('api.php?a=trends&timezone=UTC&weeks=52')).json()).weeks.length);
+  check('Last year covers 52 weeks, shown by month', year === 52 && (await page.locator('h2:has-text("Monthly workout time")').count()) === 1);
+  await page.reload();
+  await page.waitForSelector('h2:has-text("Monthly lifting volume")');
+  check('the chosen range is still there after reopening the app', (await page.locator('main > .top-head select.trends-range').evaluate((s) => s.selectedOptions[0].textContent)) === 'Last year');
+  await page.locator('main > .top-head select.trends-range').selectOption('8');
+  await page.waitForSelector('h2:has-text("Weekly lifting volume")');
+  check('the server only accepts the offered ranges', (await page.evaluate(async () => (await (await fetch('api.php?a=trends&timezone=UTC&weeks=1000')).json()).weeks.length)) === 8);
+}
 check('Trends is highlighted in the tab bar', (await page.getAttribute('.tab:has-text("Trends")', 'aria-current')) === 'page');
 check('no sideways scrolling on Trends', (await overflow()) <= 0);
+
+console.log('Pinned exercises (#126)');
+{
+  const pinned = () => page.$$eval('.pinned-card .log-title', (els) => els.map((e) => e.textContent));
+  check('with nothing pinned, Trends says how to pin', (await pinned()).length === 0 && /Pin up to 5 exercises/.test(await page.textContent('.pinned-card')));
+  await page.goto(`${URL}#/exercises`);
+  await page.fill('input[type=search]', liftName.slice(0, 12));
+  await page.click(`.log-row:has-text("${liftName}")`);
+  await page.waitForSelector('.pin-btn');
+  await page.click('.pin-btn');
+  await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
+  check('an exercise page pins it to Trends', /Pinned to Trends/.test(await page.textContent('.pin-btn')));
+  await page.click('.tab:has-text("Trends")');
+  await page.waitForSelector('.pinned-card .log-row');
+  const row = await page.textContent('.pinned-card .log-row');
+  check('Trends shows the pinned exercise with its latest result, opening its chart', row.includes(liftName) && /× \d+/.test(row) && /\/exercises\/\d+$/.test(await page.getAttribute('.pinned-card .log-row', 'href')), row);
+  await shot('19b-trends-pinned');
+  // Fill up to five, then try a sixth from its page.
+  const ids = await page.evaluate(async (n) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const others = b.exercises.filter((x) => x.name !== n && !x.archived).slice(0, 5);
+    for (const x of others.slice(0, 4)) await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: x.id, pinned: true }) });
+    return others.map((x) => x.id);
+  }, liftName);
+  const refused = await page.evaluate(async (id) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    return (await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: id, pinned: true }) })).status;
+  }, ids[4]);
+  check('the server refuses a sixth pin', refused === 409, String(refused));
+  await page.goto(`${URL}#/exercises/${ids[4]}`);
+  await page.reload();
+  await page.waitForSelector('.pin-btn');
+  await page.click('.pin-btn');
+  await page.waitForSelector('.sheet:has-text("Unpin one first")');
+  check('pinning a sixth asks which to unpin first', (await page.locator('.sheet .pin-swap').count()) === 5);
+  await page.locator('.sheet .pin-swap').first().locator('button:has-text("Unpin")').click();
+  await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
+  const pins = (await page.evaluate(async () => (await (await fetch('api.php?a=pins')).json()).pins)).map((p) => p.exercise_id);
+  check('unpinning one makes room, and the new one is pinned', pins.length === 5 && pins.includes(ids[4]), JSON.stringify(pins));
+  // Leave nothing pinned for the rest of the walk-through.
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=pin_exercise', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ exercise_id: id, pinned: false }) });
+  }, pins);
+}
 
 console.log('Exercises, settings, small screens');
 await page.click('.tab:has-text("Exercises")');
@@ -2122,7 +2203,7 @@ console.log('Fixed page headers (#175)');
     }
     check('switching tabs keeps the same header and logo on screen and only changes the title, so nothing blinks', kept.every(Boolean), kept.join());
   }
-  check('Trends and History say "Last 8 weeks." under their titles', screens.trends.sub === 'Last 8 weeks.' && screens.history.sub === 'Last 8 weeks.', JSON.stringify([screens.trends.sub, screens.history.sub]));
+  check('History says "Last 8 weeks." under its title, and Trends names its range there', screens.history.sub === 'Last 8 weeks.' && screens.trends.sub.startsWith('Last 8 weeks'), JSON.stringify([screens.trends.sub, screens.history.sub]));
   check('Settings shows the version under its title', /^Version /.test(screens.settings.sub), screens.settings.sub);
   {
     await page.click('.tab:has-text("History")');
