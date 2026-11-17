@@ -359,6 +359,50 @@ final class Generator
         ];
     }
 
+    /** How far back, and how many matching ratings, it takes for effort to change a plan (#198). */
+    public const EFFORT_DAYS = 28;
+    public const EFFORT_SESSIONS = 2;
+    public const EFFORT_MAX_SETS = 5;
+
+    /**
+     * How recent comparable workouts felt (#198): 'hard' or 'light' when the last
+     * two the lifter explicitly rated (same workout type, last 4 weeks) agree,
+     * otherwise null. 'light' also needs those sessions to have done all their
+     * planned working sets, so an easy rating on a cut-short day doesn't add work.
+     * Moderate, mixed or skipped ratings keep the usual rules.
+     */
+    public function effortTrend(int $uid, string $dayType, int $now): ?string
+    {
+        if (!isset(self::TEMPLATES[$dayType])) {
+            return null; // picked-muscle days differ each time, so there is nothing comparable
+        }
+        $rows = $this->db->all(
+            "SELECT id, effort FROM workouts WHERE user_id=? AND status='completed' AND day_type=? AND effort_rated=1 AND started_at>=?
+             ORDER BY started_at DESC LIMIT " . self::EFFORT_SESSIONS,
+            [$uid, $dayType, gmdate('Y-m-d H:i:s', $now - self::EFFORT_DAYS * 86400)]
+        );
+        if (count($rows) < self::EFFORT_SESSIONS) {
+            return null;
+        }
+        $efforts = array_unique(array_column($rows, 'effort'));
+        if (count($efforts) !== 1 || !in_array($efforts[0], ['hard', 'light'], true)) {
+            return null;
+        }
+        if ($efforts[0] === 'light') {
+            foreach ($rows as $r) {
+                $short = $this->db->val(
+                    'SELECT COUNT(*) FROM workout_exercises we WHERE we.workout_id=? AND we.target_seconds IS NULL
+                       AND (SELECT COUNT(*) FROM workout_sets s WHERE s.workout_exercise_id=we.id AND s.done=1 AND s.warmup=0 AND s.reps>0) < we.target_sets',
+                    [$r['id']]
+                );
+                if ((int) $short > 0) {
+                    return null;
+                }
+            }
+        }
+        return $efforts[0];
+    }
+
     /** How many recent sessions of one setup must agree before calling it a stall (#124). */
     public const STALL_SESSIONS = 3;
 
@@ -752,6 +796,9 @@ final class Generator
         $stats = $this->muscleStats($uid, $now);
         $recent = $this->recentUse($uid, $now);
         $bodyweightOnly = ($opts['bodyweight_only'] ?? false) === true;
+        // How the last comparable workouts felt (#198) nudges the number of sets, never weights or reps.
+        $effort = $template === null ? $this->effortTrend($uid, $dayType, $now) : null;
+        $effortChanged = false;
         $by = $this->available($uid, $gym, $bodyweightOnly);
         $equipmentContext = $bodyweightOnly ? 'without equipment' : 'with the equipment at ' . $gym['name'];
         $byId = [];
@@ -849,6 +896,16 @@ final class Generator
             }
             $tired = $stats[$muscle]['recovery'] < 50;
             $block = $this->block($user, $gym, $pick, $tired, bodyweightOnly: $bodyweightOnly);
+            if ($effort === 'hard' && !$tired && $block['target_sets'] > 2) {
+                // Already one set down for recovery? Then not another.
+                $block['target_sets']--;
+                $effortChanged = true;
+            } elseif ($effort === 'light' && $isRequired && $stats[$muscle]['recovery'] >= 80 && $block['target_sets'] < self::EFFORT_MAX_SETS) {
+                // Main lifts only, for well-recovered muscles; the time budget below still applies.
+                $block['target_sets']++;
+                $effortChanged = true;
+            }
+            $block['minutes'] = round(($block['target_sets'] * (45 + $block['rest_seconds']) + 90) / 60, 1);
             if (count($blocks) - ($warm ? 1 : 0) >= 3 && $total + $block['minutes'] > $minutes) {
                 if ($how === 'locked') {
                     // Locked exercises always stay, even if they run the session long.
@@ -933,6 +990,12 @@ final class Generator
             'exercises' => $blocks,
             'skipped' => $skipped,
             'recovery' => $stats,
+            // Said once for the whole workout when effort ratings changed it (#198).
+            'effort_note' => $effortChanged
+                ? ($effort === 'hard'
+                    ? 'Your recent ' . strtolower(self::DAY_LABELS[$dayType]) . ' workouts felt hard, so this one has fewer sets.'
+                    : 'Your recent ' . strtolower(self::DAY_LABELS[$dayType]) . ' workouts felt light, so the main lifts get an extra set.')
+                : null,
         ];
     }
 

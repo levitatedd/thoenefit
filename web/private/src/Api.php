@@ -336,7 +336,7 @@ final class Api
             case 'save_workout':
                 $doc = (array) ($in['workout'] ?? []);
                 $saved = $this->workouts->save($uid, $doc);
-                if (!empty($saved['completed_now']) && isset(Calories::EFFORTS[$doc['effort'] ?? '']) && $doc['effort'] !== $user['effort']) {
+                if (!empty($saved['completed_now']) && !empty($doc['effort_rated']) && isset(Calories::EFFORTS[$doc['effort'] ?? '']) && $doc['effort'] !== $user['effort']) {
                     // Offer the same effort next time (#38).
                     $this->db->run('UPDATE users SET effort=? WHERE id=?', [$doc['effort'], $uid]);
                 }

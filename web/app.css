@@ -590,6 +590,12 @@ textarea:focus {
   font: 700 19px/1.2 var(--display);
 }
 
+/* Effort ratings changed the plan (#198): one line under the summary. */
+.effort-note {
+  margin-top: -8px;
+  color: var(--muted);
+}
+
 .plan {
   display: flex;
   flex-direction: column;
