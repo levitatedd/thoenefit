@@ -840,6 +840,7 @@ check('settings end with the app version', /^Version (dev|\d+\.\d+\.\d+(-staging
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  check('no divider line between the Settings header and Training', (await page.$eval('.settings-main > .top-head + .section', (el) => getComputedStyle(el).borderTopStyle)) === 'none');
   const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
   check("Settings links to Routines, data, help and What's new instead of showing them inline", ['Manage routines', 'Export all sets as CSV', 'Import from Fitbod', 'Add to your Home Screen', "What's new"].every((t) => links.includes(t)) && (await page.locator('[data-list=routines]').count()) === 0 && !(await page.textContent('.page')).includes('Tap the Share button'), links.join());
   await page.click('.link-row:has-text("Add to your Home Screen")');
@@ -1342,6 +1343,19 @@ console.log('Pause and resume a workout');
   await page.click('a.workout-tab');
   await page.waitForSelector('.lift');
   check('the Workout tab goes back to the workout and leaves it paused', (await page.evaluate(() => location.hash)) === '#/workout' && (await page.locator('.paused-banner').count()) === 1 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Resume workout');
+  {
+    const wh = await page.evaluate(() => {
+      const head = document.querySelector('main > .top-head');
+      const h1 = head?.querySelector('h1');
+      return head && { position: getComputedStyle(head).position, top: Math.round(head.getBoundingClientRect().top), color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top), clock: !!head.querySelector('#elapsed'), sync: !!head.querySelector('#sync') };
+    });
+    await page.goto(`${URL}#/history`);
+    await page.waitForSelector('main > .top-head');
+    const ref = await page.evaluate(() => { const h1 = document.querySelector('main > .top-head h1'); return { color: getComputedStyle(h1).color, size: getComputedStyle(h1).fontSize, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top) }; });
+    check('during a workout the header matches the other screens, with the clock and save status on the right (#175)', wh && wh.position === 'sticky' && wh.top === 0 && wh.color === 'rgb(58, 242, 156)' && wh.size === ref.size && wh.left === ref.left && wh.h1Top === ref.h1Top && wh.clock && wh.sync, JSON.stringify({ wh, ref }));
+    await page.goto(`${URL}#/workout`);
+    await page.waitForSelector('.lift');
+  }
   await page.click('.paused-banner button:has-text("Resume")');
   await waitForToast(page, /Workout resumed/);
   check('Resume clears the pause', (await page.locator('.paused-banner').count()) === 0 && (await page.locator('.pause-tab').getAttribute('aria-label')) === 'Pause workout');

@@ -210,8 +210,13 @@ a {
   position: static;
 }
 
-body.scrolled .top-head,
-body.scrolled .workout-head {
+/* The first section under a header needs no divider above it (Settings). */
+main > .top-head + .section {
+  border-top: none;
+  padding-top: 0;
+}
+
+body.scrolled .top-head {
   box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.9);
 }
 
@@ -710,25 +715,6 @@ textarea:focus {
 }
 
 /* ---- active workout ---- */
-
-.workout-head {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
-  margin: calc(-18px - env(safe-area-inset-top, 0px)) -16px 0;
-  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-  transition: box-shadow 0.2s ease;
-}
-
-.workout-head h1 {
-  font-size: 26px;
-}
 
 .workout-meta {
   display: flex;
