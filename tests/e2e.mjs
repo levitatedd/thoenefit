@@ -1804,7 +1804,7 @@ console.log('Fixed page headers (#175)');
       bg: getComputedStyle(head).backgroundColor, shadow: getComputedStyle(head).boxShadow,
       font: `${hs.fontSize} ${hs.fontWeight} ${hs.fontFamily}`, color: hs.color, left: Math.round(h1.getBoundingClientRect().left), h1Top: Math.round(h1.getBoundingClientRect().top),
       nextTop: next ? next.getBoundingClientRect().top : Infinity,
-      logo: !!head.querySelector('.top-head-row > img.brand-wide'), sub: head.querySelector('p.muted')?.textContent || '',
+      logo: !!head.querySelector('.top-head-row > img.brand-wide'), logoTop: head.querySelector('.top-head-row > img.brand-wide')?.getBoundingClientRect().top, sub: head.querySelector('p.muted')?.textContent || '',
     };
   });
   await page.goto(`${URL}#/today`);
@@ -1821,6 +1821,19 @@ console.log('Fixed page headers (#175)');
   const same = Object.values(screens).every((x) => x.font === today.font && x.color === today.color && x.left === today.left && x.h1Top === today.h1Top);
   check('History, Trends, Exercises and Settings headers match Today: font, mint colour and position', today.color === 'rgb(58, 242, 156)' && same, JSON.stringify({ today, screens }));
   check('every top-level header has the wide logo top right, like Today', [today, ...Object.values(screens)].every((x) => x.logo));
+  check('the logo sits in exactly the same spot on every tab, with or without a line under the title', Object.values(screens).every((x) => Math.abs(x.logoTop - today.logoTop) < 0.5), JSON.stringify([today.logoTop, ...Object.values(screens).map((x) => x.logoTop)]));
+  {
+    await page.click('.tab:has-text("History")');
+    await page.waitForFunction(() => document.querySelector('main > .top-head h1')?.textContent === 'History');
+    await page.evaluate(() => { window.__head = document.querySelector('main > .top-head'); window.__logo = window.__head.querySelector('img.brand-wide'); });
+    const kept = [];
+    for (const t of ['Trends', 'Exercises', 'Settings']) {
+      await page.click(`.tab:has-text("${t}")`);
+      await page.waitForFunction((x) => document.querySelector('main > .top-head h1')?.textContent === x, t);
+      kept.push(await page.evaluate(() => document.querySelector('main > .top-head') === window.__head && document.querySelector('main > .top-head img.brand-wide') === window.__logo));
+    }
+    check('switching tabs keeps the same header and logo on screen and only changes the title, so nothing blinks', kept.every(Boolean), kept.join());
+  }
   check('Trends says just "Last 8 weeks" under its title', screens.trends.sub === 'Last 8 weeks', screens.trends.sub);
   check('every top-level header is held at the top, over the page background', [today, ...Object.values(screens)].every((x) => x.position === 'sticky' && x.top === 0 && x.bg === 'rgb(18, 21, 26)'));
   check('at the top of the page there is no shadow, and the first row starts below the header', [today, ...Object.values(screens)].every((x) => x.shadow === 'none' && x.nextTop >= x.bottom));
