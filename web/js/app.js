@@ -1563,12 +1563,12 @@ function viewWorkout() {
   const doneSets = doc.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0);
   const totalSets = doc.exercises.reduce((n, e) => n + e.sets.length, 0);
 
-  const head = h(
-    'header',
-    { class: 'workout-head' },
-    h('div', {}, h('h1', {}, dayLabel(doc.day_type)), h('p', { class: 'muted' }, `${doc.gym_name}, ${doneSets} of ${totalSets} sets`)),
-    h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: `elapsed ${doc.paused_at ? 'paused' : ''}` }, fmtClock(workoutSeconds(doc))), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
-  );
+  // Today's header (#175), with the clock and save status where Today has the logo.
+  const head = topHead(dayLabel(doc.day_type), {
+    sub: `${doc.gym_name}, ${doneSets} of ${totalSets} sets`,
+    right: h('div', { class: 'workout-meta' }, h('output', { id: 'elapsed', class: `elapsed ${doc.paused_at ? 'paused' : ''}` }, fmtClock(workoutSeconds(doc))), h('span', { id: 'sync', class: 'sync', role: 'status' }, 'Saved')),
+    rowClass: 'workout-head',
+  });
   const paused = doc.paused_at && h('section', { class: 'paused-banner', role: 'status' },
     h('div', {}, h('strong', {}, 'Paused'), h('span', { class: 'muted small' }, 'The clock is stopped. Logging a set resumes it.')),
     h('button', { class: 'btn primary small', type: 'button', onclick: () => togglePause() }, icon('play', 18), 'Resume'));
