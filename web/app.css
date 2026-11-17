@@ -1492,6 +1492,40 @@ input[type="file"] {
   padding: 14px 8px 6px 18px;
 }
 
+.sheet-head h2 {
+  min-width: 0;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.sheet-actions .btn.ghost {
+  padding: 0 12px;
+}
+
+/* Build (n) in the Pick muscle groups header (#169): filled mint once something is picked. */
+.btn.build-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border-color: var(--mint);
+  background: var(--mint);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.btn.build-btn:disabled {
+  opacity: 1;
+  background: var(--raised);
+  color: var(--mint);
+}
+
 .sheet-body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;

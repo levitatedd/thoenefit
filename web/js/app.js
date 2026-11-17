@@ -1858,13 +1858,8 @@ function quickStart() {
 async function musclePicker() {
   const chosen = new Set(S.draftOpts.day_type === 'custom' ? S.draftOpts.muscles || [] : []);
   const grid = h('div', { class: 'muscle-grid' }, h('p', { class: 'muted' }, 'Loading'));
-  const build = h('button', { class: 'btn primary block', type: 'submit', disabled: true }, 'Build workout');
-  const refresh = () => {
-    build.disabled = chosen.size === 0;
-    build.textContent = chosen.size ? `Build workout (${chosen.size})` : 'Build workout';
-  };
-  const close = sheet('Pick muscle groups', h('form', { class: 'stack', onsubmit: (e) => {
-    e.preventDefault();
+  // Build (n) sits in the sheet header, next to Close, so it stays in reach while the tiles scroll (#169).
+  const build = h('button', { class: 'btn build-btn', type: 'button', disabled: true, onclick: () => {
     if (!chosen.size) return;
     close();
     S.draftOpts.day_type = 'custom';
@@ -1873,7 +1868,13 @@ async function musclePicker() {
     S.draftAdded = [];
     S.draftRemoved = [];
     loadDraft();
-  } }, h('p', { class: 'muted small' }, 'Recovery comes from the sets you logged in the last week, like on Trends. Below 50% is still recovering.'), grid, build));
+  } }, 'Build');
+  const refresh = () => {
+    build.disabled = chosen.size === 0;
+    build.textContent = chosen.size ? `Build (${chosen.size})` : 'Build';
+  };
+  const close = sheet('Pick muscle groups', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, 'Recovery comes from the sets you logged in the last week, like on Trends. Below 50% is still recovering.'), grid), { actions: [build] });
   refresh();
   try {
     const { recovery } = await api.get('recovery');
