@@ -542,6 +542,8 @@ console.log('Pinned exercises (#126)');
   await page.fill('input[type=search]', liftName.slice(0, 12));
   await page.click(`.log-row:has-text("${liftName}")`);
   await page.waitForSelector('.pin-btn');
+  await page.waitForSelector('.p1rm-value');
+  const pageP1rm = (await page.textContent('.p1rm-value')).trim();
   await page.click('.pin-btn');
   await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
   check('an exercise page pins it to Trends', /Pinned to Trends/.test(await page.textContent('.pin-btn')));
@@ -549,6 +551,10 @@ console.log('Pinned exercises (#126)');
   await page.waitForSelector('.pinned-card .log-row');
   const row = await page.textContent('.pinned-card .log-row');
   check('Trends shows the pinned exercise with its latest result, opening its chart', row.includes(liftName) && /× \d+/.test(row) && /\/exercises\/\d+$/.test(await page.getAttribute('.pinned-card .log-row', 'href')), row);
+  const pinP1rm = await page.textContent('.pinned-card .pin-p1rm').catch(() => null);
+  check('the pinned exercise shows the same P1RM as its page', pinP1rm === `P1RM · ${pageP1rm}`, `${pinP1rm} vs ${pageP1rm}`);
+  const trendHeads = await page.$$eval('.trends-page .card > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('every Trends section heading is mint green', trendHeads.length >= 4 && trendHeads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(trendHeads));
   await shot('19b-trends-pinned');
   // Fill up to five, then try a sixth from its page.
   const ids = await page.evaluate(async (n) => {

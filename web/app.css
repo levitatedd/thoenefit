@@ -1877,6 +1877,11 @@ ul.notes {
   color: var(--mint);
 }
 
+/* Trends cards get the same mint headings. */
+.trends-page .card > h2 {
+  color: var(--mint);
+}
+
 .settings-main .section {
   gap: 12px;
   padding-top: 22px;

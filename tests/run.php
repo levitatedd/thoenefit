@@ -1755,6 +1755,7 @@ $tu = $auth->createUser('trend-batch', 'trend batch password');
 $tg = $mkGym($tu, 'Trends gym', Catalog::equipmentKeys());
 check('Trends defaults to 8 weeks and builds exactly the chosen range', count($wk->weeklyTrends($tu, 'lb', 'UTC')) === 8 && count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 52)) === 52 && count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 5)) === 5);
 check('a range that is not offered falls back to 8 weeks', count($wk->weeklyTrends($tu, 'lb', 'UTC', null, 1000)) === 8);
+$wk->save($tu, $doc($tg, 'push', [[$bench, 6, 10, [[125, 8]]]], $ago(6)));
 $wk->save($tu, $doc($tg, 'push', [[$bench, 6, 10, [[135, 8], [145, 6]]]], $ago(3)));
 $wk->save($tu, $doc($tg, 'push', [[$press, 8, 12, [[100, 10]]]], $ago(1)));
 $wk->setPin($tu, $bench, true);
@@ -1762,6 +1763,7 @@ $wk->setPin($tu, $press, true);
 $wk->setPin($tu, $bench, true); // pinning twice is harmless
 $pins = $wk->pins($tu);
 check('pins come back in the order pinned, once each, with the latest result', array_column($pins, 'exercise_id') === [$bench, $press] && $pins[0]['last']['best'] === ['weight' => 145.0, 'reps' => 6], json_encode($pins[0]['last']['best'] ?? null));
+check('each pin carries its recent sessions of the same setup, newest first, for its P1RM', count($pins[0]['recent']) === 2 && $pins[0]['recent'][0]['date'] === $pins[0]['last']['date'] && $pins[0]['recent'][0]['sets'] === $pins[0]['last']['sets'] && $pins[0]['recent'][1]['date'] < $pins[0]['recent'][0]['date'], json_encode($pins[0]['recent']));
 check('machine pins name the gym, barbell pins do not', $pins[1]['last']['gym_name'] === 'Trends gym' && $pins[0]['last']['gym_name'] === null);
 $more = array_slice(array_values(array_filter(array_keys($exById), static fn($id) => $id !== $bench && $id !== $press)), 0, 4);
 foreach (array_slice($more, 0, 3) as $id) {
