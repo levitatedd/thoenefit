@@ -1128,6 +1128,8 @@ function viewToday() {
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
       h('p', { class: 'summary' }, planSummary(d)),
+      // How recent workouts felt changed the plan (#198): said once, for the whole workout.
+      d.effort_note && h('p', { class: 'effort-note' }, d.effort_note),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
@@ -2123,9 +2125,11 @@ function finishSheet(doc) {
     };
     strava = { send, summary, calories: caloriesRow ? calories : null, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details, caloriesRow) };
   }
-  // How hard it felt (#38), for the calorie estimate. Asked once a body weight is set.
-  let effort = S.user.effort || 'moderate';
-  const effortField = done && S.user.body_weight != null && field('How hard was it?', choices(EFFORTS, effort, (v) => (effort = v), { columns: 3 }), 'Used to estimate the calories you burned.');
+  // How hard it felt: optional, nothing chosen until tapped (#198). A choice helps plan the next
+  // workouts of this kind and the calorie estimate (#38); skipping keeps the usual effort for calories only.
+  let effort = null;
+  const effortField = done && field('How hard was it?', choices(EFFORTS, null, (v) => (effort = v), { columns: 3 }),
+    S.user.body_weight != null ? 'Optional. Helps plan your next workouts and estimate calories.' : 'Optional. Helps plan your next workouts.');
   const body = done
     ? h('div', { class: 'stack' },
         h('p', {}, `${done} set${done === 1 ? '' : 's'} logged over ${fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)}.`),
@@ -2148,9 +2152,13 @@ function finishSheet(doc) {
             endPause(d); // a pause counts up to the finish, then stops
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
-            if (effortField) {
+            if (effort) {
               d.effort = effort;
+              d.effort_rated = true;
               S.user.effort = effort;
+            } else if (S.user.body_weight != null) {
+              d.effort = S.user.effort || 'moderate'; // for the calorie estimate only
+              d.effort_rated = false;
             }
             if (toStrava) d.strava_send = { include_summary: strava.summary.checked, include_calories: !!strava.calories?.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
           }, 0);
@@ -2686,8 +2694,9 @@ function viewHistoryDetail(id) {
           ? [h('strong', {}, `About ${calories.toLocaleString()} calories`), h('span', { class: 'muted' }, ' (estimated)')]
           : h('span', { class: 'muted small' }, S.user.body_weight == null ? 'Add your body weight in Settings to see estimated calories.' : 'No estimated calories: this workout is under a minute or has no recorded duration.'));
         showCalories();
-        const effortBox = S.user.body_weight != null && workout.status === 'completed' && field('How hard was it?',
-          choices(EFFORTS, workout.effort || 'moderate', (v) => { workout.effort = v; touch(); }, { columns: 3 }));
+        // Choosing here counts as a rating for planning (#198); an unrated workout shows nothing chosen.
+        const effortBox = workout.status === 'completed' && field('How hard was it?',
+          choices(EFFORTS, workout.effort_rated ? workout.effort : null, (v) => { workout.effort = v; workout.effort_rated = true; touch(); }, { columns: 3 }));
         save.onclick = () => act(async () => {
           const bad = workout.exercises.some((e) => e.sets.some((s) => (isTimed(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
           if (bad) {

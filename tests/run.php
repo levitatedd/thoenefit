@@ -1565,6 +1565,48 @@ foreach ([5, 4, 3] as $d) {
 }
 check('a "4+ reps left" rating on the latest session means it is not a stall', $gen->block($euser, $eg, $exById[$squatS])['stall'] === null);
 
+echo "Effort ratings plan the next workout (#198)\n";
+// Lifters with the same two push workouts, rated differently (or not at all).
+$effortUser = function (string $name, ?string $effort, bool $rated, array $doneShort = []) use ($auth, $mkGym, $doc, $wk, $db, $bySlug, $ago) {
+    $id = $auth->createUser($name, "$name long password");
+    $gym = $mkGym($id, 'Effort gym', Catalog::equipmentKeys());
+    foreach ([12, 10] as $i => $d) {
+        $w = $doc($gym, 'push', [[$bySlug['barbell-bench-press'], 6, 10, [[135, 10], [135, 10], [135, 10]]], [$bySlug['machine-chest-press'], 8, 12, [[100, 12], [100, 12], [100, 12]]]], $ago($d));
+        if (in_array($i, $doneShort, true)) {
+            $w['exercises'][0]['target_sets'] = 4; // planned 4, did 3
+        }
+        $w['effort'] = $effort;
+        $w['effort_rated'] = $rated;
+        $wk->save($id, $w);
+    }
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $gym];
+};
+$plan = fn(array $u) => $gen->generate($u[0], $u[1], ['day_type' => 'push', 'minutes' => 90, 'now' => time()]);
+$sets = fn(array $p) => array_column(array_filter($p['exercises'], static fn($b) => $b['kind'] !== 'cardio' && $b['kind'] !== 'stretch'), 'target_sets', 'exercise_id');
+$weights = fn(array $p) => array_column($p['exercises'], 'suggested_weight', 'exercise_id');
+$base = $plan($effortUser('effort-none', 'hard', false));
+$hard = $plan($effortUser('effort-hard', 'hard', true));
+$light = $plan($effortUser('effort-light', 'light', true));
+check('skipped (default-only) effort keeps the usual plan and says nothing', $base['effort_note'] === null);
+check('two recent push workouts rated Hard plan fewer sets, never below 2', array_keys($sets($hard)) === array_keys($sets($base)) && array_sum($sets($hard)) < array_sum($sets($base)) && min($sets($hard)) >= 2, json_encode([$sets($hard), $sets($base)]));
+check('the change is explained once, for the whole workout', $hard['effort_note'] === 'Your recent push workouts felt hard, so this one has fewer sets.', (string) $hard['effort_note']);
+check('effort never changes a lift\'s weight or reps', $weights($hard) === $weights($base) && $weights($light) === $weights($base) && array_column($hard['exercises'], 'suggested_reps', 'exercise_id') === array_column($base['exercises'], 'suggested_reps', 'exercise_id'));
+check('two Light ratings with every planned set done add a set to the main lifts', array_sum($sets($light)) > array_sum($sets($base)) && max($sets($light)) <= Generator::EFFORT_MAX_SETS && strpos((string) $light['effort_note'], 'felt light') !== false, json_encode([$sets($light), $sets($base)]));
+check('Light on a session that missed planned sets adds nothing', $plan($effortUser('effort-light-short', 'light', true, [0]))['effort_note'] === null);
+check('Moderate ratings use the usual rules', $plan($effortUser('effort-moderate', 'moderate', true))['effort_note'] === null);
+$mixedU = $effortUser('effort-mixed', 'hard', true);
+$db->run("UPDATE workouts SET effort='light' WHERE id=?", [$wk->history((int) $mixedU[0]['id'])[0]['id']]);
+check('mixed recent ratings use the usual rules', $plan($mixedU)['effort_note'] === null);
+$hardU = $effortUser('effort-hard-legs', 'hard', true);
+check('ratings only count for the same kind of workout', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'legs', 'minutes' => 90, 'now' => time()])['effort_note'] === null);
+check('picked-muscle workouts are not adjusted', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'custom', 'muscles' => ['chest'], 'minutes' => 90, 'now' => time()])['effort_note'] === null);
+check('ratings older than 4 weeks are ignored', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'push', 'minutes' => 90, 'now' => time() + 30 * 86400])['effort_note'] === null);
+$latestOf = fn(string $name) => (function () use ($wk, $db, $name) {
+    $id = (int) $db->val('SELECT id FROM users WHERE username=?', [$name]);
+    return $wk->get($id, $wk->history($id)[0]['id']);
+})();
+check('whether the effort was chosen comes back with the workout', $latestOf('effort-hard')['effort_rated'] === true && $latestOf('effort-none')['effort_rated'] === false && $latestOf('effort-none')['effort'] === 'hard');
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

@@ -1156,10 +1156,10 @@ if (!process.env.TF_URL) {
   check('after a reload, the warm-up still shows what was logged', (await page.locator('.lift').first().locator('.set input').nth(1).inputValue()) === '1.8');
 
   console.log('Estimated calories');
-  // #38: no body weight, no effort question. Add one in Settings, finish, and see the estimate.
+  // #198: the effort question is optional and asked even without a body weight (#38 used to need one).
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
-  check('without a body weight, finishing does not ask how hard it was', (await page.locator('.sheet :text("How hard was it?")').count()) === 0);
+  check('finishing asks how hard it was even without a body weight, with nothing chosen (#198)', (await page.locator('.sheet :text("How hard was it?")').count()) === 1 && (await page.locator('.sheet .choice[aria-pressed="true"]').count()) === 0 && /Helps plan your next workouts\.$/.test(await page.textContent('.sheet .field-hint')));
   await page.click('.sheet button:has-text("Close")');
   await page.goto(`${URL}#/settings`);
   const bw = page.locator('input[aria-label^="Body weight"]');
@@ -1171,7 +1171,7 @@ if (!process.env.TF_URL) {
   await page.waitForSelector('.lift');
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet :text("How hard was it?")');
-  check('finishing now asks how hard it was, starting at Moderate', (await page.locator('.sheet .choice[aria-pressed="true"]').textContent()).trim() === 'Moderate');
+  check('with a body weight it still starts with nothing chosen, and mentions calories', (await page.locator('.sheet .choice[aria-pressed="true"]').count()) === 0 && /estimate calories/.test(await page.textContent('.sheet .field-hint')));
   await page.click('.sheet .choice:has-text("Hard")');
   await shot('15-finish-effort');
   await page.click('.sheet button:has-text("Finish and save")');
@@ -1905,6 +1905,41 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
     await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, qs.id);
   check('no sideways scrolling', (await overflow()) <= 0);
+}
+
+console.log('Effort ratings plan the next workout (#198)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  // Two pull workouts a while back, both rated Hard on purpose.
+  const ids = await page.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const ex = b.exercises.find((x) => x.name === 'Barbell Row') || b.exercises.find((x) => x.pattern === 'horizontal_pull' && x.kind === 'barbell');
+    const out = [];
+    for (const days of [12, 10]) {
+      const id = crypto.randomUUID();
+      const at = new Date(Date.now() - days * 86400000).toISOString();
+      const sets = [10, 10, 10].map((r) => ({ id: crypto.randomUUID(), weight: 95, reps: r, warmup: false, done: true, done_at: at }));
+      await fetch('api.php?a=save_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, gym_id: b.user.active_gym_id, day_type: 'pull', status: 'completed', unit: 'lb', started_at: at, completed_at: at, effort: 'hard', effort_rated: true, rev: 1, exercises: [{ id: crypto.randomUUID(), exercise_id: ex.id, rep_min: 6, rep_max: 10, target_sets: 3, sets }] } }) });
+      out.push(id);
+    }
+    return out;
+  });
+  await page.selectOption('select[aria-label="Workout type"]', 'pull');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await page.waitForTimeout(300);
+  const note = await page.locator('.effort-note').allTextContents();
+  check('after two pull workouts rated Hard, the pull plan says once that it has fewer sets', note.length === 1 && note[0] === 'Your recent pull workouts felt hard, so this one has fewer sets.', JSON.stringify(note));
+  await shot('49-effort-note');
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, ids);
+  await page.click('button:has-text("Regenerate")');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await page.waitForTimeout(300);
+  check('without those ratings the note goes away', (await page.locator('.effort-note').count()) === 0);
 }
 
 console.log('Stalled lifts (#124)');
