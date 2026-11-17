@@ -441,6 +441,27 @@ final class Workouts
         return array_values($weeks);
     }
 
+    /**
+     * How many finished workouts include each exercise with at least one logged
+     * set, counted once per workout (#174). Keyed by exercise id.
+     */
+    public function exerciseCounts(int $uid): array
+    {
+        $out = [];
+        foreach ($this->db->all(
+            "SELECT we.exercise_id, COUNT(DISTINCT w.id) AS n
+             FROM workout_exercises we
+             JOIN workouts w ON w.id=we.workout_id
+             WHERE w.user_id=? AND w.status='completed'
+               AND EXISTS (SELECT 1 FROM workout_sets s WHERE s.workout_exercise_id=we.id AND s.done=1)
+             GROUP BY we.exercise_id",
+            [$uid]
+        ) as $r) {
+            $out[(int) $r['exercise_id']] = (int) $r['n'];
+        }
+        return $out;
+    }
+
     /** Every completed session of one exercise, oldest first, for the trend chart. */
     public function exerciseHistory(int $uid, int $exerciseId): array
     {

@@ -1489,6 +1489,19 @@ foreach (['upgrade', 'empty'] as $sfx) {
     @unlink("$file-$sfx-shm");
 }
 
+echo "Most-performed exercises (#174)\n";
+$cu = $auth->createUser('counter', 'counter long password');
+$cg = $mkGym($cu, 'Count gym', Catalog::equipmentKeys());
+$squat = $bySlug['back-squat'];
+$wk->save($cu, $doc($cg, 'push', [[$bench, 6, 10, [[135, 8], [135, 8]]], [$squat, 6, 10, [[185, 5]]]], $ago(3)));
+$wk->save($cu, $doc($cg, 'push', [[$bench, 6, 10, [[135, 8]]], [$press, 8, 12, [[90, 10, false, false]]]], $ago(2)));
+$wk->save($cu, $doc($cg, 'push', [[$press, 8, 12, [[90, 10]]]], $ago(1), 'active'));
+$counts = $wk->exerciseCounts($cu);
+check('counts each exercise once per finished workout, not once per set', ($counts[$bench] ?? 0) === 2 && ($counts[$squat] ?? 0) === 1, json_encode($counts));
+check('an exercise with no logged sets, or only in an unfinished workout, is not counted', !isset($counts[$press]), json_encode($counts));
+check('a new lifter has no counts, so Add exercise stays alphabetical', $wk->exerciseCounts($auth->createUser('newbie', 'newbie long password')) === []);
+check('other lifters\' workouts are not counted', ($wk->exerciseCounts($uid)[$bench] ?? 0) === count($wk->exerciseHistory($uid, $bench)), json_encode([$wk->exerciseCounts($uid)[$bench] ?? 0, count($wk->exerciseHistory($uid, $bench))]));
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

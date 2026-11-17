@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { searchExercises, editDistance, normalize } from '../web/js/search.js';
+import { searchExercises, editDistance, normalize, byUsage } from '../web/js/search.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dump = `
@@ -112,6 +112,15 @@ check('results only come from the list passed in', hr.matches.every((e) => allow
 check('with no barbell at the gym, "bench press" leads with the dumbbell one', hr.matches[0].name === 'Dumbbell Bench Press', hr.matches[0].name);
 check('"rdl" at a dumbbell gym gives only the dumbbell and bodyweight versions', names('rdl', home).join() === 'Dumbbell Romanian Deadlift,Single-Leg Romanian Deadlift', names('rdl', home).join());
 check('normalising strips accents and punctuation', normalize("Farmer’s  Wálk!") === 'farmers walk');
+
+console.log('Most-performed first (#174)');
+{
+  const pool = [{ id: 1, name: 'Squat' }, { id: 2, name: 'Bench Press' }, { id: 3, name: 'Curl' }, { id: 4, name: 'Arnold Press' }, { id: 5, name: 'Row' }];
+  const order = (counts) => byUsage(pool, counts).map((e) => e.name).join();
+  check('most-performed first, ties alphabetical, never-done after them alphabetically', order({ 1: 2, 3: 5, 5: 2 }) === 'Curl,Row,Squat,Arnold Press,Bench Press', order({ 1: 2, 3: 5, 5: 2 }));
+  check('with no history the list is alphabetical', order({}) === 'Arnold Press,Bench Press,Curl,Row,Squat' && order(undefined) === order({}));
+  check('the list passed in is left as it was', pool[0].name === 'Squat');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

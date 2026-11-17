@@ -1,5 +1,5 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
-import { searchExercises } from './search.js';
+import { searchExercises, byUsage } from './search.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -115,6 +115,7 @@ function applyBoot(data) {
   S.routines = data.routines || [];
   S.vocab = data.vocab;
   setExercises(data.exercises);
+  S.exerciseCounts = data.exercise_counts || {};
   if (data.csrf) api.csrf = data.csrf;
   if (!sync || sync.key !== `tf.docs.${S.user.id}`) {
     sync = new WorkoutSync({
@@ -1932,7 +1933,8 @@ function addExerciseSheet(doc, onAdd) {
   const paint = () => {
     const q = search.value.trim();
     const pick = muscle.value ? pool.filter((x) => x.muscles_main.includes(muscle.value)) : pool;
-    const r = searchExercises(pick, q, S.vocab, { limit: 40, similarLimit: 6 });
+    // With no search, the lifter's most-performed exercises come first (#174); a search keeps relevance order.
+    const r = searchExercises(q ? pick : byUsage(pick, S.exerciseCounts), q, S.vocab, { limit: 40, similarLimit: 6 });
     fill(list,
       r.closest && h('p', { class: 'muted' }, `Nothing at this gym matches "${q}" exactly. Closest:`),
       ...r.matches.map(row),
@@ -1943,6 +1945,12 @@ function addExerciseSheet(doc, onAdd) {
   };
   close = sheet('Add exercise', h('div', { class: 'stack' }, h('div', { class: 'filters' }, search, muscle), list));
   paint();
+  // The counts from bootstrap can be days old in an installed app. Refresh them,
+  // and reorder only if nothing has been typed yet. Offline, the cached order stands.
+  api.get('exercise_counts').then(({ counts }) => {
+    S.exerciseCounts = counts || {};
+    if (list.isConnected && !search.value.trim()) paint();
+  }).catch(() => {});
 }
 
 // "Send to Strava" on the Finish sheet (#87): the choice is remembered on this device.
