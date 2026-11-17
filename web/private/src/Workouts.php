@@ -412,8 +412,66 @@ final class Workouts
     }
 
     /** Eight Monday-start weeks in the user's timezone, grouped by workout start. */
-    public function weeklyTrends(int $uid, string $unit, string $timezone, ?int $now = null): array
+    /**
+     * Pinned exercises (#126), in the order pinned, each with its latest
+     * finished session: date, the best working set, and the gym for machines
+     * and cables, whose numbers are kept per gym.
+     */
+    public function pins(int $uid): array
     {
+        $out = [];
+        foreach ($this->db->all('SELECT p.exercise_id, e.name, e.kind FROM exercise_pins p JOIN exercises e ON e.id=p.exercise_id WHERE p.user_id=? ORDER BY p.id', [$uid]) as $r) {
+            $sessions = $this->exerciseHistory($uid, (int) $r['exercise_id']);
+            $last = $sessions ? $sessions[count($sessions) - 1] : null;
+            $best = null;
+            foreach ($last['sets'] ?? [] as $s) {
+                if (isset($s['weight']) && (!$best || $s['weight'] > $best['weight'] || ($s['weight'] === $best['weight'] && $s['reps'] > $best['reps']))) {
+                    $best = $s;
+                }
+            }
+            $out[] = [
+                'exercise_id' => (int) $r['exercise_id'],
+                'name' => $r['name'],
+                'last' => $last ? [
+                    'date' => $last['date'],
+                    'workout_id' => $last['workout_id'],
+                    'unit' => $last['unit'],
+                    'sets' => $last['sets'],
+                    'best' => $best,
+                    'gym_name' => in_array($r['kind'], Catalog::GYM_SPECIFIC_KINDS, true) ? $last['gym_name'] : null,
+                ] : null,
+            ];
+        }
+        return $out;
+    }
+
+    /** Pin or unpin an exercise (#126). Pinning a sixth is refused with 409, so the app can ask which to remove. */
+    public function setPin(int $uid, int $exerciseId, bool $pinned): void
+    {
+        if (!$pinned) {
+            $this->db->run('DELETE FROM exercise_pins WHERE user_id=? AND exercise_id=?', [$uid, $exerciseId]);
+            return;
+        }
+        if (!$this->db->val('SELECT 1 FROM exercises WHERE id=? AND (user_id IS NULL OR user_id=?)', [$exerciseId, $uid])) {
+            throw new HttpError(404, 'Exercise not found.');
+        }
+        if ($this->db->val('SELECT 1 FROM exercise_pins WHERE user_id=? AND exercise_id=?', [$uid, $exerciseId])) {
+            return;
+        }
+        if ((int) $this->db->val('SELECT COUNT(*) FROM exercise_pins WHERE user_id=?', [$uid]) >= self::MAX_PINS) {
+            throw new HttpError(409, 'You can pin up to ' . self::MAX_PINS . ' exercises. Unpin one first.');
+        }
+        $this->db->insert('exercise_pins', ['user_id' => $uid, 'exercise_id' => $exerciseId, 'created_at' => now_utc()]);
+    }
+
+    public const MAX_PINS = 5;
+
+    /** Trends ranges (#184), in Monday-start weeks: 8 weeks by default, then 1, 2, 3, 6 months and a year. */
+    public const TREND_WEEKS = [8, 5, 9, 13, 26, 52];
+
+    public function weeklyTrends(int $uid, string $unit, string $timezone, ?int $now = null, int $count = 8): array
+    {
+        $count = in_array($count, self::TREND_WEEKS, true) ? $count : 8;
         try {
             $zone = new \DateTimeZone($timezone);
         } catch (\Exception $e) {
@@ -421,9 +479,9 @@ final class Workouts
         }
         $now ??= time();
         $date = (new \DateTimeImmutable('@' . $now))->setTimezone($zone);
-        $first = $date->modify('monday this week')->setTime(0, 0)->modify('-7 weeks');
+        $first = $date->modify('monday this week')->setTime(0, 0)->modify('-' . ($count - 1) . ' weeks');
         $weeks = [];
-        for ($i = 0; $i < 8; $i++) {
+        for ($i = 0; $i < $count; $i++) {
             $start = $first->modify("+$i weeks")->format('Y-m-d');
             $weeks[$start] = ['start' => $start, 'workouts' => 0, 'volume' => 0.0, 'seconds' => null];
         }

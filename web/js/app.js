@@ -99,6 +99,28 @@ api.onUnauthorized = () => {
 const markScrolled = () => document.body.classList.toggle('scrolled', window.scrollY > 2);
 window.addEventListener('scroll', markScrolled, { passive: true });
 
+// Trends range (#184). The header is kept across renders (#187), so its picker is handled here, not on the element.
+const MAX_PINS = 5; // pinned exercises on Trends (#126)
+const TREND_RANGES = [[8, 'Last 8 weeks'], [5, 'Last month'], [9, 'Last 2 months'], [13, 'Last 3 months'], [26, 'Last 6 months'], [52, 'Last year']];
+function trendWeeks() {
+  let w = 8;
+  try {
+    w = Number(localStorage.getItem('tf.trendWeeks')) || 8;
+  } catch (e) {
+    // Private mode: the default range.
+  }
+  return TREND_RANGES.some(([n]) => n === w) ? w : 8;
+}
+document.addEventListener('change', (e) => {
+  if (!e.target.matches?.('.trends-range')) return;
+  try {
+    localStorage.setItem('tf.trendWeeks', e.target.value);
+  } catch (err) {
+    // Not remembered, but still shown.
+  }
+  render();
+});
+
 async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!bootBuild) serverBuild().then((b) => (bootBuild = bootBuild || b));
@@ -164,6 +186,7 @@ function applyBoot(data) {
   S.vocab = data.vocab;
   setExercises(data.exercises);
   S.exerciseCounts = data.exercise_counts || {};
+  S.pinned = data.pinned || []; // pinned exercises on Trends (#126)
   if (data.csrf) api.csrf = data.csrf;
   if (!sync || sync.key !== `tf.docs.${S.user.id}`) {
     sync = new WorkoutSync({
@@ -1467,13 +1490,38 @@ function stallBox(b, gym) {
       h('button', { type: 'button', class: 'btn small ghost', onclick: () => choose('keep') }, 'Keep suggestion')));
 }
 
-function recoveryPanel(recovery) {
-  const rows = Object.values(recovery).map((m) => {
-    const bar = h('span', { class: 'meter-fill' });
-    bar.style.width = `${m.recovery}%`;
-    return h('li', { class: 'meter' }, h('span', { class: 'meter-name' }, m.label), h('span', { class: `meter-track ${m.recovery < 50 ? 'low' : ''}` }, bar), h('span', { class: 'meter-num' }, `${m.recovery}%`), h('span', { class: 'meter-sets' }, `${fmtW(m.weekly_sets)} sets`));
+/**
+ * Recovery estimate as Pick muscle groups tiles (#166), most recovered first.
+ * Tapping one shows its recovery, when it was last trained and with what.
+ */
+function recoveryPanel(recovery, last) {
+  const order = Object.keys(recovery).sort((a, b) => recovery[b].recovery - recovery[a].recovery);
+  const tiles = order.map((m) => {
+    const r = recovery[m];
+    const tired = r.recovery < 50;
+    return h('button', { type: 'button', class: `muscle-tile${tired ? ' tired' : ''}`, 'data-muscle': m, onclick: () => muscleSheet(m, r, last[m]) },
+      MUSCLE_ART.includes(m) && h('img', { src: `icons/muscles/${m}.png`, alt: '', 'aria-hidden': 'true' }),
+      h('span', { class: 'muscle-name' }, r.label),
+      h('span', { class: 'muscle-pct' }, tired ? `${r.recovery}% · recovering` : `${r.recovery}%`));
   });
-  return h('details', { class: 'card fold', open: true }, h('summary', {}, 'Recovery estimate'), h('p', { class: 'muted small' }, 'Estimated only from sets logged here in the last 7 days. It cannot see sleep, soreness or other activity, so treat it as a rough guide.'), h('ul', { class: 'meters' }, rows));
+  return h('section', { class: 'card stack recovery-card' },
+    h('h2', {}, 'Recovery estimate'),
+    h('p', { class: 'muted small' }, 'Estimated only from sets logged here in the last 7 days. It cannot see sleep, soreness or other activity, so treat it as a rough guide. Tap a muscle for details.'),
+    h('div', { class: 'muscle-grid' }, tiles));
+}
+
+/** One muscle's recovery (#166): the estimate, then the last workout that trained it, when there is one. */
+function muscleSheet(key, r, l) {
+  const tired = r.recovery < 50;
+  const close = sheet(r.label, h('div', { class: 'stack muscle-detail' },
+    h('p', { class: 'muscle-detail-pct' }, h('strong', {}, `${r.recovery}%`), tired ? ' · Still recovering' : ' recovered'),
+    h('p', { class: 'muted small' }, `${fmtW(r.weekly_sets)} sets in the last 7 days.`),
+    l ? [
+      h('h3', {}, 'Last trained'),
+      h('p', {}, `${fmtDate(l.date, { weekday: 'short', month: 'short', day: 'numeric' })} · ${dayLabel(l.day_type)} at ${l.gym_name}`),
+      h('ul', { class: 'muscle-detail-exercises' }, l.exercises.map((n) => h('li', {}, n))),
+      h('a', { class: 'btn block', href: `#/history/${l.workout_id}`, onclick: () => close() }, 'Open workout'),
+    ] : h('p', { class: 'muted' }, 'No training logged for this muscle in the last 60 days.')));
 }
 
 async function swapSheet(gymId, exerciseId, exclude, onPick, bodyweightOnly = false) {
@@ -2514,30 +2562,74 @@ function asyncSection(load, build) {
 
 function viewTrends() {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const content = asyncSection(() => api.get('trends', '&timezone=' + encodeURIComponent(timezone)), ({ weeks, unit, recovery }) => {
-    const points = weeks.map((week) => ({
-      ...week,
-      label: fmtDate(week.start + 'T12:00:00', { month: 'short', day: 'numeric' }),
-      title: `Week of ${fmtDate(week.start + 'T12:00:00', { month: 'long', day: 'numeric' })}`,
-      lines: [week.workouts ? `${week.workouts} workout${week.workouts === 1 ? '' : 's'}` : 'No workouts'],
+  const weeksWanted = trendWeeks();
+  const rangeLabel = TREND_RANGES.find(([n]) => n === weeksWanted)[1];
+  // The line under the title picks the range (#184), so it always names what is shown.
+  const range = h('select', { class: 'trends-range', 'aria-label': 'Trends time range' },
+    TREND_RANGES.map(([n, label]) => h('option', { value: String(n), selected: n === weeksWanted }, label)));
+  const content = asyncSection(() => api.get('trends', `&timezone=${encodeURIComponent(timezone)}&weeks=${weeksWanted}`), ({ weeks, unit, recovery, muscle_last: last, pins }) => {
+    // Longer ranges read better by month than by week.
+    const monthly = weeks.length > 13;
+    const buckets = monthly ? byMonth(weeks) : weeks;
+    const points = buckets.map((b) => ({
+      ...b,
+      label: fmtDate(b.start + 'T12:00:00', monthly ? { month: 'short' } : { month: 'short', day: 'numeric' }),
+      title: monthly ? fmtDate(b.start + 'T12:00:00', { month: 'long', year: 'numeric' }) : `Week of ${fmtDate(b.start + 'T12:00:00', { month: 'long', day: 'numeric' })}`,
+      lines: [b.workouts ? `${b.workouts} workout${b.workouts === 1 ? '' : 's'}` : 'No workouts'],
     }));
     const whole = (v) => Math.round(v).toLocaleString();
+    const per = monthly ? 'Monthly' : 'Weekly';
+    const span = rangeLabel.toLowerCase();
     return h('div', { class: 'stack' },
+      pinnedPanel(pins),
       h('section', { class: 'card stack' },
-        h('h2', {}, 'Weekly lifting volume'),
+        h('h2', {}, `${per} lifting volume`),
         h('p', { class: 'muted small' }, 'Logged weight × reps across completed working sets.'),
         weeks.some((w) => w.workouts > 0)
           ? lineChart(points.map((p) => ({ ...p, value: p.volume })), { unit: unit + ' × reps', format: whole })
-          : h('p', { class: 'muted' }, 'No completed workouts in the last 8 weeks.')),
+          : h('p', { class: 'muted' }, `No completed workouts in the ${span}.`)),
       h('section', { class: 'card stack' },
-        h('h2', {}, 'Weekly workout time'),
+        h('h2', {}, `${per} workout time`),
         h('p', { class: 'muted small' }, 'Start to finish, leaving out long idle stretches before the first set or after the last. A workout still over 4 hours is not counted.'),
         weeks.some((w) => w.seconds !== null)
           ? lineChart(points.map((p) => ({ ...p, value: (p.seconds ?? 0) / 60 })), { unit: 'min', format: whole })
-          : h('p', { class: 'muted' }, 'No workout time recorded in the last 8 weeks.')),
-      recoveryPanel(recovery));
+          : h('p', { class: 'muted' }, `No workout time recorded in the ${span}.`)),
+      recoveryPanel(recovery, last || {}));
   });
-  return h('main', { class: 'page' }, topHead('Trends', { sub: 'Last 8 weeks.' }), content);
+  return h('main', { class: 'page' }, topHead('Trends', { sub: range }), content);
+}
+
+/** Weekly trend buckets summed by calendar month (#184), for the longer ranges. */
+function byMonth(weeks) {
+  const out = [];
+  for (const w of weeks) {
+    const key = w.start.slice(0, 7);
+    let m = out[out.length - 1];
+    if (!m || m.key !== key) {
+      m = { key, start: `${key}-01`, workouts: 0, volume: 0, seconds: null };
+      out.push(m);
+    }
+    m.workouts += w.workouts;
+    m.volume += w.volume;
+    if (w.seconds !== null) m.seconds = (m.seconds ?? 0) + w.seconds;
+  }
+  return out;
+}
+
+/** Pinned exercises (#126): each one's latest result, opening its chart. */
+function pinnedPanel(pins) {
+  const rows = (pins || []).map((p) => {
+    const l = p.last;
+    const result = !l ? 'Not done yet'
+      : l.best ? `${fmtW(l.best.weight)} ${l.unit} × ${l.best.reps}` : fmtSets(l.sets, l.unit);
+    const meta = l ? [fmtDate(l.date, { month: 'short', day: 'numeric' }), l.gym_name].filter(Boolean).join(' · ') : '';
+    return h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${p.exercise_id}` },
+      h('span', { class: 'log-title' }, p.name),
+      h('span', { class: 'log-meta' }, meta ? `${result} · ${meta}` : result)));
+  });
+  return h('section', { class: 'card stack pinned-card' },
+    h('h2', {}, 'Pinned exercises'),
+    rows.length ? h('ul', { class: 'log' }, rows) : h('p', { class: 'muted small' }, `Pin up to ${MAX_PINS} exercises from their pages to follow them here.`));
 }
 
 /**
@@ -3055,7 +3147,8 @@ function viewExercise(id) {
   return h('main', { class: 'page exercise-page' }, detailHead(backOr('exercises', 'Exercises'), ex.name),
     h('div', { class: `exercise-head${art ? ' has-art' : ''}` },
       art,
-      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]), p1rm)),
+      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]), p1rm),
+      pinButton(ex)),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
     section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),
@@ -3070,6 +3163,46 @@ function viewExercise(id) {
         render();
       }, e.currentTarget) }, ex.archived ? 'Restore exercise' : 'Archive exercise')),
   );
+}
+
+/** Pin to Trends (#126): up to five; a sixth asks which to unpin first. Needs a connection. */
+function pinButton(ex) {
+  const btn = h('button', { type: 'button', class: 'btn small pin-btn' });
+  const paint = () => {
+    const on = (S.pinned || []).includes(ex.id);
+    btn.setAttribute('aria-pressed', String(on));
+    fill(btn, icon(on ? 'check' : 'plus', 18), on ? 'Pinned to Trends' : 'Pin to Trends');
+  };
+  const set = async (id, pinned) => {
+    const r = await api.post('pin_exercise', { exercise_id: id, pinned });
+    S.pinned = r.pins.map((p) => p.exercise_id);
+    return r;
+  };
+  btn.onclick = () => act(async () => {
+    const on = (S.pinned || []).includes(ex.id);
+    try {
+      await set(ex.id, !on);
+      toast(on ? 'Unpinned from Trends.' : 'Pinned to Trends.');
+      paint();
+    } catch (e) {
+      if (e.status !== 409) throw e;
+      // Five already: pick one to unpin, then this one goes in.
+      const { pins } = await api.get('pins');
+      const close = sheet('Unpin one first', h('div', { class: 'stack' },
+        h('p', { class: 'muted' }, `You can pin up to ${MAX_PINS} exercises. Unpin one to make room for ${ex.name}.`),
+        h('ul', { class: 'log' }, pins.map((p) => h('li', {}, h('div', { class: 'link-row pin-swap' },
+          h('span', { class: 'log-title' }, p.name),
+          h('button', { type: 'button', class: 'btn small', onclick: (ev) => act(async () => {
+            await set(p.exercise_id, false);
+            await set(ex.id, true);
+            close();
+            toast(`Unpinned ${p.name} and pinned ${ex.name}.`);
+            paint();
+          }, ev.currentTarget) }, 'Unpin')))))));
+    }
+  }, btn);
+  paint();
+  return btn;
 }
 
 function viewExerciseForm(id) {
