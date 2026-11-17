@@ -1927,7 +1927,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
           if (v == null) delete t.reps_left;
           else t.reps_left = v;
         })),
-      }, e.reps_left != null ? `${repsLeftLabel(e.reps_left)} left` : 'Difficulty?'),
+      }, e.reps_left != null ? `Difficulty: ${repsLeftLabel(e.reps_left)}` : 'Difficulty?'),
     ),
   );
 }
@@ -1946,7 +1946,7 @@ function difficultySheet(e, onPick) {
       close();
       onPick(v);
     }, { columns: 5 }),
-    h('p', { class: 'muted small' }, 'Your next suggestion for this exercise takes it into account. 2 left keeps the usual progression.'),
+    h('p', { class: 'muted small' }, 'Your next suggestion for this exercise takes it into account.'),
     e.reps_left != null && h('button', { class: 'btn ghost block', type: 'button', onclick: () => {
       close();
       onPick(null);

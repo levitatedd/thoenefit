@@ -1578,13 +1578,13 @@ console.log('Workout recap and records (#123)');
   check('with every set checked off, Difficulty? appears in the action row', (await diff.textContent()) === 'Difficulty?' && (await card.locator('.set-actions button.difficulty').count()) === 1);
   await diff.click();
   await page.waitForSelector('.sheet .choices');
-  check('it asks how many more reps a typical working set had, with 0, 1, 2, 3 and 4+', /how many more reps could you have done with good form/.test(await page.textContent('.sheet')) && (await page.$$eval('.sheet .choice-label', (els) => els.map((e) => e.textContent).join())) === '0,1,2,3,4+');
+  check('it asks how many more reps a typical working set had, with 0, 1, 2, 3 and 4+, without explaining the rules', /how many more reps could you have done with good form/.test(await page.textContent('.sheet')) && !/usual progression/.test(await page.textContent('.sheet')) && (await page.$$eval('.sheet .choice-label', (els) => els.map((e) => e.textContent).join())) === '0,1,2,3,4+');
   await page.locator('.sheet .choice', { hasText: '4+' }).click();
-  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === '4+ left');
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === 'Difficulty: 4+');
   await diff.click();
   await page.waitForSelector('.sheet .choices');
   await page.locator('.sheet .choice[data-value="0"]').click();
-  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === '0 left');
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === 'Difficulty: 0');
   const rated = await page.evaluate((id) => {
     const key = Object.keys(localStorage).find((k) => k.startsWith('tf.docs.'));
     const st = JSON.parse(localStorage.getItem(key));
