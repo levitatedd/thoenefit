@@ -2862,7 +2862,7 @@ function viewExercise(id) {
   ];
   const history = api.get('exercise_history', `&id=${id}`);
   // P1RM (#202): the estimated 1-rep max (#162) from the latest eligible session of the
-  // current setup, as of today. Filled in once the history arrives; no row without one.
+  // current setup, dated with that workout. Filled in once the history arrives; no row without one.
   const p1rm = h('div', { class: 'facts-row', hidden: true });
   history.then(({ sessions }) => {
     if (!sessions.length) return;
@@ -2871,7 +2871,7 @@ function viewExercise(id) {
     if (!latest) return;
     const est = bestEstimate(latest.sets, ex);
     fill(p1rm,
-      h('dt', {}, 'P1RM as of:', h('span', { class: 'p1rm-date' }, fmtDate(new Date().toISOString(), { month: 'short', day: 'numeric', year: 'numeric' }))),
+      h('dt', {}, 'P1RM as of:', h('span', { class: 'p1rm-date' }, fmtDate(latest.date, { month: 'short', day: 'numeric', year: 'numeric' }))),
       h('dd', { class: 'p1rm-value' }, `${roundEstimate(convertWeight(est.value, latest.unit, S.user.unit)).toLocaleString()} ${S.user.unit}`));
     p1rm.hidden = false;
   }, () => {});
