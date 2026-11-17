@@ -1,6 +1,6 @@
 // Refreshes the README screenshots (#134). Seeds a throwaway local copy with
 // made-up people (Alex Rivera, Sam Lee) and eight weeks of training, then
-// captures the six screenshots at 402px wide, 2x.
+// captures the screenshots at 402px wide, 2x.
 //
 //   rm -rf data
 //   printf 'sample-password-alex\n' | php web/private/bin/create-user.php alex "Alex Rivera"
@@ -71,7 +71,7 @@ const at = (daysAgo, hour) => { const d = new Date(Date.now() - daysAgo * DAY); 
 
 // ---- Alex: eight weeks of push / pull / legs, about four sessions a week
 const alex = await person('alex', 'sample-password-alex');
-const gymA = await setUp(alex, { unit: 'lb', goal: 'muscle', experience: 'intermediate', split_type: 'ppl', minutes: 60, body_weight: 182, history_visibility: 'members' }, 'Downtown Gym');
+const gymA = await setUp(alex, { unit: 'lb', goal: 'muscle', experience: 'intermediate', split_type: 'ppl', minutes: 60, body_weight: 182, history_visibility: 'members', training_days: [1, 3, 5] }, 'Downtown Gym');
 const rota = ['push', 'pull', 'legs'];
 let n = 0;
 const plans = {};
@@ -126,10 +126,28 @@ for (let i = 0; i < 2; i++) {
 await A.waitForTimeout(23000); // a believable rest time left on the clock
 await A.evaluate(() => scrollTo(0, 0));
 await jpg(A, 'workout-in-progress');
+
+// 2b. Plate calculator (#227): the Plates sheet for the next set of the barbell lift.
+await A.waitForFunction(() => !document.querySelector('#toast.show'), null, { timeout: 10000 });
+await lift.locator('.plates-btn').click();
+await A.waitForSelector('.sheet .plates-sheet');
+await A.click('.sheet button[aria-label="5 lb more"]'); // a jump that needs the small plates
+await A.waitForTimeout(300);
+await jpg(A, 'plate-calculator');
+await A.click('.sheet button:has-text("Close")');
 await A.goto(URL + '#/today');
 await A.click('button:has-text("Discard workout")');
 await A.click('.sheet button:has-text("Discard workout")');
 await A.waitForSelector('.plan-row');
+
+// 2c. Calendar on History (#228): finished days, and Mon/Wed/Fri planned ahead with the next one selected.
+await A.goto(URL + '#/history'); await A.reload();
+await A.waitForSelector('.cal-card .cal-day');
+await A.locator('.cal-day.plan').first().click();
+await A.waitForSelector('.cal-detail button:has-text("Rest that day")');
+await A.evaluate(() => scrollTo(0, 0));
+await A.waitForTimeout(300);
+await jpg(A, 'calendar');
 
 // 3. Exercise progress: the most-logged lift, with a point selected.
 const hist = await alex.call('history&limit=100');
