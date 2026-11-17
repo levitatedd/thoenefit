@@ -417,6 +417,9 @@ final class Workouts
      * finished session: date, the best working set, and the gym for machines
      * and cables, whose numbers are kept per gym.
      */
+    /** How many recent sessions of the current setup each pin carries for its P1RM. */
+    public const PIN_RECENT = 20;
+
     public function pins(int $uid): array
     {
         $out = [];
@@ -429,9 +432,19 @@ final class Workouts
                     $best = $s;
                 }
             }
+            // P1RM on the pin (#126): the app takes it from the newest of these sessions of the
+            // current setup that gives an estimate, the same way the exercise page does (#202).
+            $recent = [];
+            for ($i = count($sessions) - 1; $i >= 0 && count($recent) < self::PIN_RECENT; $i--) {
+                if ($sessions[$i]['variant_key'] !== $last['variant_key']) {
+                    continue;
+                }
+                $recent[] = ['date' => $sessions[$i]['date'], 'unit' => $sessions[$i]['unit'], 'sets' => $sessions[$i]['sets']];
+            }
             $out[] = [
                 'exercise_id' => (int) $r['exercise_id'],
                 'name' => $r['name'],
+                'recent' => $recent,
                 'last' => $last ? [
                     'date' => $last['date'],
                     'workout_id' => $last['workout_id'],

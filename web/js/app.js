@@ -2574,7 +2574,7 @@ function viewTrends() {
           : h('p', { class: 'muted' }, `No workout time recorded in the ${span}.`)),
       recoveryPanel(recovery, last || {}));
   });
-  return h('main', { class: 'page' }, topHead('Trends', { sub: range }), content);
+  return h('main', { class: 'page trends-page' }, topHead('Trends', { sub: range }), content);
 }
 
 /** Weekly trend buckets summed by calendar month (#184), for the longer ranges. */
@@ -2601,8 +2601,13 @@ function pinnedPanel(pins) {
     const result = !l ? 'Not done yet'
       : l.best ? `${fmtW(l.best.weight)} ${l.unit} × ${l.best.reps}` : fmtSets(l.sets, l.unit);
     const meta = l ? [fmtDate(l.date, { month: 'short', day: 'numeric' }), l.gym_name].filter(Boolean).join(' · ') : '';
+    // P1RM, as on the exercise page (#202): the newest estimate from the current setup.
+    const ex = S.exById.get(p.exercise_id);
+    const src = (p.recent || []).find((r) => bestEstimate(r.sets, ex));
+    const p1rm = src && `P1RM · ${roundEstimate(convertWeight(bestEstimate(src.sets, ex).value, src.unit, S.user.unit)).toLocaleString()} ${S.user.unit}`;
     return h('li', {}, h('a', { class: 'log-row', href: `#/exercises/${p.exercise_id}` },
       h('span', { class: 'log-title' }, p.name),
+      p1rm && h('span', { class: 'log-est pin-p1rm' }, p1rm),
       h('span', { class: 'log-meta' }, meta ? `${result} · ${meta}` : result)));
   });
   return h('section', { class: 'card stack pinned-card' },
