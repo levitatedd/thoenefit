@@ -8,7 +8,9 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 **Host and maintain** · [Installation](#installation) · [Integration setup](#integration-setup) · [Administration and maintenance](#administration-and-maintenance) · [Development](#development)
 
-## Screenshots
+<a name="screenshots"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/screenshots-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/screenshots-light.svg"><img alt="Screenshots" src="docs/headings/screenshots-light.svg" height="34"></picture>
 
 | Workout planner | Pick muscle groups | Workout in progress |
 | :---: | :---: | :---: |
@@ -28,7 +30,9 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 Sample data: Alex Rivera and Sam Lee are made-up people at a made-up gym. Tap a preview to open it at full size. To refresh these, see the steps at the top of [`docs/screenshots/capture.mjs`](docs/screenshots/capture.mjs).
 
-## Features
+<a name="features"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/features-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/features-light.svg"><img alt="Features" src="docs/headings/features-light.svg" height="34"></picture>
 
 <details>
 <summary><strong>Workout planning</strong></summary>
@@ -144,7 +148,9 @@ Sample data: Alex Rivera and Sam Lee are made-up people at a made-up gym. Tap a 
 
 Generating fresh plans, server-backed exercise swaps, and loading history require a connection. Strava and GitHub feedback require server configuration.
 
-## Using ThoeneFit
+<a name="using-thoenefit"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/using-thoenefit-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/using-thoenefit-light.svg"><img alt="Using ThoeneFit" src="docs/headings/using-thoenefit-light.svg" height="34"></picture>
 
 ### Plan and log
 
@@ -225,7 +231,9 @@ The first account is the admin. In **Settings → Manage users**, the admin can 
 
 Tap the version under the **Settings** heading to see **What's new**. The deploy generates release notes from PR titles. PRs from `feature/…` branches appear under **New** PRs from `fix/…` branches appear under **Fixed**, and improvements appear under **Improved**. Staging shows the next release's notes under **Coming next**.
 
-## Installation
+<a name="installation"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/installation-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/installation-light.svg"><img alt="Installation" src="docs/headings/installation-light.svg" height="34"></picture>
 
 ### Run it on your computer
 
@@ -247,7 +255,9 @@ Open <http://localhost:8000>. For a phone on the same Wi-Fi, bind to `0.0.0.0:80
 
 For a staging deployment, use a separate site such as `staging.fit.example.com` and a separate `~/thoenefit-staging-config.php`. Serve `web/` as the document root, keep the config above it, and deny HTTP access to `/private/`.
 
-## Integration setup
+<a name="integration-setup"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/integration-setup-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/integration-setup-light.svg"><img alt="Integration setup" src="docs/headings/integration-setup-light.svg" height="34"></picture>
 
 ### Configure Strava
 
@@ -266,7 +276,9 @@ If Strava reports an invalid `redirect_uri`, compare those values and start agai
 
 Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) limited to this repository, with **Issues: Read and write** and no other permissions. Put it in the `github` block of the private config (`~/thoenefit-config.php`, and `~/thoenefit-staging-config.php` for fit-test; see `config.example.php`). Without a token, the option doesn't appear.
 
-## Administration and maintenance
+<a name="administration-and-maintenance"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/administration-and-maintenance-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/administration-and-maintenance-light.svg"><img alt="Administration and maintenance" src="docs/headings/administration-and-maintenance-light.svg" height="34"></picture>
 
 ### Reset a password over SSH
 
@@ -305,7 +317,9 @@ gunzip -c ~/backups/thoenefit-DATE.sql.gz | mysql -h DBHOST -u DBUSER -p DBNAME
 
 For nightly backups, store the MySQL credentials in a `[client]` section of `~/.my.cnf` with permissions set to `600`. Omit `-p` from the cron command, escape the percent sign in `date +%F`, and prune old backups after a successful dump. For local SQLite, stop the app and copy `data/thoenefit.sqlite`.
 
-## Development
+<a name="development"></a>
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/headings/development-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/headings/development-light.svg"><img alt="Development" src="docs/headings/development-light.svg" height="34"></picture>
 
 ### Version number
 
