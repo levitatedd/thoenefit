@@ -59,20 +59,21 @@ final class Auth
         ]);
     }
 
-    // ---- account requests -------------------------------------------------
+    // ---- sign-ups with the invite code -------------------------------------
 
     private const INVITE_KEY = 'invite_token_hash';
-    private const MAX_PENDING = 25;
     private const MAX_TOKEN_TRIES = 5;
+    /** New accounts from one connection per 15 minutes, so a shared invite code can't be used to flood the site. */
+    private const MAX_NEW_ACCOUNTS = 3;
 
-    /** Whether account requests are open, and when the invite token was last set. The token itself is never readable. */
+    /** Whether sign-ups are open, and when the invite token was last set. The token itself is never readable. */
     public function inviteStatus(): array
     {
         $row = $this->db->one('SELECT updated_at FROM app_settings WHERE name=?', [self::INVITE_KEY]);
         return ['set' => $row !== null, 'updated_at' => $row ? to_iso($row['updated_at']) : null];
     }
 
-    /** Sets or changes the shared invite token. An empty token closes account requests. Only its hash is stored. */
+    /** Sets or changes the shared invite token. An empty token closes sign-ups. Only its hash is stored. */
     public function setInviteToken(string $token): void
     {
         $token = trim($token);
@@ -87,50 +88,32 @@ final class Auth
     }
 
     /**
-     * Someone with the invite token asks for an account. The row is created
-     * as 'pending' with their own password and cannot sign in until approved.
+     * Someone with the invite token creates their own account from the sign-in
+     * screen. It is a regular account, ready straight away (no admin approval),
+     * and this device is signed in to it.
      */
     public function requestAccount(string $token, string $username, string $password, string $displayName = ''): int
     {
-        $ident = 'inv:' . ($_SERVER['REMOTE_ADDR'] ?? 'cli');
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'cli';
         $since = now_utc(time() - self::WINDOW_MINUTES * 60);
-        if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', [$ident, $since]) >= self::MAX_TOKEN_TRIES) {
+        if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', ['inv:' . $ip, $since]) >= self::MAX_TOKEN_TRIES) {
             throw new HttpError(429, 'Too many tries with the wrong invite code. Wait 15 minutes and try again.');
         }
         $hash = $this->db->val('SELECT value FROM app_settings WHERE name=?', [self::INVITE_KEY]);
         if (!$hash) {
-            throw new HttpError(403, 'Account requests are not open right now.');
+            throw new HttpError(403, 'New accounts are not open right now.');
         }
         if (!password_verify(trim($token), (string) $hash)) {
-            $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', [$ident, now_utc()]);
+            $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', ['inv:' . $ip, now_utc()]);
             throw new HttpError(403, 'That invite code is not right.');
         }
-        if ((int) $this->db->val("SELECT COUNT(*) FROM users WHERE status='pending'") >= self::MAX_PENDING) {
-            throw new HttpError(429, 'There are already a lot of requests waiting. Try again after the admin has gone through them.');
+        if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', ['new:' . $ip, $since]) >= self::MAX_NEW_ACCOUNTS) {
+            throw new HttpError(429, 'Several accounts were just created from here. Wait 15 minutes and try again.');
         }
-        return $this->createUser($username, $password, $displayName, 'pending');
-    }
-
-    /** Requests waiting for the admin, oldest first. */
-    public function pendingRequests(): array
-    {
-        return $this->listUsers('pending');
-    }
-
-    public function approveRequest(int $id): void
-    {
-        $st = $this->db->run("UPDATE users SET status='active', role='user' WHERE id=? AND status='pending'", [$id]);
-        if ($st->rowCount() === 0) {
-            throw new HttpError(404, 'That request is no longer waiting.');
-        }
-    }
-
-    public function declineRequest(int $id): void
-    {
-        $st = $this->db->run("DELETE FROM users WHERE id=? AND status='pending'", [$id]);
-        if ($st->rowCount() === 0) {
-            throw new HttpError(404, 'That request is no longer waiting.');
-        }
+        $id = $this->createUser($username, $password, $displayName);
+        $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', ['new:' . $ip, now_utc()]);
+        $this->startSession($id);
+        return $id;
     }
 
     /**
@@ -297,8 +280,8 @@ final class Auth
             throw new HttpError(403, 'This account has been deactivated. Ask the admin to turn it back on.');
         }
         if (($user['status'] ?? 'active') !== 'active') {
-            // Only said once the password is right, so it does not reveal who has asked for an account.
-            throw new HttpError(403, 'Your account request is waiting for the admin to approve it.');
+            // Only said once the password is right. Accounts no longer wait for approval (030), so this is a safety net.
+            throw new HttpError(403, 'This account cannot sign in yet. Ask the admin.');
         }
         $this->db->run('DELETE FROM login_attempts WHERE ident=? OR attempted_at<?', [$idents[0], now_utc(time() - 86400)]);
         if (password_needs_rehash($user['password_hash'], PASSWORD_DEFAULT)) {

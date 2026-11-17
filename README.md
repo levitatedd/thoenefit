@@ -92,7 +92,7 @@ Imports feed Trends and weight suggestions. Fitbod's **Cycling - Stationary** an
 
 ## More accounts and password resets
 
-The first account is the admin. In **Settings → Manage users**, the admin can create accounts or set an invite token. With the token, someone can select **Request an account** on the sign-in screen, set a password, and sign in after approval.
+The first account is the admin. In **Settings → Manage users**, the admin can create accounts or set an invite token. With the token, someone can select **Create an account** on the sign-in screen, choose a username and password, and start right away.
 
 To reset a password over SSH, run this command. It signs the account out on its devices.
 

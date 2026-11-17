@@ -75,7 +75,7 @@ final class Api
         }
 
         if ($action === 'request_account' && $method === 'POST') {
-            // Open to people who are not signed in, but only with the admin's invite token.
+            // Open to people who are not signed in, but only with the admin's invite token. Signs them in.
             $this->auth->requestAccount((string) ($in['token'] ?? ''), (string) ($in['username'] ?? ''), (string) ($in['password'] ?? ''), trim((string) ($in['display_name'] ?? '')));
             self::json(['ok' => true]);
             return;
@@ -221,16 +221,6 @@ final class Api
             case 'set_invite_token':
                 Auth::requireAdmin($user);
                 $this->auth->setInviteToken((string) ($in['token'] ?? ''));
-                self::json($this->accounts());
-                return;
-            case 'approve_request':
-                Auth::requireAdmin($user);
-                $this->auth->approveRequest((int) ($in['id'] ?? 0));
-                self::json($this->accounts());
-                return;
-            case 'decline_request':
-                Auth::requireAdmin($user);
-                $this->auth->declineRequest((int) ($in['id'] ?? 0));
                 self::json($this->accounts());
                 return;
             case 'admin_reset_password':
@@ -487,7 +477,6 @@ final class Api
     {
         return [
             'users' => $this->auth->listUsers(),
-            'requests' => $this->auth->pendingRequests(),
             'inactive' => $this->auth->listUsers('inactive'),
             'invite' => $this->auth->inviteStatus(),
         ];
@@ -508,7 +497,6 @@ final class Api
             'version' => app_version(),
             'csrf' => $this->auth->session['csrf'],
             'user' => self::userShape($user),
-            'pending_requests' => Auth::isAdmin($user) ? count($this->auth->pendingRequests()) : 0,
             'gyms' => $this->gyms($uid),
             'exercises' => Catalog::forUser($this->db, $uid, true),
             // Most-performed first in Add exercise (#174). An object, so ids stay keys in JSON.
