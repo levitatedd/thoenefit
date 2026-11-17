@@ -1932,6 +1932,13 @@ button.setup-note {
   color: var(--mint);
 }
 
+/* Finish workout (#164): the Quick Start treatment, in red. */
+.btn.finish {
+  border-color: rgba(255, 107, 94, 0.5);
+  background: rgba(255, 107, 94, 0.1);
+  color: var(--red);
+}
+
 /* ---- Share a workout as an image (#160) -------------------------------- */
 .share-preview {
   display: flex;

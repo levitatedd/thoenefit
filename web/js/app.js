@@ -1573,7 +1573,8 @@ function viewWorkout() {
       plan: () => planOf(sync.active.day_type, sync.active.exercises, (e) => e.sets.filter((s) => !s.warmup).length || e.target_sets),
       workoutId: doc.id,
     }) }, icon('share', 18), 'Share this workout'),
-    h('button', { class: 'btn primary block finish', type: 'button', onclick: () => finishSheet(doc) }, 'Finish workout'),
+    // Styled like Quick Start, in red (#164).
+    h('button', { class: 'btn block finish', type: 'button', onclick: () => finishSheet(doc) }, icon('check', 18), 'Finish workout'),
   );
 }
 
