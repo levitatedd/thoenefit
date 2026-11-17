@@ -1781,6 +1781,61 @@ check('pinning an exercise that does not exist is refused', throws(fn() => $wk->
 $last = $gen->muscleLast($tu);
 check('each trained muscle knows its latest workout and the exercises in it that worked it', isset($last['chest']) && $last['chest']['exercises'] === ['Machine Chest Press'] && !isset($last['quads']), json_encode($last['chest'] ?? null));
 
+echo "Calendar and planned days (#228)\n";
+$cu = $auth->createUser('cal-user', 'calendar password');
+$db->update('users', ['split_type' => 'ppl'], 'id=?', [$cu]);
+$cg = $mkGym($cu, 'Cal gym', Catalog::equipmentKeys());
+$cal = new TF\Calendar($db, $gen);
+$cuser = fn() => $db->one('SELECT * FROM users WHERE id=?', [$cu]);
+$tue = strtotime('2026-11-17T15:00:00Z'); // a Tuesday
+$plans = function (array $m): array {
+    $out = [];
+    foreach ((array) $m['days'] as $day => $d) {
+        if ($d['plan']) {
+            $out[substr($day, 8)] = $d['plan']['short'];
+        }
+    }
+    return $out;
+};
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('with no training days there is no plan, only the month', $m['has_plan'] === false && $plans($m) === [] && $m['today'] === '2026-11-17' && $m['month'] === '2026-11');
+check('training days are stored as sorted weekdays, ignoring anything else', TF\Calendar::storeDays([4, 1, 'x', 9, 2, 1]) === '1,2,4' && TF\Calendar::storeDays([]) === null && TF\Calendar::parseDays('4,1,2') === [1, 2, 4]);
+$db->update('users', ['training_days' => '1,2,4'], 'id=?', [$cu]); // Mon, Tue, Thu
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('the split is planned onto the training days from today, starting with Push', $plans($m) === ['17' => 'Push', '19' => 'Pull', '23' => 'Legs', '24' => 'Push', '26' => 'Pull', '30' => 'Legs'], json_encode($plans($m)));
+check('nothing is planned before today', !array_filter(array_keys($plans($m)), static fn($d) => $d < '17'));
+$wk->save($cu, $doc($cg, 'push', [[$bench, 6, 10, [[135, 8]]]], '2026-11-16T15:00:00Z'));
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+$d16 = ((array) $m['days'])['2026-11-16'];
+check('a finished workout shows on its day with its day type, and the plan carries on from it', count($d16['done']) === 1 && $d16['done'][0]['short'] === 'Push' && $d16['done'][0]['label'] === 'Push' && $plans($m)['17'] === 'Pull' && $plans($m)['19'] === 'Legs', json_encode($plans($m)));
+$thu = strtotime('2026-11-19T15:00:00Z');
+$m = $cal->month($cuser(), '2026-11', 'UTC', $thu);
+check('a missed day is not lost: Pull moves to the next training day and the rest shift', $plans($m) === ['19' => 'Pull', '23' => 'Legs', '24' => 'Push', '26' => 'Pull', '30' => 'Legs'], json_encode($plans($m)));
+$wk->save($cu, $doc($cg, 'pull', [[$bench, 6, 10, [[135, 8]]]], '2026-11-17T14:00:00Z'));
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('once today is trained, today is not planned again and the next day type moves on', !isset($plans($m)['17']) && $plans($m)['19'] === 'Legs' && $plans($m)['23'] === 'Push', json_encode($plans($m)));
+$cal->setDay($cuser(), '2026-11-19', 'rest', 'UTC', $tue);
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('resting a planned day pushes everything back one training day', !isset($plans($m)['19']) && $plans($m)['23'] === 'Legs' && $plans($m)['24'] === 'Push' && ((array) $m['days'])['2026-11-19']['override'] === 'rest', json_encode($plans($m)));
+$cal->setDay($cuser(), '2026-11-19', 'clear', 'UTC', $tue);
+$cal->setDay($cuser(), '2026-11-19', 'move', 'UTC', $tue);
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('moving a day trains the next day instead', !isset($plans($m)['19']) && $plans($m)['20'] === 'Legs' && $plans($m)['23'] === 'Push', json_encode($plans($m)));
+$cal->setDay($cuser(), '2026-11-19', 'clear', 'UTC', $tue);
+$cal->setDay($cuser(), '2026-11-20', 'clear', 'UTC', $tue);
+$cal->setDay($cuser(), '2026-11-21', 'train', 'UTC', $tue);
+$m = $cal->month($cuser(), '2026-11', 'UTC', $tue);
+check('an extra training day takes the next day type', $plans($m) === ['19' => 'Legs', '21' => 'Push', '23' => 'Pull', '24' => 'Legs', '26' => 'Push', '30' => 'Pull'], json_encode($plans($m)));
+check('past days and non-dates cannot be changed', throws(fn() => $cal->setDay($cuser(), '2026-11-16', 'rest', 'UTC', $tue), 422) && throws(fn() => $cal->setDay($cuser(), '2026-02-30', 'rest', 'UTC', $tue), 422) && throws(fn() => $cal->setDay($cuser(), '2026-11-19', 'nap', 'UTC', $tue), 422));
+$m = $cal->month($cuser(), '2026-12', 'UTC', $tue);
+check('later months carry the plan on', ($plans($m)['01'] ?? null) === 'Legs' && count($plans($m)) === 14, json_encode($plans($m)));
+$m = $cal->month($cuser(), '2026-11', 'UTC', strtotime('2026-11-25T15:00:00Z'));
+check('changes to days that have passed are cleared away', (int) $db->val('SELECT COUNT(*) FROM schedule_overrides WHERE user_id=?', [$cu]) === 0);
+$wk->save($cu, $doc($cg, 'legs', [[$bench, 6, 10, [[135, 8]]]], '2026-11-11T03:00:00Z'));
+$m = $cal->month($cuser(), '2026-11', 'America/Chicago', $tue);
+check('a workout counts on the day it started where the person is (late evening in Chicago)', isset(((array) $m['days'])['2026-11-10']) && !isset(((array) $m['days'])['2026-11-11']));
+check('a bad month falls back to this month', $cal->month($cuser(), 'nope', 'UTC', $tue)['month'] === '2026-11');
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');
