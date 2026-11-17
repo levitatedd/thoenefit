@@ -57,6 +57,7 @@ await context.addInitScript(() => {
   }
 });
 const page = await context.newPage();
+if (process.env.TF_SLOW) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.TF_SLOW) });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && !/Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(m.text()) && errors.push(m.text()));
@@ -138,7 +139,10 @@ check('the way back is labelled Today', (await page.textContent('.back')).trim()
 await shot('03a-history-from-today');
 await page.click('.back');
 await page.waitForSelector('.plan-row');
-check('going back returns to the same planned workout at the same spot', (await names()).join() === first.join() && Math.abs((await page.evaluate(() => window.scrollY)) - y0) < 5);
+{
+  const back = { names: (await names()).join(), y: await page.evaluate(() => window.scrollY) };
+  check('going back returns to the same planned workout at the same spot', back.names === first.join() && Math.abs(back.y - y0) < 5, JSON.stringify({ ...back, first: first.join(), y0 }));
+}
 await page.click('.plan-row:nth-child(1) button:has-text("Lock")');
 await page.click('.plan-row:nth-child(2) button:has-text("Swap")');
 await page.waitForSelector('.sheet .pick');
@@ -950,7 +954,7 @@ await page.waitForSelector('h1:has-text("What\'s new")');
 }
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
-  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
+  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')), (await page.textContent('.page')).slice(0, 300));
   const { writeFileSync, unlinkSync } = await import('node:fs');
   const notesFile = new globalThis.URL('../web/changelog.json', import.meta.url);
   try {
@@ -1389,6 +1393,12 @@ console.log('Tab bar while a tab loads (#112)');
     };
   });
   check('Today was scrolled down before switching', (await page.evaluate(() => scrollY)) > 300);
+  console.log('  tab bar', await page.evaluate(() => {
+    const t = document.querySelector('.tab[href="#/history"]').getBoundingClientRect();
+    const hit = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
+    const bar = document.querySelector('.tabs').getBoundingClientRect();
+    return JSON.stringify({ tab: [t.top, t.bottom], tabs: [bar.top, bar.bottom], vh: innerHeight, hit: hit && hit.outerHTML.slice(0, 80), y: scrollY });
+  }));
   await page.click('.tab:has-text("History")');
   await page.waitForSelector('.tab-home');
   const m = await page.evaluate(() => ({ swapY: window.__swapY, doc: document.documentElement.scrollHeight, vh: innerHeight, bottom: Math.round(document.querySelector('.tabs').getBoundingClientRect().bottom) }));
