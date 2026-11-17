@@ -3234,7 +3234,7 @@ function viewSettings() {
         }, e.currentTarget);
       } }, 'Sign out'),
       // For a shared phone or computer (#23).
-      h('button', { class: 'btn block', type: 'button', onclick: async (e) => {
+      h('button', { class: 'btn danger block', type: 'button', onclick: async (e) => {
         const button = e.currentTarget;
         const unsynced = sync.status() !== 'saved';
         if (!(await confirmSheet(
