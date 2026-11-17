@@ -1687,11 +1687,22 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.waitForSelector('.muscle-tile');
   const tiles = await page.$$eval('.muscle-tile', (ts) => ts.map((t) => [t.dataset.muscle, t.querySelector('.muscle-pct').textContent, t.querySelector('img').complete]));
   check('Pick muscle groups shows all 13 with their recovery, most recovered first', tiles.length === 13 && tiles.every(([, p]) => /^\d+%/.test(p)) && tiles.map(([, p]) => parseInt(p, 10)).every((v, i, all) => i === 0 || all[i - 1] >= v), JSON.stringify(tiles));
+  // #169: Build sits in the header next to Close, disabled and outlined until something is picked.
+  const buildBtn = page.locator('.sheet-head .build-btn');
+  const buildLook = () => buildBtn.evaluate((b) => { const s = getComputedStyle(b); return { text: b.textContent.trim(), disabled: b.disabled, bg: s.backgroundColor, color: s.color, border: s.borderTopColor, next: b.nextElementSibling?.textContent }; });
+  const empty = await buildLook();
+  check('Build sits in the muscle picker header, left of Close', empty.next === 'Close');
+  check('with nothing picked, Build is disabled, with mint text and outline on dark gray', empty.text === 'Build' && empty.disabled && empty.color === 'rgb(58, 242, 156)' && empty.border === 'rgb(58, 242, 156)' && empty.bg === 'rgb(38, 45, 55)', JSON.stringify(empty));
+  check('the old Build workout button at the bottom is gone', (await page.locator('.sheet-body button:has-text("Build workout")').count()) === 0);
   await page.click('.muscle-tile[data-muscle="lats"]');
   await page.click('.muscle-tile[data-muscle="biceps"]');
-  check('the build button counts the picks', (await page.textContent('.sheet button[type=submit]')).trim() === 'Build workout (2)');
+  const picked = await buildLook();
+  check('the build button counts the picks, filled mint', picked.text === 'Build (2)' && !picked.disabled && picked.bg === 'rgb(58, 242, 156)' && picked.color === 'rgb(14, 17, 21)', JSON.stringify(picked));
+  await page.evaluate(() => document.querySelector('.sheet-body').scrollTo(0, 9999));
+  const headFits = await page.evaluate(() => { const b = document.querySelector('.sheet-head .build-btn').getBoundingClientRect(); const c = [...document.querySelectorAll('.sheet-head button')].pop().getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight && c.right <= innerWidth && document.querySelector('.sheet-panel').scrollWidth <= innerWidth; });
+  check('Build and Close stay visible and fit after scrolling the tiles', headFits);
   await shot('44-pick-muscles');
-  await page.click('.sheet button[type=submit]');
+  await page.click('.sheet-head .build-btn');
   await settle();
   const arts = await page.$$eval('.plan-row img.muscle-art', (is) => is.map((i) => i.dataset.muscle));
   check('the plan trains only the picked groups', arts.length >= 2 && arts.every((m) => ['lats', 'biceps'].includes(m)) && arts.includes('lats') && arts.includes('biceps'), arts.join());
