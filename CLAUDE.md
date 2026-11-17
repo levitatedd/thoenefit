@@ -49,7 +49,7 @@ PR bodies follow this shape: `Refs #N. Part of #1.`, then **What changed**, **Ch
 
 ## Version and What's new
 
-- `VERSION` holds the starting number (currently `0.1.100`). `.github/scripts/app-version.sh` adds one for each commit on `main`'s first-parent line since `VERSION` last changed, so each release counts once. Staging shows the next number with `-staging`.
+- `VERSION` holds the starting number (currently `0.2.1`). `.github/scripts/app-version.sh` adds one for each commit on `main`'s first-parent line since `VERSION` last changed, so each release counts once. Staging shows the next number with `-staging`.
 - Never hand-edit version numbers in code. Only change `VERSION` to start a new minor or major version (e.g. `0.2.0`).
 - What's new (`web/changelog.json`) is generated on deploy from PR titles and branch names by `.github/scripts/changelog.mjs`. Nothing to write by hand, which is why branch names and PR titles matter.
 - The notes come from merge commits, so they can't be edited after merging. A `feature/` PR that turns out to be polish can be moved to **Improved** by adding its number to `IMPROVED_PRS` in `.github/scripts/changelog.mjs`. A `feature/` or `fix/` PR that a later PR replaces before release (like #114, replaced by #115) still appears. When reworking something already on staging, say so in the release PR.
