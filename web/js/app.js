@@ -680,7 +680,7 @@ function activeGym() {
 async function loadDraft({ regenerate = false } = {}) {
   const gym = activeGym();
   if (!gym) return;
-  const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
+  const body = { gym_id: gym.id, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
   if (S.draftOpts.day_type === 'custom') body.muscles = S.draftOpts.muscles || []; // picked muscle groups (#154)
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;

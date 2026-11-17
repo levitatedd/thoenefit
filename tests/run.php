@@ -1568,6 +1568,21 @@ foreach ([5, 4, 3] as $d) {
     $wk->save($eu, $ed);
 }
 check('a "4+ reps left" rating on the latest session means it is not a stall', $gen->block($euser, $eg, $exById[$squatS])['stall'] === null);
+// A long break is not a stall: the same weight a year ago, then fewer reps on coming back.
+$bu = $auth->createUser('comeback', 'comeback long password');
+$bg = $mkGym($bu, 'Comeback gym', Catalog::equipmentKeys());
+$buser = $db->one('SELECT * FROM users WHERE id=?', [$bu]);
+foreach ([[357, [[225, 8], [225, 8], [225, 8]]], [346, [[225, 8], [225, 8]]], [2, [[225, 6], [225, 6], [225, 6]]]] as [$d, $sets]) {
+    $wk->save($bu, $doc($bg, 'legs', [[$squatS, 8, 12, $sets]], $ago($d)));
+}
+check('sessions a year apart are a comeback, not a stall', $gen->block($buser, $bg, $exById[$squatS])['stall'] === null);
+foreach ([4, 3] as $d) {
+    $wk->save($bu, $doc($bg, 'legs', [[$squatS, 8, 12, [[225, 6], [225, 6], [225, 6]]]], $ago($d)));
+}
+check('three close sessions after the break can still be a stall', ($gen->block($buser, $bg, $exById[$squatS])['stall']['sessions'] ?? 0) === 3);
+check('a stall only counts while it is recent: nothing to report a month later', $gen->stall($bu, Catalog::variantKey($squatS, $exById[$squatS]['kind'], $bg['id']), 8, 12, 5.0, 'lb', time() + 30 * 86400) === null);
+$chicago = new DateTimeZone('America/Chicago');
+check('days since a workout count calendar days where the lifter is (Sunday evening to Tuesday afternoon is 2)', Generator::daysBetween(strtotime('2026-11-16T02:00:00Z'), strtotime('2026-11-17T22:24:00Z'), $chicago) === 2 && Generator::daysBetween(strtotime('2026-11-16T02:00:00Z'), strtotime('2026-11-17T22:24:00Z'), new DateTimeZone('UTC')) === 1);
 
 echo "Effort ratings plan the next workout (#198)\n";
 // Lifters with the same two push workouts, rated differently (or not at all).
