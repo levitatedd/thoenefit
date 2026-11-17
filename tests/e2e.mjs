@@ -121,14 +121,14 @@ await shot('03-today');
   check('Today\'s heading and planned exercise names are mint', (await colour('.today-head h1')) === 'rgb(58, 242, 156)' && (await colour('.plan-row .name-link')) === 'rgb(58, 242, 156)');
 }
 
-// Recovery estimate lives on the Trends tab (#26), so Today ends with the plan and the logo.
+// The wide logo sits top right on Today, beside the heading.
 const order = await page.evaluate(() => {
-  const rows = document.querySelectorAll('.plan-row');
-  const last = rows[rows.length - 1];
-  const logo = document.querySelector('.page img.brand-wide');
-  return logo && last ? [last.getBoundingClientRect().bottom, logo.getBoundingClientRect().top, logo.complete && logo.naturalWidth > 0] : null;
+  const h1 = document.querySelector('.today-head h1').getBoundingClientRect();
+  const img = document.querySelector('.today-head img.brand-wide');
+  const logo = img && img.getBoundingClientRect();
+  return logo ? [logo.left > h1.right, logo.right <= window.innerWidth, logo.top < h1.bottom, img.complete && img.naturalWidth > 0, document.querySelectorAll('.page img.brand-wide').length] : null;
 });
-check('on Today, the wide logo sits below the planned workout', !!order && order[1] >= order[0] && order[2] === true, JSON.stringify(order));
+check('on Today, the wide logo sits top right beside the heading, and only there', !!order && order.slice(0, 4).every(Boolean) && order[4] === 1, JSON.stringify(order));
 check('Recovery estimate is no longer on Today', !(await page.textContent('.page')).includes('Recovery estimate'));
 const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');

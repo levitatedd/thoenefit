@@ -1903,3 +1903,31 @@ button.setup-note {
 .plan-actions {
   flex-wrap: wrap;
 }
+
+/* Today: heading and date on the left, the wide logo top right. */
+.today-head {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand-wide.head {
+  flex: none;
+  width: min(150px, 38vw);
+  margin: 10px 0 0;
+}
+
+/* Quick Start (#127): a mint-tinted button with a caption, after the plan. */
+.quick-start-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.btn.quick-start {
+  border-color: rgba(58, 242, 156, 0.45);
+  background: rgba(58, 242, 156, 0.08);
+  color: var(--mint);
+}
