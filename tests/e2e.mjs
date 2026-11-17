@@ -508,7 +508,37 @@ await shot('10a-search');
 await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');
-check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) === 2);
+check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) >= 2);
+// #162: estimated 1-rep max per session, from the best working set of 10 reps or fewer.
+{
+  const exId = Number((await page.evaluate(() => location.hash)).split('/').pop());
+  const expected = await page.evaluate(async (id) => {
+    const { bestEstimate, estimateLabel } = await import('./js/strength.js');
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${id}`)).json();
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.id === id);
+    return sessions.map((s) => { const e = bestEstimate(s.sets, ex); return e && `${estimateLabel(e, s.unit, s.unit)} from`; }).filter(Boolean);
+  }, exId);
+  const shareFrom = await page.evaluate(async (id) => {
+    const { bestEstimate, estimateLabel } = await import('./js/strength.js');
+    const { sessions } = await (await fetch(`api.php?a=exercise_history&id=${id}`)).json();
+    const ex = (await (await fetch('api.php?a=bootstrap')).json()).exercises.find((x) => x.id === id);
+    const s = [...sessions].reverse().find((x) => bestEstimate(x.sets, ex));
+    return s && { workout: s.workout_id, label: estimateLabel(bestEstimate(s.sets, ex), s.unit) };
+  }, exId);
+  const shown = await page.$$eval('.log-est', (els) => els.map((e) => e.textContent));
+  if (shareFrom) {
+    const back = await page.evaluate(() => location.hash);
+    await page.goto(`${URL}#/history/${shareFrom.workout}`);
+    await page.click('button:has-text("Share workout")');
+    await page.waitForSelector('.sheet canvas.share-card');
+    const label = await page.getAttribute('.sheet canvas.share-card', 'aria-label');
+    check(`the share card shows the estimate next to the lift (${shareFrom.label})`, label.includes(`${liftName}, `) && label.includes(shareFrom.label), label);
+    await page.click('.sheet button:has-text("Close")');
+    await page.goto(`${URL}${back}`);
+    await page.waitForSelector('.chart');
+  }
+  check('exercise history shows an estimated 1-rep max chart and the estimate on each eligible session, with its source set', expected.length > 0 && (await page.locator('h3:has-text("Estimated 1-rep max")').count()) === 1 && shown.length === expected.length && shown.every((t) => /^Est\. 1RM · \d+ (lb|kg) from [\d.]+ (lb|kg) × \d+$/.test(t)) && [...expected].reverse().every((p, i) => shown[i].startsWith(p)), JSON.stringify({ expected, shown }));
+}
 // #11: tap a point for its details, open that workout, and filter by date range.
 {
   const exHash = await page.evaluate(() => location.hash);
@@ -1560,6 +1590,7 @@ console.log('Workout recap and records (#123)');
   const shareCard = await page.$eval('.sheet canvas.share-card', (cv) => ({ w: cv.width, h: cv.height, data: cv.toDataURL('image/png') }));
   const save = await page.$eval('.sheet a:has-text("Save image")', (a) => [a.getAttribute('download'), a.getAttribute('href').slice(0, 22)]);
   check('Share workout draws a phone-width PNG of the workout', shareCard.w === 1080 && shareCard.h > 900 && shareCard.data.startsWith('data:image/png'), `${shareCard.w}x${shareCard.h}`);
+  check('a lift logged only above 10 reps gets no estimate on the share card', !(await page.getAttribute('.sheet canvas.share-card', 'aria-label')).includes('Est. 1RM'));
   check('Save image downloads it as a PNG', /^thoenefit-\d{4}-\d\d-\d\d\.png$/.test(save[0]) && save[1] === 'data:image/png;base64,', save.join());
   if (SHOTS) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${SHOTS}/45-share-card.png`, Buffer.from(shareCard.data.split(',')[1], 'base64')); }
   await page.click('.sheet button:has-text("Close")');
