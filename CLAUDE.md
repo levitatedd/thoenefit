@@ -61,6 +61,7 @@ Run before every PR:
 php tests/run.php
 node tests/sync.test.mjs
 node tests/search.test.mjs
+node tests/strength.test.mjs
 node tests/install.test.mjs
 node tests/version.test.mjs
 node tests/changelog.test.mjs

@@ -1,5 +1,6 @@
 import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises, byUsage } from './search.js';
+import { bestEstimate, estimateLabel, convertWeight, roundEstimate } from './strength.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -2156,7 +2157,10 @@ async function drawShareCard(workout, recap) {
   const seconds = Math.max(0, (new Date(workout.completed_at) - new Date(workout.started_at)) / 1000 - (workout.paused_s || 0));
   const sets = lifts.reduce((n, e) => n + e.sets.filter((s) => s.done && !s.warmup).length, 0);
   const stats = [seconds >= 60 && seconds <= 4 * 3600 && `${Math.round(seconds / 60)} min`, `${lifts.length} exercise${lifts.length === 1 ? '' : 's'}`, `${sets} working set${sets === 1 ? '' : 's'}`].filter(Boolean).join('  •  ');
-  const rowH = compact ? 92 : 168;
+  // Estimated 1-rep max per lift (#162), from this workout's sets, in its unit.
+  const ests = new Map(lifts.map((e) => [e, bestEstimate(e.sets, S.exById.get(e.exercise_id))]));
+  const anyEst = [...ests.values()].some(Boolean);
+  const rowH = compact ? (anyEst ? 128 : 92) : 168;
   const recordH = record ? 330 + (recap.records.length > 1 ? 52 : 0) : 0;
   const H = P + 90 + 120 + 70 + (record ? recordH + 40 : 0) + lifts.length * (rowH + 18) + 40 + P;
   const canvas = document.createElement('canvas');
@@ -2222,6 +2226,7 @@ async function drawShareCard(workout, recap) {
   for (const e of lifts) {
     box(P - 20, y, W - 2 * P + 40, rowH, 24, '#1b2027');
     const text = shareSets(e, unit);
+    const est = ests.get(e) && estimateLabel(ests.get(e), unit);
     if (compact) {
       c.font = `500 40px ${SHARE_BODY}`;
       const tw = Math.min(c.measureText(text).width, 470);
@@ -2232,17 +2237,34 @@ async function drawShareCard(workout, recap) {
       c.font = `500 40px ${SHARE_BODY}`;
       c.textAlign = 'right';
       c.fillText(fit(text, 470), W - P - 16, y + 26);
+      if (est) {
+        c.fillStyle = '#a6afbb';
+        c.font = `500 32px ${SHARE_BODY}`;
+        c.fillText(est, W - P - 16, y + 80);
+      }
       c.textAlign = 'left';
     } else {
+      c.font = `500 40px ${SHARE_BODY}`;
+      const ew = est ? c.measureText(est).width + 30 : 0;
       c.fillStyle = '#3af29c';
       c.font = `700 54px ${SHARE_FONT}`;
-      c.fillText(fit(e.name, W - 2 * P - 40), P + 16, y + 26);
+      c.fillText(fit(e.name, W - 2 * P - 40 - ew), P + 16, y + 26);
+      if (est) {
+        c.fillStyle = '#a6afbb';
+        c.font = `500 40px ${SHARE_BODY}`;
+        c.textAlign = 'right';
+        c.fillText(est, W - P - 16, y + 34);
+        c.textAlign = 'left';
+      }
       c.fillStyle = '#f4f2ec';
       c.font = `500 50px ${SHARE_BODY}`;
       c.fillText(fit(text, W - 2 * P - 40), P + 16, y + 96);
     }
     y += rowH + 18;
   }
+  // What the image shows, for screen readers.
+  canvas.dataset.summary = [fmtDate(workout.started_at, { month: 'long', day: 'numeric', year: 'numeric' }), stats,
+    ...lifts.map((e) => [e.name, shareSets(e, unit), ests.get(e) && estimateLabel(ests.get(e), unit)].filter(Boolean).join(', '))].join('. ');
   return canvas;
 }
 
@@ -2267,7 +2289,7 @@ async function shareWorkoutSheet(workout, recap) {
   file = new File([blob], name, { type: 'image/png' });
   canvas.classList.add('share-card');
   canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', 'Workout summary image');
+  canvas.setAttribute('aria-label', `Workout summary image. ${canvas.dataset.summary}`);
   fill(preview, canvas);
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   fill(actions,
@@ -2786,10 +2808,25 @@ function viewExercise(id) {
         // Opening a workout from the chart comes back to this exercise.
         const onOpen = (p) => (S.backTo = { to: `history/${p.s.workout_id}`, path: `exercises/${id}`, label: ex.name, y: window.scrollY });
         const where = (s) => (variants.length > 1 ? [] : [s.gym_name]);
+        // Estimated 1-rep max (#162): the best from each session's working sets, in the lifter's unit.
+        const prefUnit = S.user.unit;
+        const estOf = (s) => bestEstimate(s.sets, ex);
+        const estLine = (s) => {
+          const e = estOf(s);
+          return e && `${estimateLabel(e, s.unit, prefUnit)} from ${fmtW(e.weight)} ${s.unit} × ${e.reps}`;
+        };
         const sessionList = () => [
           h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
-          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), h('span', { class: 'log-meta' }, s.gym_name))))),
+          h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), estLine(s) && h('span', { class: 'log-est' }, estLine(s)), h('span', { class: 'log-meta' }, s.gym_name))))),
         ];
+        const estChart = () => {
+          const epts = pts.map((p) => ({ ...p, est: estOf(p.s) })).filter((p) => p.est);
+          if (!epts.length) return [];
+          return [
+            h('h3', {}, 'Estimated 1-rep max'),
+            lineChart(epts.map((p) => ({ ...p, value: roundEstimate(convertWeight(p.est.value, p.s.unit, prefUnit)), lines: [`From ${fmtW(p.est.weight)} ${p.s.unit} × ${p.est.reps}`, ...where(p.s)] })), { unit: prefUnit, onOpen, hint: 'Estimated from your best working set of 10 reps or fewer.' }),
+          ];
+        };
         if (isStretch(ex)) {
           // Stretches (#138): seconds held per session.
           const spts = mine.map((s) => ({
@@ -2836,6 +2873,7 @@ function viewExercise(id) {
           lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' }),
           h('h3', {}, 'Best reps at top weight'),
           lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' }),
+          ...estChart(),
           ...sessionList(),
         );
       };
