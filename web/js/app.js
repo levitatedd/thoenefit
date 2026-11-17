@@ -3463,7 +3463,9 @@ async function loadChangelog() {
   } catch (e) {
     throw Object.assign(new Error('This needs a connection.'), { offline: true });
   }
-  if (res.status === 404) return { upcoming: null, releases: [] };
+  // No notes file yet. Some servers answer a missing file with the app page instead of a 404.
+  const isJson = (res.headers.get('content-type') || '').includes('json');
+  if (res.status === 404 || (res.ok && !isJson)) return { upcoming: null, releases: [] };
   if (!res.ok) throw new Error('Could not load the release notes.');
   return res.json();
 }

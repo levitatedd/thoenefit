@@ -130,7 +130,9 @@ const order = await page.evaluate(() => {
 });
 check('on Today, the wide logo sits top right beside the heading, and only there', !!order && order.slice(0, 4).every(Boolean) && order[4] === 1, JSON.stringify(order));
 check('Recovery estimate is no longer on Today', !(await page.textContent('.page')).includes('Recovery estimate'));
-const y0 = await page.evaluate(() => { window.scrollTo(0, 300); return window.scrollY; });
+// Scroll the page so the name sits mid-screen, clear of the action bar, and note the spot.
+// (A fixed scroll position put it behind the bar with some fonts, so the tap scrolled first, #217.)
+const y0 = await page.evaluate(() => { document.querySelector('.plan-row:nth-child(3) h3 a').scrollIntoView({ block: 'center' }); return window.scrollY; });
 await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
 check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
@@ -138,7 +140,10 @@ check('the way back is labelled Today', (await page.textContent('.back')).trim()
 await shot('03a-history-from-today');
 await page.click('.back');
 await page.waitForSelector('.plan-row');
-check('going back returns to the same planned workout at the same spot', (await names()).join() === first.join() && Math.abs((await page.evaluate(() => window.scrollY)) - y0) < 5);
+{
+  const back = { names: (await names()).join(), y: await page.evaluate(() => window.scrollY) };
+  check('going back returns to the same planned workout at the same spot', back.names === first.join() && Math.abs(back.y - y0) < 5, JSON.stringify({ ...back, first: first.join(), y0 }));
+}
 await page.click('.plan-row:nth-child(1) button:has-text("Lock")');
 await page.click('.plan-row:nth-child(2) button:has-text("Swap")');
 await page.waitForSelector('.sheet .pick');
@@ -1031,7 +1036,7 @@ await page.waitForSelector('h1:has-text("What\'s new")');
 }
 await page.waitForSelector('.page .card, .page p.pad:not(:has-text("Loading"))');
 if (!process.env.TF_URL) {
-  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')));
+  check('tapping the version opens What\'s new, which says notes come with a deploy when there are none', /Release notes are added when the app is deployed/.test(await page.textContent('.page')), (await page.textContent('.page')).slice(0, 300));
   const { writeFileSync, unlinkSync } = await import('node:fs');
   const notesFile = new globalThis.URL('../web/changelog.json', import.meta.url);
   try {
@@ -1435,19 +1440,23 @@ console.log("Seeing each other's history");
   await vctx.close();
 }
 
+// Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
+// which moves where taps land for the checks after this (#217).
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {
-  await page.setViewportSize({ width: w, height: hgt });
+  const wp = await context.newPage();
+  await wp.setViewportSize({ width: w, height: hgt });
   let worst = 0;
   const plain = [];
   for (const tab of ['today', 'history', 'trends', 'exercises', 'settings']) {
-    await page.goto(`${URL}#/${tab}`);
-    await page.waitForSelector('.tabs');
-    await page.waitForTimeout(250);
-    worst = Math.max(worst, await overflow());
-    if ((await page.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
+    await wp.goto(`${URL}#/${tab}`);
+    await wp.waitForSelector('.tabs');
+    await wp.waitForTimeout(250);
+    worst = Math.max(worst, await wp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth));
+    if ((await wp.$eval('main h1', (el) => getComputedStyle(el).color)) !== 'rgb(58, 242, 156)') plain.push(tab);
   }
   if (w === 375) check('every tab\'s main heading is mint', plain.length === 0, plain.join());
   check(`no sideways scrolling at ${w}px (${label})`, worst <= 0, `${worst}px`);
+  await wp.close();
 }
 console.log('Tab bar while a tab loads (#112)');
 {
