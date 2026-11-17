@@ -391,6 +391,15 @@ function topHead(title, { sub = null, right = brandWide('head'), rowClass = '' }
     h('div', { class: `top-head-row ${rowClass}`.trim() }, h('div', {}, h('h1', {}, title), sub && h('p', { class: 'muted' }, sub)), right));
 }
 
+/**
+ * The shared pinned header (#175) for a detail page (#202): the back link on
+ * the left and the page's title on the right, in the header's title type.
+ */
+function detailHead(back, title) {
+  return h('header', { class: 'page-head top-head detail-head' },
+    h('div', { class: 'top-head-row' }, h('div', { class: 'detail-back' }, back), h('h1', { class: `detail-title${title.length > 20 ? ' long' : title.length > 12 ? ' mid' : ''}` }, title)));
+}
+
 function page(title, ...kids) {
   return h('main', { class: 'page' }, title && h('h1', {}, title), kids);
 }
@@ -2431,6 +2440,11 @@ function recapSheet(id, sets) {
 
 // ---------------------------------------------------------------- history
 
+/** A history chart in its own card (#202): mint title, the chart and its readout together. */
+function chartCard(title, chart) {
+  return h('section', { class: 'chart-card' }, h('h3', {}, title), chart);
+}
+
 function asyncSection(load, build) {
   const box = h('div', { class: 'stack' }, h('p', { class: 'muted pad' }, 'Loading'));
   load().then(
@@ -2846,8 +2860,23 @@ function viewExercise(id) {
     ['Primary muscles', ex.muscles_main.map((m) => S.vocab.muscles[m]).join(', ')],
     ['Secondary muscles', ex.muscles_assist.map((m) => S.vocab.muscles[m]).join(', ') || 'None'],
   ];
+  const history = api.get('exercise_history', `&id=${id}`);
+  // P1RM (#202): the estimated 1-rep max (#162) from the latest eligible session of the
+  // current setup, as of today. Filled in once the history arrives; no row without one.
+  const p1rm = h('div', { class: 'facts-row', hidden: true });
+  history.then(({ sessions }) => {
+    if (!sessions.length) return;
+    const key = sessions[sessions.length - 1].variant_key;
+    const latest = [...sessions].reverse().find((s) => s.variant_key === key && bestEstimate(s.sets, ex));
+    if (!latest) return;
+    const est = bestEstimate(latest.sets, ex);
+    fill(p1rm,
+      h('dt', {}, 'P1RM as of:', h('span', { class: 'p1rm-date' }, fmtDate(new Date().toISOString(), { month: 'short', day: 'numeric', year: 'numeric' }))),
+      h('dd', { class: 'p1rm-value' }, `${roundEstimate(convertWeight(est.value, latest.unit, S.user.unit)).toLocaleString()} ${S.user.unit}`));
+    p1rm.hidden = false;
+  }, () => {});
   const trend = asyncSection(
-    () => api.get('exercise_history', `&id=${id}`),
+    () => history,
     ({ sessions }) => {
       if (!sessions.length) return h('p', { class: 'muted' }, 'No logged sets yet. Trends appear after your first finished workout with this exercise.');
       const variants = [...new Set(sessions.map((s) => s.variant_key))];
@@ -2900,15 +2929,14 @@ function viewExercise(id) {
           return e && `${estimateLabel(e, s.unit, prefUnit)} from ${fmtW(e.weight)} ${s.unit} × ${e.reps}`;
         };
         const sessionList = () => [
-          h('h3', {}, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
+          h('h3', { class: 'session-count' }, mine.length > 30 ? `Latest 30 of ${mine.length} sessions` : `${mine.length} session${mine.length === 1 ? '' : 's'}`),
           h('ul', { class: 'log' }, [...mine].reverse().slice(0, 30).map((s) => h('li', {}, h('a', { class: 'log-row', href: `#/history/${s.workout_id}`, onclick: () => onOpen({ s }) }, h('span', { class: 'log-date' }, fmtDate(s.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })), h('span', { class: 'log-title' }, fmtSets(s.sets, s.unit)), estLine(s) && h('span', { class: 'log-est' }, estLine(s)), h('span', { class: 'log-meta' }, s.gym_name))))),
         ];
         const estChart = () => {
           const epts = pts.map((p) => ({ ...p, est: estOf(p.s) })).filter((p) => p.est);
           if (!epts.length) return [];
           return [
-            h('h3', {}, 'Estimated 1-rep max'),
-            lineChart(epts.map((p) => ({ ...p, value: roundEstimate(convertWeight(p.est.value, p.s.unit, prefUnit)), lines: [`From ${fmtW(p.est.weight)} ${p.s.unit} × ${p.est.reps}`, ...where(p.s)] })), { unit: prefUnit, onOpen, hint: 'Estimated from your best working set of 10 reps or fewer.' }),
+            chartCard('Estimated 1-rep max', lineChart(epts.map((p) => ({ ...p, value: roundEstimate(convertWeight(p.est.value, p.s.unit, prefUnit)), lines: [`From ${fmtW(p.est.weight)} ${p.s.unit} × ${p.est.reps}`, ...where(p.s)] })), { unit: prefUnit, onOpen, hint: 'Estimated from your best working set of 10 reps or fewer.' })),
           ];
         };
         if (isStretch(ex)) {
@@ -2923,8 +2951,7 @@ function viewExercise(id) {
             s,
           }));
           fill(box,
-            h('h3', {}, 'Seconds held'),
-            lineChart(spts, { unit: 's', format: (v) => String(Math.round(v)), onOpen, hint: 'Tap a point to see that session.' }),
+            chartCard('Seconds held', lineChart(spts, { unit: 's', format: (v) => String(Math.round(v)), onOpen, hint: 'Tap a point to see that session.' })),
             ...sessionList(),
           );
           return;
@@ -2944,19 +2971,15 @@ function viewExercise(id) {
           }));
           const withDistance = cpts.filter((p) => p.distance != null);
           fill(box,
-            h('h3', {}, 'Minutes'),
-            lineChart(cpts.map((p) => ({ ...p, value: p.minutes })), { unit: 'min', onOpen, hint: 'Tap a point to see that session.' }),
-            withDistance.length > 0 && h('h3', {}, 'Distance'),
-            withDistance.length > 0 && lineChart(withDistance.map((p) => ({ ...p, value: p.distance })), { unit: distUnit(unit), onOpen, hint: 'Tap a point to see that session.' }),
+            chartCard('Minutes', lineChart(cpts.map((p) => ({ ...p, value: p.minutes })), { unit: 'min', onOpen, hint: 'Tap a point to see that session.' })),
+            withDistance.length > 0 && chartCard('Distance', lineChart(withDistance.map((p) => ({ ...p, value: p.distance })), { unit: distUnit(unit), onOpen, hint: 'Tap a point to see that session.' })),
             ...sessionList(),
           );
           return;
         }
         fill(box,
-          h('h3', {}, 'Top weight'),
-          lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' }),
-          h('h3', {}, 'Best reps at top weight'),
-          lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' }),
+          chartCard('Top weight', lineChart(pts.map((p) => ({ ...p, value: p.top, lines: [`Sets: ${fmtSets(p.s.sets, p.s.unit)}`, ...where(p.s)] })), { unit, onOpen, hint: 'Tap a point to see that session.' })),
+          chartCard('Best reps at top weight', lineChart(pts.map((p) => ({ ...p, value: p.best, lines: [`At ${fmtW(p.top)} ${p.s.unit}`, `Sets: ${fmtSets(p.s.sets, p.s.unit)}`] })), { unit: 'reps', onOpen, hint: 'Tap a point to see that session.' })),
           ...estChart(),
           ...sessionList(),
         );
@@ -2971,11 +2994,10 @@ function viewExercise(id) {
     },
   );
   const art = muscleArt(ex.id);
-  return h('main', { class: 'page' }, backOr('exercises', 'Exercises'),
+  return h('main', { class: 'page exercise-page' }, detailHead(backOr('exercises', 'Exercises'), ex.name),
     h('div', { class: `exercise-head${art ? ' has-art' : ''}` },
       art,
-      h('h1', {}, ex.name),
-      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
+      h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]), p1rm)),
     ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
     section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),

@@ -509,6 +509,29 @@ await page.fill('input[type=search]', liftName.slice(0, 12));
 await page.click(`.log-row:has-text("${liftName}")`);
 await page.waitForSelector('.chart');
 check('exercise page shows form cues and a trend', (await page.locator('.cues').count()) === 1 && (await page.locator('.chart').count()) >= 2);
+// #202: the exercise page uses the pinned header: back link left, name right, no logo.
+{
+  const head = await page.evaluate(() => {
+    const hd = document.querySelector('main > .top-head');
+    const back = hd?.querySelector('.detail-back a.back');
+    const title = hd?.querySelector('.detail-title');
+    return hd && { back: back?.textContent.trim(), backLeft: Math.round(back.getBoundingClientRect().left), title: title?.textContent, titleRight: Math.round(innerWidth - title.getBoundingClientRect().right), titleColor: getComputedStyle(title).color, logo: !!hd.querySelector('img.brand-wide'), h1s: document.querySelectorAll('h1').length, height: Math.round(hd.getBoundingClientRect().height), position: getComputedStyle(hd).position };
+  });
+  check('the exercise page pins the back link on the left and the exercise name on the right, once, with no logo (#202)', head && head.back === 'Exercises' && head.title === liftName && head.backLeft < 40 && head.titleRight < 40 && head.titleColor === 'rgb(58, 242, 156)' && !head.logo && head.h1s === 1 && head.position === 'sticky', JSON.stringify(head));
+  await page.evaluate(() => window.scrollTo(0, 800));
+  await page.waitForTimeout(250);
+  check('the header stays at the top while the history scrolls under it', await page.evaluate(() => Math.round(document.querySelector('main > .top-head').getBoundingClientRect().top) === 0 && !!document.querySelector('main > .top-head .detail-title')));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const sub = await page.$$eval('.exercise-page .section > h2, .chart-card > h3, .session-count', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
+  check('section headings, chart titles and the session count are mint', sub.length >= 5 && sub.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(sub));
+  const cards = await page.$$eval('.chart-card', (cs) => cs.map((c) => ({ title: c.querySelector('h3').textContent, chart: !!c.querySelector('.chart svg'), readout: !!c.querySelector('.chart-readout'), bg: getComputedStyle(c).backgroundColor, radius: getComputedStyle(c).borderTopLeftRadius })));
+  const gap = await page.evaluate(() => { const c = [...document.querySelectorAll('.chart-card')]; return c.length > 1 ? Math.round(c[1].getBoundingClientRect().top - c[0].getBoundingClientRect().bottom) : 0; });
+  check('Top weight, Best reps and Estimated 1-rep max each sit in their own rounded card, with a gap', ['Top weight', 'Best reps at top weight', 'Estimated 1-rep max'].every((t) => cards.some((c) => c.title === t && c.chart && c.readout && c.bg === 'rgb(27, 32, 39)' && c.radius === '16px')) && gap > 0, JSON.stringify({ cards, gap }));
+  check('the session count comes after the chart cards', await page.evaluate(() => { const n = document.querySelector('.session-count'); const last = [...document.querySelectorAll('.chart-card')].pop(); return !!(n && last && (last.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)); }));
+  const p1 = await page.evaluate(() => { const v = document.querySelector('.p1rm-value'); return v && !v.closest('[hidden]') ? [v.previousElementSibling.textContent, v.textContent] : null; });
+  const today = await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }));
+  check('under Secondary muscles, "P1RM as of:" shows today\'s date and the estimate', !!p1 && p1[0].startsWith('P1RM as of:') && p1[0].includes(today) && /^\d[\d,]* (lb|kg)$/.test(p1[1]) && (await page.evaluate(() => document.querySelector('.p1rm-value').closest('.facts-row').previousElementSibling.previousElementSibling.textContent)) === 'Secondary muscles', JSON.stringify(p1));
+}
 // #162: estimated 1-rep max per session, from the best working set of 10 reps or fewer.
 {
   const exId = Number((await page.evaluate(() => location.hash)).split('/').pop());
