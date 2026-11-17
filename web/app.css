@@ -1836,3 +1836,98 @@ button.setup-note {
   max-width: 50%;
   opacity: 0.24;
 }
+
+/* ---- Pick muscle groups (#154) and plan editing (#155) ----------------- */
+.muscle-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.muscle-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--chalk);
+  font: inherit;
+  cursor: pointer;
+}
+
+.muscle-tile img {
+  width: 100%;
+  max-width: 96px;
+  aspect-ratio: 1;
+  opacity: 0.55;
+}
+
+.muscle-name {
+  font: 700 15px/1.2 var(--display);
+  text-align: center;
+}
+
+.muscle-pct {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.muscle-tile.tired .muscle-pct {
+  color: var(--yellow);
+}
+
+.muscle-tile[aria-pressed="true"] {
+  border-color: var(--mint);
+  background: rgba(58, 242, 156, 0.14);
+}
+
+.muscle-tile[aria-pressed="true"] img {
+  opacity: 1;
+}
+
+.muscle-tile[aria-pressed="true"] .muscle-name {
+  color: var(--mint);
+}
+
+.plan-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-actions {
+  flex-wrap: wrap;
+}
+
+/* Today: heading and date on the left, the wide logo top right. */
+.today-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center; /* the logo centres on the heading and date together */
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand-wide.head {
+  flex: none;
+  width: min(118px, 30vw);
+  margin: 0;
+}
+
+/* Quick Start (#127): a mint-tinted button with a caption, after the plan. */
+.quick-start-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.btn.quick-start {
+  border-color: rgba(58, 242, 156, 0.45);
+  background: rgba(58, 242, 156, 0.08);
+  color: var(--mint);
+}

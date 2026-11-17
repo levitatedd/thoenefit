@@ -548,6 +548,7 @@ async function loadDraft({ regenerate = false } = {}) {
   if (!gym) return;
   const body = { gym_id: gym.id, bodyweight_only: S.draftOpts.bodyweight_only, warm_up: S.draftOpts.warm_up ?? !!S.user.warm_up, stretches: S.draftOpts.stretches ?? !!S.user.stretches };
   if (S.draftOpts.day_type) body.day_type = S.draftOpts.day_type;
+  if (S.draftOpts.day_type === 'custom') body.muscles = S.draftOpts.muscles || []; // picked muscle groups (#154)
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
     body.locked = {};
@@ -556,6 +557,7 @@ async function loadDraft({ regenerate = false } = {}) {
       if (b.locked) body.locked[b.slot] = b.exercise_id;
       else body.avoid.push(b.exercise_id);
     }
+    body.avoid.push(...(S.draftRemoved || [])); // removed by hand (#155): do not bring them back
   } else if (S.draft) {
     body.locked = Object.fromEntries(S.draft.exercises.filter((b) => b.locked).map((b) => [b.slot, b.exercise_id]));
   }
@@ -586,6 +588,12 @@ async function loadDraft({ regenerate = false } = {}) {
     }
     if (!res) {
       res = await api.post('generate', body);
+      // Lifts added by hand (#155) stay through Regenerate and option changes.
+      const extra = (S.draftAdded || []).filter((b) => !res.workout.exercises.some((x) => x.exercise_id === b.exercise_id));
+      if (extra.length) {
+        res.workout.exercises.push(...extra);
+        res.workout.est_minutes = Math.round(res.workout.exercises.reduce((n, b) => n + (Number(b.minutes) || 0), 0));
+      }
       S.draftOpts.day_type = res.workout.day_type;
       S.draftOpts.minutes = res.workout.minutes;
     }
@@ -668,6 +676,8 @@ function cardioInputs(s, unit, onChange) {
 
 function startWorkout() {
   const d = S.draft;
+  S.draftAdded = [];
+  S.draftRemoved = [];
   sync.start({
     id: uuid(),
     gym_id: d.gym_id,
@@ -872,7 +882,10 @@ function viewToday() {
   const gym = activeGym();
   const active = sync.active;
   refreshShares();
-  const head = h('header', { class: 'page-head today-head' }, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' })));
+  // The wide logo sits top right, beside the heading.
+  const head = h('header', { class: 'page-head today-head' },
+    h('div', {}, h('h1', {}, 'Today'), h('p', { class: 'muted' }, fmtDate(new Date().toISOString(), { weekday: 'long', month: 'long', day: 'numeric' }))),
+    brandWide('head'));
   const waiting = sync.waiting ? h('p', { class: 'notice' }, `${sync.waiting} finished workout${sync.waiting > 1 ? 's are' : ' is'} saved on this phone and will upload when you are back online.`) : null;
 
   if (active) {
@@ -906,7 +919,6 @@ function viewToday() {
           'Discard workout',
         ),
       ),
-      brandWide(),
     );
   }
 
@@ -946,6 +958,14 @@ function viewToday() {
       'aria-label': 'Workout type',
       onchange: (e) => {
         const v = e.target.value;
+        if (v === 'pick-muscles') {
+          e.target.value = S.draftOpts.routine_id ? `routine:${S.draftOpts.routine_id}` : S.draftOpts.day_type || '';
+          musclePicker();
+          return;
+        }
+        S.draftAdded = [];
+        S.draftRemoved = [];
+        if (v === 'custom') return;
         if (v.startsWith('routine:')) {
           S.draftOpts.routine_id = Number(v.slice(8));
         } else {
@@ -957,7 +977,10 @@ function viewToday() {
       },
     },
     h('optgroup', { label: 'Suggested' },
-      ordered.map((d) => h('option', { value: d, selected: !S.draftOpts.routine_id && d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d)))),
+      ordered.map((d) => h('option', { value: d, selected: !S.draftOpts.routine_id && d === (S.draft ? S.draft.day_type : S.draftOpts.day_type) }, dayLabel(d))),
+      // Picked muscle groups (#154).
+      S.draftOpts.day_type === 'custom' && (S.draftOpts.muscles || []).length > 0 && h('option', { value: 'custom', selected: !S.draftOpts.routine_id }, `Custom: ${S.draftOpts.muscles.map((m) => S.vocab.muscles[m]).join(', ')}`),
+      h('option', { value: 'pick-muscles' }, 'Pick muscle groups…')),
     (S.routines || []).length > 0 && h('optgroup', { label: 'Your routines' },
       S.routines.map((r) => h('option', { value: `routine:${r.id}`, selected: S.draftOpts.routine_id === r.id }, r.name))),
   );
@@ -1052,8 +1075,21 @@ function viewToday() {
         { class: 'plan' },
         d.exercises.map((b) => planRow(b, gym)),
       ),
+      h('div', { class: 'plan-edit' },
+        h('button', { class: 'btn block', type: 'button', onclick: () => addExerciseSheet({ gym_id: d.gym_id, exercises: d.exercises }, (block) => {
+          block.slot = `added${Date.now()}`;
+          block.locked = false;
+          S.draft.exercises.push(block);
+          S.draftAdded = [...(S.draftAdded || []), block];
+          replanTime();
+          pushSharedPlan();
+          render();
+        }) }, icon('plus', 18), 'Add exercise')),
       d.exercises.length > 0 && h('button', { class: 'btn block', type: 'button', onclick: () => routineSheet(d.routine_name || dayLabel(d.day_type), planOf(d.day_type, d.exercises, (b) => b.target_sets)) }, icon('plus', 18), d.routine_id ? 'Save changes to this routine' : 'Save as routine'),
-      brandWide(),
+      // Quick Start (#127): an empty workout, built as you go.
+      h('div', { class: 'quick-start-box' },
+        h('button', { class: 'btn block quick-start', type: 'button', onclick: quickStart }, icon('bolt', 18), 'Quick Start'),
+        h('p', { class: 'muted small center' }, 'Start an empty workout')),
     );
   }
 
@@ -1238,10 +1274,10 @@ function planRow(b, gym) {
     { class: `plan-row${art ? ' has-art' : ''}` },
     art,
     h('div', { class: 'plan-main' }, h('h3', {}, historyLink(b.exercise_id, b.name, 'today', 'Today')), h('p', { class: 'target' }, targetLine(b, S.draft.unit)), !isStretch(b) && h('p', { class: 'last' }, lastLine(b.previous)), noteLine(b.note), h('p', { class: 'why' }, b.reason)),
-    !S.draft.share_id && !S.draft.routine_id && h(
+    h(
       'div',
       { class: 'plan-actions' },
-      h(
+      !S.draft.share_id && !S.draft.routine_id && h(
         'button',
         {
           type: 'button',
@@ -1255,11 +1291,20 @@ function planRow(b, gym) {
         icon(b.locked ? 'lock' : 'unlock', 18),
         b.locked ? 'Locked' : 'Lock',
       ),
-      h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
+      !S.draft.share_id && !S.draft.routine_id && h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(gym.id, b.exercise_id, S.draft.exercises.map((x) => x.exercise_id), (block) => {
         Object.assign(b, block, { slot: b.slot, locked: true, reason: `You swapped this in. ${block.reason}` });
         pushSharedPlan();
         render();
       }, S.draft.bodyweight_only) }, icon('swap', 18), 'Swap'),
+      // Edit the plan before starting (#155).
+      h('button', { type: 'button', class: 'btn small', 'aria-label': `Remove ${b.name} from the plan`, onclick: () => {
+        S.draft.exercises = S.draft.exercises.filter((x) => x !== b);
+        S.draftAdded = (S.draftAdded || []).filter((x) => x !== b);
+        S.draftRemoved = [...(S.draftRemoved || []), b.exercise_id];
+        replanTime();
+        pushSharedPlan();
+        render();
+      } }, icon('trash', 18), 'Remove'),
     ),
   );
 }
@@ -1786,7 +1831,70 @@ function move(list, from, to) {
   list.splice(to, 0, item);
 }
 
-function addExerciseSheet(doc) {
+/** Recomputes the plan's time after lifts are added or removed by hand (#155). */
+function replanTime() {
+  S.draft.est_minutes = Math.round(S.draft.exercises.reduce((n, b) => n + (Number(b.minutes) || 0), 0));
+}
+
+/**
+ * Quick Start (#127): an empty workout at the selected gym, built as you go
+ * with Add exercise. Logging, pause and saving work as usual.
+ */
+function quickStart() {
+  const gym = activeGym();
+  if (!gym || sync.active) return;
+  S.draftAdded = [];
+  S.draftRemoved = [];
+  sync.start({ id: uuid(), gym_id: gym.id, gym_name: gym.name, day_type: 'custom', status: 'active', unit: S.user.unit, started_at: new Date().toISOString(), completed_at: null, notes: 'Quick start', exercises: [] });
+  go('workout');
+  addExerciseSheet(sync.active);
+}
+
+/**
+ * The muscle groups to train (#154), with each one's recovery from the same
+ * estimate as Trends, most recovered first. Picking builds a custom plan.
+ */
+async function musclePicker() {
+  const chosen = new Set(S.draftOpts.day_type === 'custom' ? S.draftOpts.muscles || [] : []);
+  const grid = h('div', { class: 'muscle-grid' }, h('p', { class: 'muted' }, 'Loading'));
+  const build = h('button', { class: 'btn primary block', type: 'submit', disabled: true }, 'Build workout');
+  const refresh = () => {
+    build.disabled = chosen.size === 0;
+    build.textContent = chosen.size ? `Build workout (${chosen.size})` : 'Build workout';
+  };
+  const close = sheet('Pick muscle groups', h('form', { class: 'stack', onsubmit: (e) => {
+    e.preventDefault();
+    if (!chosen.size) return;
+    close();
+    S.draftOpts.day_type = 'custom';
+    S.draftOpts.muscles = MUSCLE_ART.filter((m) => chosen.has(m));
+    S.draftOpts.routine_id = null;
+    S.draftAdded = [];
+    S.draftRemoved = [];
+    loadDraft();
+  } }, h('p', { class: 'muted small' }, 'Recovery comes from the sets you logged in the last week, like on Trends. Below 50% is still recovering.'), grid, build));
+  refresh();
+  try {
+    const { recovery } = await api.get('recovery');
+    const order = MUSCLE_ART.slice().sort((a, b) => (recovery[b]?.recovery ?? 100) - (recovery[a]?.recovery ?? 100));
+    fill(grid, order.map((m) => {
+      const pct = Math.round(recovery[m]?.recovery ?? 100);
+      return h('button', { type: 'button', class: `muscle-tile${pct < 50 ? ' tired' : ''}`, 'aria-pressed': String(chosen.has(m)), 'data-muscle': m, onclick: (e) => {
+        const on = !chosen.has(m);
+        if (on) chosen.add(m); else chosen.delete(m);
+        e.currentTarget.setAttribute('aria-pressed', String(on));
+        refresh();
+      } },
+      h('img', { src: `icons/muscles/${m}.png`, alt: '', 'aria-hidden': 'true' }),
+      h('span', { class: 'muscle-name' }, S.vocab.muscles[m]),
+      h('span', { class: 'muscle-pct' }, pct < 50 ? `${pct}% · recovering` : `${pct}%`));
+    }));
+  } catch (e) {
+    fill(grid, h('p', { class: 'muted' }, e.offline ? 'Picking muscle groups needs a connection.' : e.message));
+  }
+}
+
+function addExerciseSheet(doc, onAdd) {
   const gym = S.gyms.find((g) => g.id === doc.gym_id);
   const have = new Set(gym ? gym.equipment : []);
   const used = new Set(doc.exercises.map((e) => e.exercise_id));
@@ -1811,12 +1919,19 @@ function addExerciseSheet(doc) {
           if (!block) block = { exercise_id: x.id, name: x.name, kind: x.kind, pattern: x.pattern, target_sets: 3, rep_min: x.compound ? 6 : 10, rep_max: x.compound ? 10 : 15, rest_seconds: x.compound ? 120 : 75, suggested_weight: null, suggested_reps: null, reason: 'Added by you.', previous: null };
           else block.reason = `Added by you. ${block.reason}`;
           close();
-          sync.edit(doc.id, (d) => d.exercises.push(blockToEntry(block)));
-          render();
+          if (onAdd) onAdd(block);
+          else {
+            sync.edit(doc.id, (d) => d.exercises.push(blockToEntry(block)));
+            render();
+          }
         } }, h('span', { class: 'pick-name' }, x.name), h('span', { class: 'pick-meta' }, x.muscles_main.map((m) => S.vocab.muscles[m]).join(', ')));
+  // Narrow to one muscle group (#155).
+  const muscle = h('select', { 'aria-label': 'Muscle group', onchange: () => paint() },
+    h('option', { value: '' }, 'All muscles'), Object.entries(S.vocab.muscles).map(([k, v]) => h('option', { value: k }, v)));
   const paint = () => {
     const q = search.value.trim();
-    const r = searchExercises(pool, q, S.vocab, { limit: 40, similarLimit: 6 });
+    const pick = muscle.value ? pool.filter((x) => x.muscles_main.includes(muscle.value)) : pool;
+    const r = searchExercises(pick, q, S.vocab, { limit: 40, similarLimit: 6 });
     fill(list,
       r.closest && h('p', { class: 'muted' }, `Nothing at this gym matches "${q}" exactly. Closest:`),
       ...r.matches.map(row),
@@ -1825,7 +1940,7 @@ function addExerciseSheet(doc) {
       !r.matches.length && h('p', { class: 'muted' }, q ? `Nothing matches "${q}" with the equipment at this gym.` : 'Every exercise this gym has equipment for is already in the workout.'),
     );
   };
-  close = sheet('Add exercise', h('div', { class: 'stack' }, search, list));
+  close = sheet('Add exercise', h('div', { class: 'stack' }, h('div', { class: 'filters' }, search, muscle), list));
   paint();
 }
 
