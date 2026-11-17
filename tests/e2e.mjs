@@ -1733,9 +1733,28 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
   await page.click('.sheet button:has-text("Discard workout")');
   await page.waitForSelector('.plan-row');
   // Quick Start (#127).
+  const countsLoaded = page.waitForResponse((r) => r.url().includes('a=exercise_counts'));
   await page.click('button:has-text("Quick start")');
   await page.waitForSelector('.sheet .pick');
+  await countsLoaded;
+  await page.waitForTimeout(100);
   check('Quick start opens an empty workout with the exercise picker', /#\/workout$/.test(await page.evaluate(() => location.hash)) && (await page.locator('.lift').count()) === 0);
+  // #174: with no search, the lifter's most-performed exercises come first, ties and never-done alphabetical.
+  {
+    const listed = await page.$$eval('.sheet .pick .pick-name', (els) => els.map((e) => e.textContent.trim()));
+    const counts = await page.evaluate(async () => {
+      const b = await (await fetch('api.php?a=bootstrap')).json();
+      return Object.fromEntries(b.exercises.map((x) => [x.name, b.exercise_counts[x.id] || 0]));
+    });
+    const n = listed.map((name) => counts[name]);
+    const ordered = n.every((c, i) => i === 0 || n[i - 1] > c || (n[i - 1] === c && listed[i - 1].localeCompare(listed[i]) <= 0));
+    check('Add exercise lists the most-performed exercises first (#174)', n[0] > 0 && ordered, listed.slice(0, 6).map((x, i) => `${x}:${n[i]}`).join(', '));
+    await page.fill('.sheet input[type=search]', 'curl');
+    await page.waitForTimeout(150);
+    check('a search keeps relevance order rather than most-performed', /curl/i.test(await page.locator('.sheet .pick .pick-name').first().textContent()));
+    await page.fill('.sheet input[type=search]', '');
+    await page.waitForTimeout(150);
+  }
   const first = (await page.locator('.sheet .pick .pick-name').first().textContent()).trim();
   await page.locator('.sheet .pick').first().click();
   await page.waitForSelector('.lift');

@@ -261,6 +261,15 @@ function similarTo(base, list, taken, limit) {
   return ranked.slice(0, limit).map((r) => r[4]);
 }
 
+/**
+ * Most-performed first (#174): by how many finished workouts include each
+ * exercise, then alphabetically. Exercises never done follow, alphabetically.
+ */
+export function byUsage(list, counts = {}) {
+  const n = (x) => counts[x.id] || 0;
+  return list.slice().sort((a, b) => n(b) - n(a) || a.name.localeCompare(b.name));
+}
+
 export function searchExercises(list, query, vocab, { limit = 40, similarLimit = 8 } = {}) {
   const tokens = queryTokens(query);
   if (!tokens.length) return { matches: list.slice(0, limit), similar: [], closest: false };
