@@ -28,6 +28,122 @@ ThoeneFit is a self-hosted workout planner and log built for phones. Pick a gym 
 
 Sample data: Alex Rivera and Sam Lee are made-up people at a made-up gym. Tap a preview to open it at full size. To refresh these, see the steps at the top of [`docs/screenshots/capture.mjs`](docs/screenshots/capture.mjs).
 
+## Features
+
+<details>
+<summary><strong>Workout planning</strong></summary>
+
+- **Personalized workouts** based on your goal, experience, equipment, available time, and recent training.
+- **Seven training goals** — Get Started, General Fitness, Reduce Bodyweight, Build Muscle, Get Stronger, Muscular Endurance, and Powerlifting.
+- **Training splits** for full body, upper/lower, and push/pull/legs.
+- **Muscle-group selection** with illustrated recovery tiles to help choose what to train.
+- **Bodyweight-only workouts** for sessions without equipment.
+- **Quick Start** to begin an empty workout and add exercises as you go.
+- **Editable plans** with options to add, remove, swap, or lock exercises before starting.
+- **Saved routines** that keep exercise order and set targets while refreshing suggested weights from your history.
+- **Optional warm-ups and stretches**, including cardio, dynamic stretches, and cooldown holds.
+- **Workout time estimates** that update as you change the plan.
+
+</details>
+
+<details>
+<summary><strong>Gyms and exercises</strong></summary>
+
+- **Multiple gym profiles** with equipment presets, custom equipment selections, and configurable weight increments.
+- **Exercise library** with equipment requirements, movement patterns, primary and secondary muscles, and form cues.
+- **Flexible search** with aliases, typo matching, and similar-exercise suggestions.
+- **Muscle and equipment filters** to find exercises that fit your session.
+- **Frequently performed exercises first** when adding an exercise manually.
+- **Custom exercises** with editable names, equipment, muscle groups, and form cues.
+- **Exercise archiving and restoration** while preserving workout history.
+- **Setup notes** for seat height, bench position, and machine settings.
+- **Gym-specific machine and cable history** to account for equipment differences.
+- **Pounds and kilograms**, with conversions for future suggestions.
+
+</details>
+
+<details>
+<summary><strong>Workout logging</strong></summary>
+
+- **Set-by-set strength logging** for weight, reps, and warm-up sets.
+- **Cardio logging** for duration, optional distance, and machine level.
+- **Stretch logging** for timed holds, including separate sides where applicable.
+- **Live workout editing** to add, remove, reorder, or swap exercises during a session.
+- **Mid-workout swaps** that preserve completed sets under the original exercise.
+- **Pause and resume** with elapsed workout time.
+- **Rest timer** with a completion sound, 15-second adjustments, and a skip button.
+- **Screen wake lock** on supported devices.
+- **Local saving and automatic sync** so you can continue logging without a signal.
+- **Barbell plate calculator** with plates per side, selectable bar weights, nearby loadable weights, and an option to apply the result to a set.
+
+</details>
+
+<details>
+<summary><strong>Progression and feedback</strong></summary>
+
+- **Weight and rep suggestions** based on your previous working sets and available weight increments.
+- **Double progression** that builds reps before increasing the load.
+- **Optional exercise difficulty ratings** using 0, 1, 2, 3, or 4+ reps left in a typical working set.
+- **Whole-workout effort ratings** that help guide future workout volume and estimate calories.
+- **Stalled-lift options** to repeat a target, reduce the load, swap exercises where available, or keep the usual suggestion.
+- **Explanations for suggestions**, including progression targets and recovery adjustments.
+- **Personal records** for heavier lifts and more reps at a previously logged weight.
+- **Estimated one-rep max** from eligible working sets, shown in exercise history and workout share images.
+- **Workout recaps** highlighting completed work, first performances, and personal records.
+
+</details>
+
+<details>
+<summary><strong>History, Trends, and recovery</strong></summary>
+
+- **Workout history** with recent sessions first and access to older workouts.
+- **Editable completed workouts** to correct logged values, add or remove sets, and update effort ratings.
+- **Workout calendar** showing completed sessions and upcoming training days.
+- **Weekly scheduling** based on your chosen training days and split.
+- **Calendar adjustments** to take a rest day or move an upcoming workout when available.
+- **Interactive exercise charts** for top weight, best reps at that weight, and estimated one-rep max.
+- **Cardio and stretch charts** for duration, distance, and hold time.
+- **Chart-to-workout navigation** to open the session behind a data point.
+- **Selectable Trends ranges** covering eight weeks, one, two, three, or six months, and one year.
+- **Lifting-volume and workout-time charts** to follow training activity.
+- **Up to five pinned exercises** in Trends, with recent results and eligible estimated 1RM values.
+- **Muscle recovery estimates** with illustrated tiles and recent-training details.
+- **Pinned exercise headers** that keep the selected exercise visible while scrolling.
+
+</details>
+
+<details>
+<summary><strong>Sharing and integrations</strong></summary>
+
+- **Shared workout plans** for other accounts on the same server, with personalized weights and separate logs.
+- **Optional history sharing** so signed-in members can view completed workouts.
+- **Shareable workout images** with exercises, set summaries, personal records, and eligible 1RM estimates.
+- **Image saving and device sharing** on supported browsers.
+- **Strava export** from the finish screen or workout history.
+- **Optional Strava details** including supported exercises, sets, reps, weights, and estimated calories.
+- **Fitbod CSV import** with a preview, exercise matching, and options for unmatched exercises.
+- **Import management** that avoids duplicates when reimporting and lets you remove imported workouts.
+- **CSV export** of your workout set history.
+
+</details>
+
+<details>
+<summary><strong>Accounts and self-hosting</strong></summary>
+
+- **Installable web app** with Home Screen installation help.
+- **Offline workout logging** after initial setup, with sync status and automatic retries.
+- **Invite-code registration** so new users can create an account and start immediately.
+- **Admin controls** to create users, manage invite codes, reset passwords, and deactivate or reactivate accounts.
+- **Password changes and session revocation**.
+- **Sign out and clear this device** for shared phones or computers.
+- **Optional in-app feedback** that creates GitHub issues and tracks their status.
+- **Version information and release notes** inside the app.
+- **Self-hosting with PHP and a database**, with migration tools and deployment workflows.
+
+</details>
+
+Generating fresh plans, server-backed exercise swaps, and loading history require a connection. Strava and GitHub feedback require server configuration.
+
 ## Plan and log
 
 1. In **Settings → Gyms**, add a gym and select its equipment. You can set the smallest weight jump for each equipment type.
