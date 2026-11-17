@@ -1867,8 +1867,40 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
         edit((d) => d.exercises.find((x) => x.id === e.id).sets.pop());
       } }, icon('minus', 18), stretch ? 'Remove hold' : cardio ? 'Remove interval' : 'Remove set'),
       doc.gym_id && e.sets.some((s) => !s.done) && h('button', { type: 'button', class: 'btn small', 'aria-label': `Swap ${e.name} for another exercise`, onclick: swap }, icon('swap', 18), 'Swap'),
+      // Difficulty (#170): once every set is checked off, one optional rating for the exercise.
+      !cardio && !stretch && e.sets.length > 0 && e.sets.every((s) => s.done) && h('button', {
+        type: 'button',
+        class: `btn small difficulty${e.reps_left != null ? ' rated' : ''}`,
+        'aria-label': e.reps_left != null ? `Difficulty for ${e.name}: ${repsLeftLabel(e.reps_left)} reps left. Change` : `Rate how hard ${e.name} felt`,
+        onclick: () => difficultySheet(e, (v) => edit((d) => {
+          const t = d.exercises.find((x) => x.id === e.id);
+          if (v == null) delete t.reps_left;
+          else t.reps_left = v;
+        })),
+      }, e.reps_left != null ? `${repsLeftLabel(e.reps_left)} left` : 'Difficulty?'),
     ),
   );
+}
+
+/** 0-4 reps left, where 4 means 4 or more (#170). */
+function repsLeftLabel(v) {
+  return v >= 4 ? '4+' : String(v);
+}
+
+/** Ask how many more reps a typical working set had in it (#170). Optional; can be changed or cleared. */
+function difficultySheet(e, onPick) {
+  const close = sheet('Difficulty', h('div', { class: 'stack' },
+    h('p', {}, h('strong', {}, e.name)),
+    h('p', {}, 'At the end of a typical working set, how many more reps could you have done with good form?'),
+    choices([0, 1, 2, 3, 4].map((v) => [v, repsLeftLabel(v)]), e.reps_left ?? null, (v) => {
+      close();
+      onPick(v);
+    }, { columns: 5 }),
+    h('p', { class: 'muted small' }, 'Your next suggestion for this exercise takes it into account. 2 left keeps the usual progression.'),
+    e.reps_left != null && h('button', { class: 'btn ghost block', type: 'button', onclick: () => {
+      close();
+      onPick(null);
+    } }, 'Clear rating')));
 }
 
 function find(doc, exId, setId) {

@@ -213,7 +213,7 @@ final class Generator
     public function lastPerformance(int $uid, string $variantKey): ?array
     {
         $cands = $this->db->all(
-            "SELECT we.id, w.started_at, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+            "SELECT we.id, we.reps_left, w.started_at, w.unit FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
              WHERE we.user_id=? AND we.variant_key=? AND w.status='completed'
              ORDER BY w.started_at DESC LIMIT 5",
             [$uid, $variantKey]
@@ -225,6 +225,8 @@ final class Generator
                     'date' => to_iso($c['started_at']),
                     'unit' => $c['unit'],
                     'sets' => array_map(static fn($s) => ['weight' => (float) $s['weight'], 'reps' => (int) $s['reps']], $sets),
+                    // How it felt (#170): reps left on a typical working set, or null if not rated.
+                    'reps_left' => Workouts::repsLeft($c['reps_left'] ?? null),
                 ];
             }
         }
@@ -251,6 +253,14 @@ final class Generator
      * weight and reached the top of the rep range, go up one increment and
      * restart at the bottom of the range. Otherwise keep the weight and add
      * reps.
+     *
+     * A difficulty rating on that session (#170, reps left on a typical working
+     * set) adjusts it; 2 or no rating keeps the rules above:
+     * - 3 or 4+ left: add load once the target is met (as usual); short of it,
+     *   aim for two more reps instead of one.
+     * - 0 or 1 left: at the top of the range, repeat it before adding load;
+     *   short of it, repeat the reps. Only when a set also fell below the
+     *   bottom of the range does the load come down one increment.
      *
      * @return array{weight: ?float, reps: int, action: string, why: string}
      */
@@ -291,8 +301,20 @@ final class Generator
             $minReps = min($minReps, $s['reps']);
         }
         $range = "$repMin-$repMax";
+        $left = $last['reps_left'] ?? null;
+        $leftText = $left === null ? '' : ($left >= 4 ? '4 or more reps' : ($left === 1 ? '1 rep' : "$left reps"));
+        $easy = $left !== null && $left >= 3;
+        $hard = $left !== null && $left <= 1;
+        // Short of the top: how many reps to aim for, by how it felt.
+        $aim = max($repMin, min($repMax, $minReps + ($easy ? 2 : ($hard ? 0 : 1))));
         if ($top <= 0 || $inc <= 0) {
             // Bodyweight or bands: progress by reps; the app cannot know what "heavier" is here.
+            if (!$allTop && ($easy || $hard)) {
+                return [
+                    'weight' => $top > 0 ? $top : null, 'reps' => $aim, 'action' => 'stay',
+                    'why' => "Last time you got $repsList reps with $leftText left. " . ($easy ? "Aim for $aim reps on every set." : "Repeat $aim reps on every set before adding more."),
+                ];
+            }
             if ($allTop) {
                 return [
                     'weight' => $top > 0 ? $top : null, 'reps' => $repMax, 'action' => 'stay',
@@ -305,11 +327,30 @@ final class Generator
             ];
         }
         $w = self::fmt($top);
+        if ($allTop && $hard) {
+            return [
+                'weight' => $top, 'reps' => $repMax, 'action' => 'stay',
+                'why' => "Last time you got $repsList reps at $w $unit, the top of $range, but with only $leftText left. Repeat $w $unit for $repMax reps before going up.",
+            ];
+        }
+        if (!$allTop && $hard && $minReps < $repMin && $top - $inc > 0) {
+            $lower = $top - $inc;
+            return [
+                'weight' => $lower, 'reps' => $repMin, 'action' => 'decrease',
+                'why' => "Last time you got $repsList reps at $w $unit with $leftText left, below the $range range, so drop to " . self::fmt($lower) . " $unit and build back up.",
+            ];
+        }
+        if (!$allTop && ($easy || $hard)) {
+            return [
+                'weight' => $top, 'reps' => $aim, 'action' => 'stay',
+                'why' => "Last time you got $repsList reps at $w $unit with $leftText left. " . ($easy ? "Stay at $w $unit and aim for $aim reps on every set." : "Stay at $w $unit and repeat $aim reps on every set before adding more."),
+            ];
+        }
         if ($allTop) {
             $next = $top + $inc;
             return [
                 'weight' => $next, 'reps' => $repMin, 'action' => 'increase',
-                'why' => "Last time you got $repsList reps at $w $unit, the top of $range on every set, so go up " . self::fmt($inc) . " $unit to " . self::fmt($next) . " $unit.",
+                'why' => "Last time you got $repsList reps at $w $unit, the top of $range on every set" . ($easy ? " with $leftText left" : '') . ", so go up " . self::fmt($inc) . " $unit to " . self::fmt($next) . " $unit.",
             ];
         }
         return [

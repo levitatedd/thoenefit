@@ -1537,6 +1537,30 @@ console.log('Workout recap and records (#123)');
   await row.locator('input').nth(1).fill('30');
   await row.locator('.plate').click();
   await page.waitForTimeout(300);
+  // Difficulty (#170): only once every set of the exercise is checked off.
+  const diff = card.locator('button.difficulty');
+  check('Difficulty? stays hidden while the exercise has unchecked sets', (await card.locator('.set:not(.done)').count()) > 0 && (await diff.count()) === 0);
+  while ((await card.locator('.set:not(.done)').count()) > 0) {
+    await card.locator('button:has-text("Remove set")').click();
+    await page.waitForTimeout(150);
+  }
+  await diff.waitFor();
+  check('with every set checked off, Difficulty? appears in the action row', (await diff.textContent()) === 'Difficulty?' && (await card.locator('.set-actions button.difficulty').count()) === 1);
+  await diff.click();
+  await page.waitForSelector('.sheet .choices');
+  check('it asks how many more reps a typical working set had, with 0, 1, 2, 3 and 4+', /how many more reps could you have done with good form/.test(await page.textContent('.sheet')) && (await page.$$eval('.sheet .choice-label', (els) => els.map((e) => e.textContent).join())) === '0,1,2,3,4+');
+  await page.locator('.sheet .choice', { hasText: '4+' }).click();
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === '4+ left');
+  await diff.click();
+  await page.waitForSelector('.sheet .choices');
+  await page.locator('.sheet .choice[data-value="0"]').click();
+  await page.waitForFunction(() => document.querySelector('button.difficulty')?.textContent === '0 left');
+  const rated = await page.evaluate((id) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('tf.docs.'));
+    const st = JSON.parse(localStorage.getItem(key));
+    return st.docs.find((d) => d.id === st.activeId).exercises.find((e) => e.id === id).reps_left;
+  }, lift.id);
+  check('the rating can be changed, shows on the card and is saved on the workout on the phone', rated === 0 && /rated/.test(await diff.getAttribute('class')));
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
   await page.click('.sheet button:has-text("Finish and save")');
@@ -1549,6 +1573,8 @@ console.log('Workout recap and records (#123)');
   await page.waitForFunction((n) => document.querySelector('h1')?.textContent === n, lift.name);
   check('the record links to that exercise\'s history', /#\/exercises\/\d+/.test(await page.evaluate(() => location.hash)) && (await page.locator('.sheet').count()) === 0);
   const hist = (await api('history&limit=1')).workouts[0];
+  const saved = (await api(`workout&id=${hist.id}`)).workout;
+  check('the rating reached the server with the finished workout', saved.exercises.find((e) => e.exercise_id === lift.exercise_id)?.reps_left === 0, JSON.stringify(saved.exercises.map((e) => e.reps_left)));
   await page.goto(`${URL}#/history/${hist.id}`);
   await page.waitForSelector('.recap');
   check('the finished workout in History shows the same recap', (await page.locator('.recap .recap-record', { hasText: lift.name }).count()) === 1);
