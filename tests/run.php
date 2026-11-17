@@ -1565,6 +1565,191 @@ foreach ([5, 4, 3] as $d) {
 }
 check('a "4+ reps left" rating on the latest session means it is not a stall', $gen->block($euser, $eg, $exById[$squatS])['stall'] === null);
 
+echo "Effort ratings plan the next workout (#198)\n";
+// Lifters with the same two push workouts, rated differently (or not at all).
+$effortUser = function (string $name, ?string $effort, bool $rated, array $doneShort = []) use ($auth, $mkGym, $doc, $wk, $db, $bySlug, $ago) {
+    $id = $auth->createUser($name, "$name long password");
+    $gym = $mkGym($id, 'Effort gym', Catalog::equipmentKeys());
+    foreach ([12, 10] as $i => $d) {
+        $w = $doc($gym, 'push', [[$bySlug['barbell-bench-press'], 6, 10, [[135, 10], [135, 10], [135, 10]]], [$bySlug['machine-chest-press'], 8, 12, [[100, 12], [100, 12], [100, 12]]]], $ago($d));
+        if (in_array($i, $doneShort, true)) {
+            $w['exercises'][0]['target_sets'] = 4; // planned 4, did 3
+        }
+        $w['effort'] = $effort;
+        $w['effort_rated'] = $rated;
+        $wk->save($id, $w);
+    }
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $gym];
+};
+$plan = fn(array $u) => $gen->generate($u[0], $u[1], ['day_type' => 'push', 'minutes' => 90, 'now' => time()]);
+$sets = fn(array $p) => array_column(array_filter($p['exercises'], static fn($b) => $b['kind'] !== 'cardio' && $b['kind'] !== 'stretch'), 'target_sets', 'exercise_id');
+$weights = fn(array $p) => array_column($p['exercises'], 'suggested_weight', 'exercise_id');
+$base = $plan($effortUser('effort-none', 'hard', false));
+$hard = $plan($effortUser('effort-hard', 'hard', true));
+$light = $plan($effortUser('effort-light', 'light', true));
+check('skipped (default-only) effort keeps the usual plan and says nothing', $base['effort_note'] === null);
+check('two recent push workouts rated Hard plan fewer sets, never below 2', array_keys($sets($hard)) === array_keys($sets($base)) && array_sum($sets($hard)) < array_sum($sets($base)) && min($sets($hard)) >= 2, json_encode([$sets($hard), $sets($base)]));
+check('the change is explained once, for the whole workout', $hard['effort_note'] === 'Your recent push workouts felt hard, so this one has fewer sets.', (string) $hard['effort_note']);
+check('effort never changes a lift\'s weight or reps', $weights($hard) === $weights($base) && $weights($light) === $weights($base) && array_column($hard['exercises'], 'suggested_reps', 'exercise_id') === array_column($base['exercises'], 'suggested_reps', 'exercise_id'));
+check('two Light ratings with every planned set done add a set to the main lifts', array_sum($sets($light)) > array_sum($sets($base)) && max($sets($light)) <= Generator::EFFORT_MAX_SETS && strpos((string) $light['effort_note'], 'felt light') !== false, json_encode([$sets($light), $sets($base)]));
+check('Light on a session that missed planned sets adds nothing', $plan($effortUser('effort-light-short', 'light', true, [0]))['effort_note'] === null);
+check('Moderate ratings use the usual rules', $plan($effortUser('effort-moderate', 'moderate', true))['effort_note'] === null);
+$mixedU = $effortUser('effort-mixed', 'hard', true);
+$db->run("UPDATE workouts SET effort='light' WHERE id=?", [$wk->history((int) $mixedU[0]['id'])[0]['id']]);
+check('mixed recent ratings use the usual rules', $plan($mixedU)['effort_note'] === null);
+$hardU = $effortUser('effort-hard-legs', 'hard', true);
+check('ratings only count for the same kind of workout', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'legs', 'minutes' => 90, 'now' => time()])['effort_note'] === null);
+check('picked-muscle workouts are not adjusted', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'custom', 'muscles' => ['chest'], 'minutes' => 90, 'now' => time()])['effort_note'] === null);
+check('ratings older than 4 weeks are ignored', $gen->generate($hardU[0], $hardU[1], ['day_type' => 'push', 'minutes' => 90, 'now' => time() + 30 * 86400])['effort_note'] === null);
+$latestOf = fn(string $name) => (function () use ($wk, $db, $name) {
+    $id = (int) $db->val('SELECT id FROM users WHERE username=?', [$name]);
+    return $wk->get($id, $wk->history($id)[0]['id']);
+})();
+check('whether the effort was chosen comes back with the workout', $latestOf('effort-hard')['effort_rated'] === true && $latestOf('effort-none')['effort_rated'] === false && $latestOf('effort-none')['effort'] === 'hard');
+
+echo "Other goals (#192)\n";
+$goalUser = function (string $name, string $goal) use ($auth, $mkGym, $db) {
+    $id = $auth->createUser($name, "$name long password");
+    $db->run('UPDATE users SET goal=? WHERE id=?', [$goal, $id]);
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $mkGym($id, 'Goal gym', Catalog::equipmentKeys())];
+};
+$lifts = fn(array $p) => array_values(array_filter($p['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true)));
+$slugOf = fn(int $id) => (string) $db->val('SELECT slug FROM exercises WHERE id=?', [$id]);
+check('the three new goals are valid goals', isset(Generator::GOALS['starter'], Generator::GOALS['weight_loss'], Generator::GOALS['powerlifting']));
+[$su, $sg] = $goalUser('goal-starter', 'starter');
+$sp = $lifts($gen->generate($su, $sg, ['day_type' => 'push', 'minutes' => 60]));
+check('Get started: at most 2 sets per lift and 6-8 reps on main lifts', $sp && max(array_column($sp, 'target_sets')) <= 2 && in_array([6, 8], array_map(static fn($b) => [$b['rep_min'], $b['rep_max']], $sp), true), json_encode(array_map(static fn($b) => [$b['name'], $b['target_sets'], $b['rep_min'], $b['rep_max']], $sp)));
+check('Get started: only machines, cables, dumbbells, bodyweight or bands', array_filter($sp, static fn($b) => !in_array($b['kind'], Generator::STARTER_KINDS, true)) === [], json_encode(array_column($sp, 'kind')));
+$beginner = function (array $p) use ($slugOf, $lifts) {
+    $bad = [];
+    foreach ($lifts($p) as $b) {
+        $slug = $slugOf($b['exercise_id']);
+        if (!in_array($slug, array_merge(...array_values(Generator::STARTER_LIFTS)), true)) {
+            $bad[] = $slug;
+        }
+    }
+    return $bad;
+};
+$starterPlans = array_map(fn($d) => $gen->generate($su, $sg, ['day_type' => $d, 'minutes' => 60]), ['push', 'pull', 'legs', 'upper', 'lower', 'full']);
+$badLifts = array_merge(...array_map($beginner, $starterPlans));
+check('Get started: every lift on every workout type is on the beginner list (no pull-ups, hanging leg raises, lunges, deadlifts)', $badLifts === [], json_encode($badLifts));
+check('Get started: at most 5 lifts in a session', max(array_map(fn($p) => count($lifts($p)), $starterPlans)) <= Generator::STARTER_MAX_LIFTS, json_encode(array_map(fn($p) => count($lifts($p)), $starterPlans)));
+check('Get started: the easiest option leads, e.g. the machine chest press on Push and the lat pulldown on Pull', $slugOf($lifts($starterPlans[0])[0]['exercise_id']) === 'machine-chest-press' && $slugOf($lifts($starterPlans[1])[0]['exercise_id']) === 'lat-pulldown');
+$bwStarter = $gen->generate($su, $sg, ['day_type' => 'legs', 'minutes' => 45, 'bodyweight_only' => true]);
+check('Get started with bodyweight only still sticks to beginner moves', $beginner($bwStarter) === [] && count($lifts($bwStarter)) > 0, json_encode(array_column($lifts($bwStarter), 'name')));
+[$wu, $wg] = $goalUser('goal-weight', 'weight_loss');
+$wp = $lifts($gen->generate($wu, $wg, ['day_type' => 'legs', 'minutes' => 60]));
+check('Reduce bodyweight: 12+ reps and short rests', $wp && min(array_column($wp, 'rep_min')) >= 12 && max(array_column($wp, 'rest_seconds')) <= 45, json_encode(array_map(static fn($b) => [$b['rep_min'], $b['rest_seconds']], $wp)));
+[$pu, $pg] = $goalUser('goal-power', 'powerlifting');
+$pp = fn(string $day) => array_map(static fn($b) => $b, $lifts($gen->generate($pu, $pg, ['day_type' => $day, 'minutes' => 75])));
+$push = $pp('push');
+$pull = $pp('pull');
+$legs = $pp('legs');
+$lower = $pp('lower');
+check('Powerlifting: Push starts with the barbell bench press, 3-5 reps', $slugOf($push[0]['exercise_id']) === 'barbell-bench-press' && $push[0]['rep_min'] === 3 && $push[0]['rep_max'] === 5, $push[0]['name']);
+check('Powerlifting: Pull leads with the deadlift', $slugOf($pull[0]['exercise_id']) === 'deadlift', $pull[0]['name']);
+check('Powerlifting: Legs has the back squat and a Romanian deadlift, not a second heavy deadlift', in_array('back-squat', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true) && in_array('romanian-deadlift', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true) && !in_array('deadlift', array_map(static fn($b) => $slugOf($b['exercise_id']), $legs), true));
+check('Powerlifting: Lower body has the squat and the deadlift', count(array_intersect(['back-squat', 'deadlift'], array_map(static fn($b) => $slugOf($b['exercise_id']), $lower))) === 2);
+check('Powerlifting says why the competition lift is there', strpos($push[0]['reason'], 'competition lift') !== false, $push[0]['reason']);
+$dbOnly = $mkGym((int) $pu['id'], 'Dumbbells only', ['dumbbells', 'bench']);
+$dpush = $lifts($gen->generate($pu, $dbOnly, ['day_type' => 'push', 'minutes' => 60]));
+check('Powerlifting without a barbell uses the closest variation', $slugOf($dpush[0]['exercise_id']) === 'dumbbell-bench-press' && strpos($dpush[0]['reason'], 'closest to the competition lift') !== false, $dpush[0]['name'] . ' / ' . $dpush[0]['reason']);
+$plain = $lifts($gen->generate($pu, $pg, ['day_type' => 'custom', 'muscles' => ['chest'], 'minutes' => 45]));
+check('picked-muscle days keep their own rules for powerlifting too', $plain !== []);
+
+echo "Exercise variety (#211)\n";
+$varUser = function (string $name, string $variety, string $goal = 'muscle') use ($auth, $mkGym, $db) {
+    $id = $auth->createUser($name, "$name long password");
+    $db->run('UPDATE users SET variety=?, goal=? WHERE id=?', [$variety, $goal, $id]);
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $mkGym($id, 'Variety gym', Catalog::equipmentKeys())];
+};
+// Finish a generated plan as planned, $daysAgo days back.
+$doPlan = function (array $u, array $plan, int $daysAgo) use ($wk, $ago) {
+    $when = $ago($daysAgo);
+    $exs = [];
+    foreach ($plan['exercises'] as $b) {
+        if (in_array($b['kind'], ['cardio', 'stretch'], true)) {
+            continue;
+        }
+        $sets = [];
+        for ($i = 0; $i < $b['target_sets']; $i++) {
+            $sets[] = ['id' => uuid(), 'weight' => $b['suggested_weight'] ?? 50, 'reps' => $b['rep_max'], 'warmup' => false, 'done' => true, 'done_at' => $when];
+        }
+        $exs[] = ['id' => uuid(), 'exercise_id' => $b['exercise_id'], 'rep_min' => $b['rep_min'], 'rep_max' => $b['rep_max'], 'target_sets' => $b['target_sets'], 'sets' => $sets];
+    }
+    $wk->save((int) $u[0]['id'], ['id' => uuid(), 'gym_id' => $u[1]['id'], 'day_type' => $plan['day_type'], 'status' => 'completed', 'unit' => 'lb', 'started_at' => $when, 'completed_at' => $when, 'rev' => 1, 'exercises' => $exs]);
+};
+$bySlot = function (array $p) {
+    $out = array_column(array_filter($p['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true)), 'exercise_id', 'slot');
+    ksort($out);
+    return $out;
+};
+$gen2 = fn(array $u, string $day, array $opts = []) => $gen->generate($u[0], $u[1], ['day_type' => $day, 'minutes' => 90, 'now' => time()] + $opts);
+// Every lift sits in a slot that accepts its movement (no Pull or Legs lifts on Push, etc).
+$fits = function (array $p) use ($exById, $db) {
+    $slots = [];
+    foreach (Generator::TEMPLATES[$p['day_type']] as $slot) {
+        $slots[$slot[0]] = $slot[1];
+    }
+    $slots['deadlift'] = ['hinge'];
+    foreach ($p['exercises'] as $b) {
+        if (in_array($b['kind'], ['cardio', 'stretch'], true)) {
+            continue;
+        }
+        if (!in_array($db->val('SELECT pattern FROM exercises WHERE id=?', [$b['exercise_id']]), $slots[$b['slot']] ?? [], true)) {
+            return false;
+        }
+    }
+    return true;
+};
+check('Mixed is the default for every account', $db->val('SELECT variety FROM users WHERE id=?', [$uid]) === 'mixed' && isset(Generator::VARIETY['steady'], Generator::VARIETY['varied']));
+$steadyU = $varUser('var-steady', 'steady');
+$mixedU = $varUser('var-mixed', 'mixed');
+foreach ([$steadyU, $mixedU] as $u) {
+    $doPlan($u, $gen2($u, 'push'), 9);
+}
+$s1 = $bySlot($gen2($steadyU, 'push'));
+$m0 = $bySlot($gen2($mixedU, 'push'));
+$doPlan($steadyU, $gen2($steadyU, 'push'), 5);
+$doPlan($mixedU, $gen2($mixedU, 'push'), 5);
+$s2 = $bySlot($gen2($steadyU, 'push'));
+$m1 = $gen2($mixedU, 'push');
+check('Steady repeats the same lifts session to session', $s1 === $s2, json_encode([$s1, $s2]));
+check('Mixed keeps the main lifts (flat press, overhead press)', $bySlot($m1)['press'] === $m0['press'] && $bySlot($m1)['overhead'] === $m0['overhead']);
+check('Mixed rotates the supporting lifts between sessions', count(array_diff_assoc(array_diff_key($bySlot($m1), ['press' => 1, 'overhead' => 1]), array_diff_key($m0, ['press' => 1, 'overhead' => 1]))) > 0, json_encode([$m0, $bySlot($m1)]));
+check('a rotated lift says why', (bool) array_filter($m1['exercises'], static fn($b) => strpos($b['reason'], 'Rotated in for variety') === 0));
+check('rotation never brings in a lift from outside the workout type', $fits($m1) && $fits($gen2($mixedU, 'pull')) && $fits($gen2($mixedU, 'legs')));
+$variedU = $varUser('var-varied', 'varied');
+$first = $bySlot($gen2($variedU, 'push'));
+foreach ([12, 9, 6] as $d) {
+    $doPlan($variedU, $gen2($variedU, 'push'), $d);
+}
+$v4 = $bySlot($gen2($variedU, 'push'));
+check('Varied also rotates a main lift once it has led three sessions in a row', $v4['press'] !== $first['press'] || $v4['overhead'] !== $first['overhead'], json_encode([$first, $v4]));
+$plU = $varUser('var-power', 'varied', 'powerlifting');
+foreach ([12, 9, 6] as $d) {
+    $doPlan($plU, $gen2($plU, 'push'), $d);
+}
+check('Powerlifting keeps the bench press on Varied', $slugOf($bySlot($gen2($plU, 'push'))['press']) === 'barbell-bench-press');
+$stU = $varUser('var-starter', 'mixed', 'starter');
+$doPlan($stU, $gen2($stU, 'push'), 6);
+$stPlan = array_filter($gen2($stU, 'push')['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true));
+check('Get Started stays on its beginner lifts whatever the Variety setting', array_filter($stPlan, static fn($b) => !in_array($slugOf($b['exercise_id']), array_merge(...array_values(Generator::STARTER_LIFTS)), true)) === []);
+// Regenerate walks down the list: keep rejecting the flat press.
+$regU = $varUser('var-regen', 'mixed');
+$seen = [];
+$avoidList = [];
+for ($i = 0; $i < 6; $i++) {
+    $p = $bySlot($gen2($regU, 'push', ['avoid' => $avoidList]));
+    $seen[] = $p['press'];
+    $avoidList = array_values(array_unique(array_merge($avoidList, array_values($p))));
+}
+check('Regenerate shows a new flat press each time instead of flipping between two', count(array_unique($seen)) === count($seen), json_encode($seen));
+$pressCount = count(array_filter($exById, static fn($e) => $e['pattern'] === 'horizontal_push'));
+$all = array_values(array_filter(array_map(static fn($e) => $e['pattern'] === 'horizontal_push' ? $e['id'] : null, $exById)));
+$wrap = $bySlot($gen2($regU, 'push', ['avoid' => array_merge($all, [-1])]));
+check('once every option has been rejected, it starts again from the earliest rejected', $wrap['press'] === $all[0], json_encode([$wrap['press'], $all[0]]));
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

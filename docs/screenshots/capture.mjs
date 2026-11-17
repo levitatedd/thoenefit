@@ -150,8 +150,10 @@ await A.evaluate(() => {
 await A.waitForTimeout(300);
 await A.evaluate(() => {
   // From the History heading down: ranges, the selected point's details and the chart.
+  // Below the pinned header (#202), so the exercise's name stays in view.
   const head = [...document.querySelectorAll('.section > h2')].find((h) => h.textContent === 'History');
-  scrollTo(0, head.getBoundingClientRect().top + scrollY - 20);
+  const pinned = document.querySelector('main > .top-head').getBoundingClientRect().height;
+  scrollTo(0, head.getBoundingClientRect().top + scrollY - pinned - 12);
 });
 await A.waitForTimeout(300);
 await jpg(A, 'exercise-progress');

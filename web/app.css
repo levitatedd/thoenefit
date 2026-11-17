@@ -590,6 +590,12 @@ textarea:focus {
   font: 700 19px/1.2 var(--display);
 }
 
+/* Effort ratings changed the plan (#198): one line under the summary. */
+.effort-note {
+  margin-top: -8px;
+  color: var(--muted);
+}
+
 .plan {
   display: flex;
   flex-direction: column;
@@ -1714,6 +1720,46 @@ input[type="file"] {
 
 .chart-card > h3 {
   color: var(--mint);
+}
+
+/* Other goals (#192): a full-width row that opens three stacked goal cards. */
+.goal-picker {
+  gap: 10px;
+}
+
+.other-goals-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--chalk);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.other-goals-label {
+  flex: 1;
+}
+
+.other-goals-value {
+  color: var(--selected-text);
+}
+
+.other-goals-row .icon {
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.other-goals-row[aria-expanded="true"] .icon {
+  transform: rotate(90deg);
 }
 
 /* Difficulty (#170): mint once rated. */

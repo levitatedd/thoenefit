@@ -900,6 +900,39 @@ check('Settings shows the app version under its title, and no longer at the bott
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  // #192: four goals in the grid, then a collapsed Other goals row with three more.
+  {
+    const grid = await page.$$eval('.goal-picker > .choices:first-child .choice-label', (els) => els.map((e) => e.textContent));
+    const others = await page.$$eval('.goal-picker > .choices:last-child .choice-label', (els) => els.map((e) => e.textContent));
+    check('the goal grid reads Get Started, Get Stronger, General Fitness, Muscular Endurance; Other Goals has Reduce Bodyweight, Powerlifting, Build Muscle', grid.join() === 'Get Started,Get Stronger,General Fitness,Muscular Endurance' && others.join() === 'Reduce Bodyweight,Powerlifting,Build Muscle', JSON.stringify([grid, others]));
+    const goal = async () => (await api('bootstrap')).user.goal;
+    const start = await goal();
+    const rowText = async () => (await page.textContent('.other-goals-row')).trim();
+    check('with Build muscle chosen, Other goals starts open and names it', start === 'muscle' && (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'true' && /Build Muscle/.test(await rowText()), `${start} | ${await rowText()}`);
+    await page.click('.other-goals-row');
+    check('Other goals collapses, and still shows the chosen goal', (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'false' && await page.locator('.goal-picker > .choices:last-child').isHidden() && /Build Muscle/.test(await rowText()));
+    await page.locator('.goal-picker .choice', { hasText: 'Get Started' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'starter');
+    check('picking a grid goal saves it and clears the name from the Other goals row', (await rowText()) === 'Other Goals' && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
+    await page.click('.other-goals-row');
+    await page.locator('.goal-picker .choice', { hasText: 'Powerlifting' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'powerlifting');
+    check('picking Powerlifting saves it as the only choice and names it on the row', /Powerlifting/.test(await rowText()) && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
+    const sel = await page.$eval('.goal-picker .choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor]; });
+    check('Other goals use the Pick muscle groups highlight too', sel[0] === 'rgb(58, 242, 156)' && sel[1] === 'rgba(58, 242, 156, 0.14)', JSON.stringify(sel));
+    await shot('11c-other-goals');
+    // #211: Variety sits under Goal, Mixed by default.
+    const variety = page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) });
+    const vLabels = await variety.locator('.choice-label').allTextContents();
+    check('Variety offers Steady, Mixed and Varied, with Mixed chosen by default (#211)', vLabels.join() === 'Steady,Mixed,Varied' && (await variety.locator('.choice[aria-pressed="true"]').textContent()).startsWith('Mixed'), vLabels.join());
+    await variety.locator('.choice', { hasText: 'Varied' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'varied');
+    check('picking Varied saves it', (await api('bootstrap')).user.variety === 'varied');
+    await page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) }).locator('.choice', { hasText: 'Mixed' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'mixed');
+    await page.locator('.goal-picker .choice', { hasText: 'Build Muscle' }).click();
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
+  }
   check('no divider line between the Settings header and Training', (await page.$eval('.settings-main > .top-head + .section', (el) => getComputedStyle(el).borderTopStyle)) === 'none');
   const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
   check("Settings links to Routines, data, help and What's new instead of showing them inline", ['Manage routines', 'Export all sets as CSV', 'Import from Fitbod', 'Add to your Home Screen', "What's new"].every((t) => links.includes(t)) && (await page.locator('[data-list=routines]').count()) === 0 && !(await page.textContent('.page')).includes('Tap the Share button'), links.join());
@@ -1156,10 +1189,10 @@ if (!process.env.TF_URL) {
   check('after a reload, the warm-up still shows what was logged', (await page.locator('.lift').first().locator('.set input').nth(1).inputValue()) === '1.8');
 
   console.log('Estimated calories');
-  // #38: no body weight, no effort question. Add one in Settings, finish, and see the estimate.
+  // #198: the effort question is optional and asked even without a body weight (#38 used to need one).
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet button:has-text("Finish and save")');
-  check('without a body weight, finishing does not ask how hard it was', (await page.locator('.sheet :text("How hard was it?")').count()) === 0);
+  check('finishing asks how hard it was even without a body weight, with nothing chosen (#198)', (await page.locator('.sheet :text("How hard was it?")').count()) === 1 && (await page.locator('.sheet .choice[aria-pressed="true"]').count()) === 0 && /Helps plan your next workouts\.$/.test(await page.textContent('.sheet .field-hint')));
   await page.click('.sheet button:has-text("Close")');
   await page.goto(`${URL}#/settings`);
   const bw = page.locator('input[aria-label^="Body weight"]');
@@ -1171,7 +1204,7 @@ if (!process.env.TF_URL) {
   await page.waitForSelector('.lift');
   await page.click('button:has-text("Finish workout")');
   await page.waitForSelector('.sheet :text("How hard was it?")');
-  check('finishing now asks how hard it was, starting at Moderate', (await page.locator('.sheet .choice[aria-pressed="true"]').textContent()).trim() === 'Moderate');
+  check('with a body weight it still starts with nothing chosen, and mentions calories', (await page.locator('.sheet .choice[aria-pressed="true"]').count()) === 0 && /estimate calories/.test(await page.textContent('.sheet .field-hint')));
   await page.click('.sheet .choice:has-text("Hard")');
   await shot('15-finish-effort');
   await page.click('.sheet button:has-text("Finish and save")');
@@ -1905,6 +1938,62 @@ console.log('Pick muscle groups, edit the plan, Quick Start (#154, #155, #127)')
     await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
   }, qs.id);
   check('no sideways scrolling', (await overflow()) <= 0);
+}
+
+console.log('Regenerate walks down the list (#211)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  await page.selectOption('select[aria-label="Workout type"]', 'push');
+  const settled = () => page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await settled();
+  await page.waitForTimeout(300);
+  const lifts = () => page.$$eval('.plan-row h3', (els) => els.map((e) => e.textContent).filter((n) => !/Bike|Treadmill|Rower|Elliptical|Stair/.test(n)).sort().join('|'));
+  const plans = [await lifts()];
+  for (let i = 0; i < 2; i++) {
+    await page.click('button:has-text("Regenerate")');
+    await page.waitForTimeout(150);
+    await settled();
+    await page.waitForTimeout(300);
+    plans.push(await lifts());
+  }
+  check('three Regenerate taps give three different plans, not back to the first', new Set(plans).size === 3, JSON.stringify(plans));
+}
+
+console.log('Effort ratings plan the next workout (#198)');
+{
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('.plan-row');
+  // Two pull workouts a while back, both rated Hard on purpose.
+  const ids = await page.evaluate(async () => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    const ex = b.exercises.find((x) => x.name === 'Barbell Row') || b.exercises.find((x) => x.pattern === 'horizontal_pull' && x.kind === 'barbell');
+    const out = [];
+    for (const days of [12, 10]) {
+      const id = crypto.randomUUID();
+      const at = new Date(Date.now() - days * 86400000).toISOString();
+      const sets = [10, 10, 10].map((r) => ({ id: crypto.randomUUID(), weight: 95, reps: r, warmup: false, done: true, done_at: at }));
+      await fetch('api.php?a=save_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ workout: { id, gym_id: b.user.active_gym_id, day_type: 'pull', status: 'completed', unit: 'lb', started_at: at, completed_at: at, effort: 'hard', effort_rated: true, rev: 1, exercises: [{ id: crypto.randomUUID(), exercise_id: ex.id, rep_min: 6, rep_max: 10, target_sets: 3, sets }] } }) });
+      out.push(id);
+    }
+    return out;
+  });
+  await page.selectOption('select[aria-label="Workout type"]', 'pull');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await page.waitForTimeout(300);
+  const note = await page.locator('.effort-note').allTextContents();
+  check('after two pull workouts rated Hard, the pull plan says once that it has fewer sets', note.length === 1 && note[0] === 'Your recent pull workouts felt hard, so this one has fewer sets.', JSON.stringify(note));
+  await shot('49-effort-note');
+  await page.evaluate(async (list) => {
+    const b = await (await fetch('api.php?a=bootstrap')).json();
+    for (const id of list) await fetch('api.php?a=delete_workout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ id }) });
+  }, ids);
+  await page.click('button:has-text("Regenerate")');
+  await page.waitForFunction(() => !document.querySelector('.stack.loading') && document.querySelector('.plan-row'));
+  await page.waitForTimeout(300);
+  check('without those ratings the note goes away', (await page.locator('.effort-note').count()) === 0);
 }
 
 console.log('Stalled lifts (#124)');

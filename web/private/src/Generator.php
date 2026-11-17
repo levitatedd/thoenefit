@@ -95,7 +95,125 @@ final class Generator
         'muscle' => [[6, 10], [10, 15], 120, 75],
         'general' => [[8, 12], [12, 15], 90, 60],
         'endurance' => [[12, 15], [15, 20], 60, 45],
+        // Other goals (#192).
+        'starter' => [[6, 8], [8, 10], 90, 60],         // Get started: fewer reps, at most 2 sets, simpler lifts
+        'weight_loss' => [[12, 15], [15, 20], 45, 30],  // Reduce bodyweight: higher reps, faster pace
+        'powerlifting' => [[3, 5], [6, 10], 210, 120],  // Squat, bench and deadlift, heavy
     ];
+
+    /** Variety (#211): how much generated workouts rotate their exercises. */
+    public const VARIETY = ['steady' => 'Steady', 'mixed' => 'Mixed', 'varied' => 'Varied'];
+
+    /** Varied (#211): a main lift rotates once it has led this many sessions of its workout type in a row. */
+    public const ANCHOR_RUN = 3;
+
+    /** When each exercise was last done, as a timestamp, over all history (#211). */
+    private function lastDone(int $uid): array
+    {
+        $out = [];
+        foreach ($this->db->all(
+            "SELECT we.exercise_id, MAX(w.started_at) AS t FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+             WHERE we.user_id=? AND w.status='completed' GROUP BY we.exercise_id",
+            [$uid]
+        ) as $r) {
+            $out[(int) $r['exercise_id']] = strtotime($r['t'] . ' UTC');
+        }
+        return $out;
+    }
+
+    /** Whether an exercise was in each of the last ANCHOR_RUN finished workouts of this type (#211). */
+    private function anchorRun(int $uid, string $dayType, int $exerciseId): bool
+    {
+        $ids = array_column($this->db->all(
+            "SELECT id FROM workouts WHERE user_id=? AND status='completed' AND day_type=? ORDER BY started_at DESC LIMIT " . self::ANCHOR_RUN,
+            [$uid, $dayType]
+        ), 'id');
+        if (count($ids) < self::ANCHOR_RUN) {
+            return false;
+        }
+        foreach ($ids as $id) {
+            if (!$this->db->val('SELECT 1 FROM workout_exercises WHERE workout_id=? AND exercise_id=?', [$id, $exerciseId])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Get started (#192): at most this many working sets per lift. */
+    public const STARTER_MAX_SETS = 2;
+
+    /** Get started (#192): equipment kinds of the beginner lifts below. Barbells and kettlebells wait. */
+    public const STARTER_KINDS = ['machine', 'cable', 'dumbbell', 'bodyweight', 'band'];
+
+    /** Get started: at most this many lifts in a session, so a first workout stays short. */
+    public const STARTER_MAX_LIFTS = 5;
+
+    /**
+     * Get started: the lifts a new lifter can learn on their own, per movement,
+     * easiest first (mostly machines, which guide the movement). Anything not
+     * listed (pull-ups, hanging leg raises, lunges, one-arm rows, deadlifts...)
+     * waits until another goal is chosen. A slot with none of these is left out.
+     */
+    public const STARTER_LIFTS = [
+        'horizontal_push' => ['machine-chest-press', 'dumbbell-bench-press'],
+        'incline_push' => ['incline-dumbbell-press'],
+        'chest_fly' => ['pec-deck', 'cable-fly', 'dumbbell-fly'],
+        'vertical_push' => ['machine-shoulder-press', 'seated-dumbbell-press'],
+        'lateral_raise' => ['dumbbell-lateral-raise', 'cable-lateral-raise', 'band-lateral-raise'],
+        'triceps' => ['cable-pushdown', 'machine-triceps-extension', 'band-pushdown'],
+        'vertical_pull' => ['lat-pulldown', 'assisted-pull-up', 'band-pulldown'],
+        'horizontal_pull' => ['seated-cable-row', 'machine-row', 'chest-supported-row', 'band-row'],
+        'biceps' => ['dumbbell-curl', 'cable-curl', 'machine-biceps-curl', 'band-curl'],
+        'rear_delt' => ['reverse-pec-deck', 'face-pull', 'band-pull-apart'],
+        'squat' => ['leg-press', 'goblet-squat', 'bodyweight-squat'],
+        'hinge' => ['back-extension', 'cable-pull-through'],
+        'lunge' => ['bodyweight-step-up', 'dumbbell-step-up'],
+        'hip_thrust' => ['glute-bridge', 'dumbbell-hip-thrust'],
+        'knee_flexion' => ['leg-curl', 'lying-leg-curl'],
+        'knee_extension' => ['leg-extension'],
+        'calf' => ['machine-calf-raise', 'standing-bodyweight-calf-raise', 'dumbbell-calf-raise'],
+        'core' => ['dead-bug', 'crunch', 'ab-crunch-machine'],
+    ];
+
+    /** Get started: the beginner lifts for a slot, in order of preference across its movements. */
+    public static function starterPrefs(array $patterns): array
+    {
+        $out = [];
+        foreach ($patterns as $p) {
+            foreach (self::STARTER_LIFTS[$p] ?? [] as $slug) {
+                $out[] = $slug;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Powerlifting (#192): the competition lift for a slot's movement, then
+     * the closest variations when the gym lacks the equipment. Pull days lead
+     * with the deadlift; Legs days then use a Romanian deadlift, so a push /
+     * pull / legs week has one heavy deadlift.
+     */
+    public const POWER_LIFTS = [
+        'horizontal_push' => ['barbell-bench-press', 'smith-bench-press', 'dumbbell-bench-press'],
+        'squat' => ['back-squat', 'front-squat', 'smith-squat', 'goblet-squat'],
+        'hinge' => ['deadlift', 'romanian-deadlift', 'kettlebell-suitcase-deadlift', 'dumbbell-rdl'],
+    ];
+    public const POWER_LEGS_HINGE = ['romanian-deadlift', 'deadlift', 'dumbbell-rdl', 'kettlebell-suitcase-deadlift'];
+
+    /** Whether a lift suits Get started (#192): it is on the beginner list for its movement. */
+    public static function starterFriendly(array $ex): bool
+    {
+        return in_array($ex['slug'] ?? '', self::STARTER_LIFTS[$ex['pattern']] ?? [], true);
+    }
+
+    /** Powerlifting's preferred lifts for a slot (#192), most preferred first, or [] if none. */
+    public static function powerPrefs(string $dayType, array $patterns): array
+    {
+        if ($dayType === 'legs' && $patterns[0] === 'hinge') {
+            return self::POWER_LEGS_HINGE;
+        }
+        return self::POWER_LIFTS[$patterns[0]] ?? [];
+    }
 
     /** experience => [compound sets, accessory sets] */
     public const EXPERIENCE = [
@@ -359,6 +477,50 @@ final class Generator
         ];
     }
 
+    /** How far back, and how many matching ratings, it takes for effort to change a plan (#198). */
+    public const EFFORT_DAYS = 28;
+    public const EFFORT_SESSIONS = 2;
+    public const EFFORT_MAX_SETS = 5;
+
+    /**
+     * How recent comparable workouts felt (#198): 'hard' or 'light' when the last
+     * two the lifter explicitly rated (same workout type, last 4 weeks) agree,
+     * otherwise null. 'light' also needs those sessions to have done all their
+     * planned working sets, so an easy rating on a cut-short day doesn't add work.
+     * Moderate, mixed or skipped ratings keep the usual rules.
+     */
+    public function effortTrend(int $uid, string $dayType, int $now): ?string
+    {
+        if (!isset(self::TEMPLATES[$dayType])) {
+            return null; // picked-muscle days differ each time, so there is nothing comparable
+        }
+        $rows = $this->db->all(
+            "SELECT id, effort FROM workouts WHERE user_id=? AND status='completed' AND day_type=? AND effort_rated=1 AND started_at>=?
+             ORDER BY started_at DESC LIMIT " . self::EFFORT_SESSIONS,
+            [$uid, $dayType, gmdate('Y-m-d H:i:s', $now - self::EFFORT_DAYS * 86400)]
+        );
+        if (count($rows) < self::EFFORT_SESSIONS) {
+            return null;
+        }
+        $efforts = array_unique(array_column($rows, 'effort'));
+        if (count($efforts) !== 1 || !in_array($efforts[0], ['hard', 'light'], true)) {
+            return null;
+        }
+        if ($efforts[0] === 'light') {
+            foreach ($rows as $r) {
+                $short = $this->db->val(
+                    'SELECT COUNT(*) FROM workout_exercises we WHERE we.workout_id=? AND we.target_seconds IS NULL
+                       AND (SELECT COUNT(*) FROM workout_sets s WHERE s.workout_exercise_id=we.id AND s.done=1 AND s.warmup=0 AND s.reps>0) < we.target_sets',
+                    [$r['id']]
+                );
+                if ((int) $short > 0) {
+                    return null;
+                }
+            }
+        }
+        return $efforts[0];
+    }
+
     /** How many recent sessions of one setup must agree before calling it a stall (#124). */
     public const STALL_SESSIONS = 3;
 
@@ -479,8 +641,11 @@ final class Generator
         [$repMin, $repMax] = $compound ? $goal[0] : $goal[1];
         $rest = $compound ? $goal[2] : $goal[3];
         $sets = $compound ? $exp[0] : $exp[1];
+        if ($user['goal'] === 'starter') {
+            $sets = min($sets, self::STARTER_MAX_SETS);
+        }
         if ($reduceSets) {
-            $sets = max(2, $sets - 1);
+            $sets = max($user['goal'] === 'starter' ? 1 : 2, $sets - 1);
         }
         if ($plan) {
             $sets = (int) $plan['target_sets'];
@@ -752,6 +917,9 @@ final class Generator
         $stats = $this->muscleStats($uid, $now);
         $recent = $this->recentUse($uid, $now);
         $bodyweightOnly = ($opts['bodyweight_only'] ?? false) === true;
+        // How the last comparable workouts felt (#198) nudges the number of sets, never weights or reps.
+        $effort = $template === null ? $this->effortTrend($uid, $dayType, $now) : null;
+        $effortChanged = false;
         $by = $this->available($uid, $gym, $bodyweightOnly);
         $equipmentContext = $bodyweightOnly ? 'without equipment' : 'with the equipment at ' . $gym['name'];
         $byId = [];
@@ -763,9 +931,26 @@ final class Generator
 
         // Required slots keep their order. Optional ones go to recovered muscles
         // first, then to whichever muscle has had the fewest sets this week.
+        $goalKey = $user['goal'] ?? 'muscle';
+        $slots = $template ?? self::TEMPLATES[$dayType];
+        if ($goalKey === 'powerlifting' && $template === null && $dayType === 'pull') {
+            // Powerlifting (#192): Pull days lead with the deadlift.
+            array_unshift($slots, ['deadlift', ['hinge'], 'hamstrings', true]);
+        }
+        // Variety (#211): the first required slot for each muscle is an anchor; the rest support it.
+        $variety = isset(self::VARIETY[$user['variety'] ?? '']) ? $user['variety'] : 'mixed';
+        $anchors = [];
+        $anchorMuscles = [];
+        foreach ($slots as $slot) {
+            if ($slot[3] && !isset($anchorMuscles[$slot[2]])) {
+                $anchorMuscles[$slot[2]] = true;
+                $anchors[$slot[0]] = true;
+            }
+        }
+        $lastDone = $variety === 'steady' ? [] : $this->lastDone($uid);
         $required = [];
         $optional = [];
-        foreach ($template ?? self::TEMPLATES[$dayType] as $i => $slot) {
+        foreach ($slots as $i => $slot) {
             $slot[] = $i;
             if ($slot[3]) {
                 $required[] = $slot;
@@ -815,29 +1000,67 @@ final class Generator
                 $how = 'locked';
             } else {
                 $cands = [];
+                // Powerlifting (#192): the competition lift for this slot comes first, whatever else applies.
+                // Get started: the easiest beginner lift comes first in the same way, and nothing else is offered.
+                $power = $goalKey === 'powerlifting' && $template === null ? array_flip(self::powerPrefs($dayType, $patterns))
+                    : ($goalKey === 'starter' ? array_flip(self::starterPrefs($patterns)) : []);
+                // Variety (#211): steady slots repeat recent lifts so progression continues; rotating
+                // slots prefer the qualifying lift done least recently (never done first).
+                $rotate = $variety !== 'steady' && !isset($anchors[$key]);
+                $rank = function (array $ex, int $pi, bool $rotate) use ($avoid, $power, $recent, $lastDone): array {
+                    return [
+                        isset($avoid[$ex['id']]) ? 1 + $avoid[$ex['id']] : 0, // Regenerate (#211): rejected ones last, earliest-rejected first
+                        $power ? ($power[$ex['slug'] ?? ''] ?? 99) : 0,
+                        $pi,                                                   // preferred movement pattern first
+                        $rotate ? 0 : (isset($recent[$ex['id']]) ? 0 : 1),
+                        $rotate ? ($lastDone[$ex['id']] ?? 0) : -($recent[$ex['id']] ?? 0),
+                        $ex['priority'],
+                        $ex['name'],
+                        $ex,
+                    ];
+                };
                 foreach ($patterns as $pi => $pattern) {
                     foreach ($by[$pattern] ?? [] as $ex) {
                         if (isset($chosen[$ex['id']]) || ($onlyMuscle && !in_array($muscle, $ex['muscles_main'], true))) {
                             continue;
                         }
-                        $cands[] = [
-                            isset($avoid[$ex['id']]) ? 1 : 0,   // steer away from what "Regenerate" just rejected
-                            $pi,                                // preferred movement pattern first
-                            isset($recent[$ex['id']]) ? 0 : 1,  // then lifts you have been doing, so progression continues
-                            -($recent[$ex['id']] ?? 0),
-                            $ex['priority'],
-                            $ex['name'],
-                            $ex,
-                        ];
+                        $cands[] = [$ex, $pi];
+                    }
+                }
+                $cands = array_map(static fn($c) => $rank($c[0], $c[1], $rotate), $cands);
+                if ($goalKey === 'starter') {
+                    // Get started: beginner lifts only. A slot without one is left out rather than filled with something hard.
+                    $cands = array_values(array_filter($cands, static fn($c) => self::starterFriendly($c[7])));
+                    if (!$cands) {
+                        continue;
                     }
                 }
                 if ($cands) {
-                    usort($cands, static fn($a, $b) => array_slice($a, 0, 6) <=> array_slice($b, 0, 6));
-                    $pick = $cands[0][6];
-                    if (isset($recent[$pick['id']])) {
-                        $how = 'recent';
-                    } elseif ($avoid && !isset($avoid[$pick['id']])) {
+                    $sort = static fn(array &$list) => usort($list, static fn($a, $b) => array_slice($a, 0, 7) <=> array_slice($b, 0, 7));
+                    $sort($cands);
+                    $pick = $cands[0][7];
+                    if (!$rotate && $variety === 'varied' && !$avoid && isset($recent[$pick['id']]) && $this->anchorRun($uid, $dayType, $pick['id'])) {
+                        // Varied (#211): this main lift has led its last few sessions, so rotate it too.
+                        $cands = array_map(fn($c) => $rank($c[7], (int) $c[2], true), $cands);
+                        $sort($cands);
+                        if ($cands[0][7]['id'] !== $pick['id'] && !($power && isset($power[$pick['slug'] ?? '']))) {
+                            $pick = $cands[0][7];
+                            $rotate = true;
+                        }
+                    }
+                    if ($power && isset($power[$pick['slug'] ?? ''])) {
+                        $how = $goalKey === 'starter' ? 'starter' : 'power';
+                    }
+                    if ($how === 'power' || $how === 'starter') {
+                        // keeps its goal's reason
+                    } elseif ($avoid && isset($avoid[$pick['id']])) {
+                        $how = 'cycled';
+                    } elseif ($avoid) {
                         $how = 'rotated';
+                    } elseif ($rotate) {
+                        $how = 'variety';
+                    } elseif (isset($recent[$pick['id']])) {
+                        $how = 'recent';
                     }
                 }
             }
@@ -849,6 +1072,19 @@ final class Generator
             }
             $tired = $stats[$muscle]['recovery'] < 50;
             $block = $this->block($user, $gym, $pick, $tired, bodyweightOnly: $bodyweightOnly);
+            if ($effort === 'hard' && !$tired && $block['target_sets'] > 2) {
+                // Already one set down for recovery? Then not another.
+                $block['target_sets']--;
+                $effortChanged = true;
+            } elseif ($effort === 'light' && $isRequired && $stats[$muscle]['recovery'] >= 80 && $block['target_sets'] < self::EFFORT_MAX_SETS) {
+                // Main lifts only, for well-recovered muscles; the time budget below still applies.
+                $block['target_sets']++;
+                $effortChanged = true;
+            }
+            $block['minutes'] = round(($block['target_sets'] * (45 + $block['rest_seconds']) + 90) / 60, 1);
+            if ($goalKey === 'starter' && $how !== 'locked' && count($blocks) - ($warm ? 1 : 0) >= self::STARTER_MAX_LIFTS) {
+                continue; // Get started: a short first workout
+            }
             if (count($blocks) - ($warm ? 1 : 0) >= 3 && $total + $block['minutes'] > $minutes) {
                 if ($how === 'locked') {
                     // Locked exercises always stay, even if they run the session long.
@@ -860,12 +1096,24 @@ final class Generator
             $mLabel = Catalog::MUSCLES[$muscle];
             if ($how === 'locked') {
                 $why = 'You locked this in.';
+            } elseif ($how === 'starter') {
+                $why = 'An easy lift to learn on your own, for getting started.';
+            } elseif ($how === 'power') {
+                $why = $pick['slug'] === self::powerPrefs($dayType, $patterns)[0]
+                    ? 'A competition lift for powerlifting.'
+                    : "The closest to the competition lift $equipmentContext.";
             } elseif ($how === 'recent') {
                 $days = (int) floor(($now - $recent[$pick['id']]) / 86400);
                 $when = $days <= 0 ? 'today' : ($days === 1 ? 'yesterday' : "$days days ago");
                 $why = "You did this $when, so repeating it keeps your progression moving.";
             } elseif ($how === 'rotated') {
                 $why = "A different $label option, as you asked.";
+            } elseif ($how === 'cycled') {
+                $why = "You've seen every $label option here, so this starts the list again.";
+            } elseif ($how === 'variety') {
+                $last = $lastDone[$pick['id']] ?? null;
+                $days = $last ? (int) floor(($now - $last) / 86400) : null;
+                $why = 'Rotated in for variety' . ($days === null ? ': new to you.' : ($days <= 0 ? '.' : ", last done $days day" . ($days === 1 ? '' : 's') . ' ago.'));
             } elseif ($isRequired) {
                 $why = "First choice for $label $equipmentContext.";
             } else {
@@ -933,6 +1181,12 @@ final class Generator
             'exercises' => $blocks,
             'skipped' => $skipped,
             'recovery' => $stats,
+            // Said once for the whole workout when effort ratings changed it (#198).
+            'effort_note' => $effortChanged
+                ? ($effort === 'hard'
+                    ? 'Your recent ' . strtolower(self::DAY_LABELS[$dayType]) . ' workouts felt hard, so this one has fewer sets.'
+                    : 'Your recent ' . strtolower(self::DAY_LABELS[$dayType]) . ' workouts felt light, so the main lifts get an extra set.')
+                : null,
         ];
     }
 

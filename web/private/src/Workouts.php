@@ -153,6 +153,8 @@ final class Workouts
             'notes' => isset($d['notes']) ? mb_substr((string) $d['notes'], 0, 2000) : null,
             // How hard it felt, chosen when finishing (#38). Used for the calorie estimate.
             'effort' => isset(Calories::EFFORTS[$d['effort'] ?? '']) ? $d['effort'] : null,
+            // Chosen by the lifter rather than a default kept for calories (#198); only these plan future workouts.
+            'effort_rated' => !empty($d['effort_rated']) && isset(Calories::EFFORTS[$d['effort'] ?? '']) ? 1 : 0,
             'paused_s' => $pausedS,
             'paused_at' => $pausedAt,
             'rev' => $rev,
@@ -253,6 +255,7 @@ final class Workouts
             'completed_at' => to_iso($w['completed_at']),
             'notes' => $w['notes'],
             'effort' => $w['effort'] ?? null,
+            'effort_rated' => (int) ($w['effort_rated'] ?? 0) === 1,
             'paused_s' => (int) ($w['paused_s'] ?? 0),
             'paused_at' => to_iso($w['paused_at'] ?? null),
             'rev' => (int) $w['rev'],

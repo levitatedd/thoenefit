@@ -26,11 +26,54 @@ let ticker = null;
 let wakeLock = null;
 let audio = null;
 
+// Goals (#192): four in the grid, the rest under Other goals.
 const GOALS = [
-  ['muscle', 'Build muscle', '6-10 reps on big lifts'],
-  ['strength', 'Get stronger', '4-6 reps, longer rests'],
-  ['general', 'General fitness', '8-12 reps, steady pace'],
-  ['endurance', 'Muscular endurance', '12-15 reps, short rests'],
+  ['starter', 'Get Started', 'Fewer reps, easier workouts'],
+  ['strength', 'Get Stronger', '4-6 reps, longer rests'],
+  ['general', 'General Fitness', '8-12 reps, steady pace'],
+  ['endurance', 'Muscular Endurance', '12-15 reps, short rests'],
+];
+const OTHER_GOALS = [
+  ['weight_loss', 'Reduce Bodyweight', 'Higher reps, faster pace'],
+  ['powerlifting', 'Powerlifting', 'Squat, bench, and deadlift'],
+  ['muscle', 'Build Muscle', '6-10 reps on big lifts'],
+];
+
+/**
+ * Goal picker (#192): the main goals in a grid, then a collapsed Other goals
+ * row with the rest. One choice across both; the row names an Other goal when
+ * it's the one chosen. Starts open when it is.
+ */
+function goalPicker(value, onPick) {
+  let current = value;
+  const label = () => OTHER_GOALS.find(([k]) => k === current)?.[1];
+  const sync = () => {
+    for (const b of wrap.querySelectorAll('.choice')) b.setAttribute('aria-pressed', String(b.dataset.value === current));
+    rowValue.textContent = label() || '';
+  };
+  const pick = (v) => {
+    current = v;
+    sync();
+    onPick(v);
+  };
+  const main = choices(GOALS, value, pick, { columns: 2 });
+  const other = choices(OTHER_GOALS, value, pick, { columns: 1 });
+  const rowValue = h('span', { class: 'other-goals-value' });
+  const open = !!OTHER_GOALS.find(([k]) => k === value);
+  other.hidden = !open;
+  const row = h('button', { type: 'button', class: 'other-goals-row', 'aria-expanded': String(open), onclick: () => {
+    other.hidden = !other.hidden;
+    row.setAttribute('aria-expanded', String(!other.hidden));
+  } }, h('span', { class: 'other-goals-label' }, 'Other Goals'), rowValue, icon('back', 18));
+  const wrap = h('div', { class: 'stack goal-picker' }, main, row, other);
+  sync();
+  return wrap;
+}
+// Variety (#211): how much generated workouts rotate their exercises.
+const VARIETY = [
+  ['steady', 'Steady', 'Same lifts each time'],
+  ['mixed', 'Mixed', 'Main lifts stay, others rotate'],
+  ['varied', 'Varied', 'Everything rotates'],
 ];
 const LEVELS = [
   ['beginner', 'Beginner', 'Under a year'],
@@ -522,7 +565,8 @@ function viewLogin() {
 function trainingFields(values, onChange) {
   return [
     field('Weight unit', choices([['lb', 'Pounds'], ['kg', 'Kilograms']], values.unit, (v) => onChange('unit', v), { columns: 2 })),
-    field('Goal', choices(GOALS, values.goal, (v) => onChange('goal', v), { columns: 2 })),
+    field('Goal', goalPicker(values.goal, (v) => onChange('goal', v))),
+    field('Variety', choices(VARIETY, values.variety || 'mixed', (v) => onChange('variety', v), { columns: 3 })),
     field('Training experience', choices(LEVELS, values.experience, (v) => onChange('experience', v), { columns: 3 })),
     field('Usual workout length', stepper(values.minutes, { min: 15, max: 150, step: 5, suffix: ' min', onChange: (v) => onChange('minutes', v) })),
     field('Training split', choices(SPLITS, values.split_type, (v) => onChange('split_type', v), { columns: 1 })),
@@ -565,7 +609,7 @@ function equipmentPicker(gym) {
 }
 
 function viewOnboarding() {
-  const profile = { unit: S.user.unit, goal: S.user.goal, experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type };
+  const profile = { unit: S.user.unit, goal: S.user.goal, variety: S.user.variety || 'mixed', experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type };
   const gym = { name: 'My gym', equipment: S.vocab.presets[0].equipment.slice(), increments: {} };
   const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true });
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save and build my first workout');
@@ -613,14 +657,19 @@ async function loadDraft({ regenerate = false } = {}) {
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
     body.locked = {};
-    body.avoid = [];
+    // Regenerate walks down the list (#211): everything rejected since this plan was first built,
+    // oldest first, so each tap brings new choices and a slot that runs out starts again from the top.
+    const avoid = [...(S.regenAvoid || [])];
     for (const b of S.draft.exercises) {
       if (b.locked) body.locked[b.slot] = b.exercise_id;
-      else body.avoid.push(b.exercise_id);
+      else avoid.push(b.exercise_id);
     }
-    body.avoid.push(...(S.draftRemoved || [])); // removed by hand (#155): do not bring them back
-  } else if (S.draft) {
-    body.locked = Object.fromEntries(S.draft.exercises.filter((b) => b.locked).map((b) => [b.slot, b.exercise_id]));
+    avoid.push(...(S.draftRemoved || [])); // removed by hand (#155): do not bring them back
+    body.avoid = [...new Set(avoid)];
+    S.regenAvoid = body.avoid;
+  } else {
+    S.regenAvoid = []; // a new day, gym or option starts the list again
+    if (S.draft) body.locked = Object.fromEntries(S.draft.exercises.filter((b) => b.locked).map((b) => [b.slot, b.exercise_id]));
   }
   S.draftLoading = true;
   S.draftError = null;
@@ -1128,6 +1177,8 @@ function viewToday() {
       'div',
       { class: S.draftLoading ? 'stack loading' : 'stack' },
       h('p', { class: 'summary' }, planSummary(d)),
+      // How recent workouts felt changed the plan (#198): said once, for the whole workout.
+      d.effort_note && h('p', { class: 'effort-note' }, d.effort_note),
       d.skipped.map((s) => h('p', { class: 'notice' }, s)),
       h(
         'ol',
@@ -2123,9 +2174,11 @@ function finishSheet(doc) {
     };
     strava = { send, summary, calories: caloriesRow ? calories : null, el: h('div', { class: 'stack' }, h('label', { class: 'check' }, send, 'Send to Strava'), details, caloriesRow) };
   }
-  // How hard it felt (#38), for the calorie estimate. Asked once a body weight is set.
-  let effort = S.user.effort || 'moderate';
-  const effortField = done && S.user.body_weight != null && field('How hard was it?', choices(EFFORTS, effort, (v) => (effort = v), { columns: 3 }), 'Used to estimate the calories you burned.');
+  // How hard it felt: optional, nothing chosen until tapped (#198). A choice helps plan the next
+  // workouts of this kind and the calorie estimate (#38); skipping keeps the usual effort for calories only.
+  let effort = null;
+  const effortField = done && field('How hard was it?', choices(EFFORTS, null, (v) => (effort = v), { columns: 3 }),
+    S.user.body_weight != null ? 'Optional. Helps plan your next workouts and estimate calories.' : 'Optional. Helps plan your next workouts.');
   const body = done
     ? h('div', { class: 'stack' },
         h('p', {}, `${done} set${done === 1 ? '' : 's'} logged over ${fmtClock((Date.now() - new Date(doc.started_at).getTime()) / 1000)}.`),
@@ -2148,9 +2201,13 @@ function finishSheet(doc) {
             endPause(d); // a pause counts up to the finish, then stops
             d.status = 'completed';
             d.completed_at = new Date().toISOString();
-            if (effortField) {
+            if (effort) {
               d.effort = effort;
+              d.effort_rated = true;
               S.user.effort = effort;
+            } else if (S.user.body_weight != null) {
+              d.effort = S.user.effort || 'moderate'; // for the calorie estimate only
+              d.effort_rated = false;
             }
             if (toStrava) d.strava_send = { include_summary: strava.summary.checked, include_calories: !!strava.calories?.checked, utc_offset: -new Date(d.started_at).getTimezoneOffset() * 60 };
           }, 0);
@@ -2686,8 +2743,9 @@ function viewHistoryDetail(id) {
           ? [h('strong', {}, `About ${calories.toLocaleString()} calories`), h('span', { class: 'muted' }, ' (estimated)')]
           : h('span', { class: 'muted small' }, S.user.body_weight == null ? 'Add your body weight in Settings to see estimated calories.' : 'No estimated calories: this workout is under a minute or has no recorded duration.'));
         showCalories();
-        const effortBox = S.user.body_weight != null && workout.status === 'completed' && field('How hard was it?',
-          choices(EFFORTS, workout.effort || 'moderate', (v) => { workout.effort = v; touch(); }, { columns: 3 }));
+        // Choosing here counts as a rating for planning (#198); an unrated workout shows nothing chosen.
+        const effortBox = workout.status === 'completed' && field('How hard was it?',
+          choices(EFFORTS, workout.effort_rated ? workout.effort : null, (v) => { workout.effort = v; workout.effort_rated = true; touch(); }, { columns: 3 }));
         save.onclick = () => act(async () => {
           const bad = workout.exercises.some((e) => e.sets.some((s) => (isTimed(e) ? !(s.duration_s > 0) : s.reps == null || s.reps <= 0)));
           if (bad) {
