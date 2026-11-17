@@ -426,6 +426,7 @@ final class Api
             'unit' => $u['unit'],
             'goal' => $u['goal'],
             'experience' => $u['experience'],
+            'variety' => isset(Generator::VARIETY[$u['variety'] ?? '']) ? $u['variety'] : 'mixed',
             'minutes' => (int) $u['minutes'],
             'split_type' => $u['split_type'],
             'active_gym_id' => $u['active_gym_id'] === null ? null : (int) $u['active_gym_id'],
@@ -537,6 +538,9 @@ final class Api
         }
         if (isset($in['goal']) && isset(Generator::GOALS[$in['goal']])) {
             $set['goal'] = $in['goal'];
+        }
+        if (isset($in['variety']) && isset(Generator::VARIETY[$in['variety']])) {
+            $set['variety'] = $in['variety'];
         }
         if (isset($in['experience']) && isset(Generator::EXPERIENCE[$in['experience']])) {
             $set['experience'] = $in['experience'];

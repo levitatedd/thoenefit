@@ -1640,6 +1640,99 @@ check('Powerlifting without a barbell uses the closest variation', $slugOf($dpus
 $plain = $lifts($gen->generate($pu, $pg, ['day_type' => 'custom', 'muscles' => ['chest'], 'minutes' => 45]));
 check('picked-muscle days keep their own rules for powerlifting too', $plain !== []);
 
+echo "Exercise variety (#211)\n";
+$varUser = function (string $name, string $variety, string $goal = 'muscle') use ($auth, $mkGym, $db) {
+    $id = $auth->createUser($name, "$name long password");
+    $db->run('UPDATE users SET variety=?, goal=? WHERE id=?', [$variety, $goal, $id]);
+    return [$db->one('SELECT * FROM users WHERE id=?', [$id]), $mkGym($id, 'Variety gym', Catalog::equipmentKeys())];
+};
+// Finish a generated plan as planned, $daysAgo days back.
+$doPlan = function (array $u, array $plan, int $daysAgo) use ($wk, $ago) {
+    $when = $ago($daysAgo);
+    $exs = [];
+    foreach ($plan['exercises'] as $b) {
+        if (in_array($b['kind'], ['cardio', 'stretch'], true)) {
+            continue;
+        }
+        $sets = [];
+        for ($i = 0; $i < $b['target_sets']; $i++) {
+            $sets[] = ['id' => uuid(), 'weight' => $b['suggested_weight'] ?? 50, 'reps' => $b['rep_max'], 'warmup' => false, 'done' => true, 'done_at' => $when];
+        }
+        $exs[] = ['id' => uuid(), 'exercise_id' => $b['exercise_id'], 'rep_min' => $b['rep_min'], 'rep_max' => $b['rep_max'], 'target_sets' => $b['target_sets'], 'sets' => $sets];
+    }
+    $wk->save((int) $u[0]['id'], ['id' => uuid(), 'gym_id' => $u[1]['id'], 'day_type' => $plan['day_type'], 'status' => 'completed', 'unit' => 'lb', 'started_at' => $when, 'completed_at' => $when, 'rev' => 1, 'exercises' => $exs]);
+};
+$bySlot = function (array $p) {
+    $out = array_column(array_filter($p['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true)), 'exercise_id', 'slot');
+    ksort($out);
+    return $out;
+};
+$gen2 = fn(array $u, string $day, array $opts = []) => $gen->generate($u[0], $u[1], ['day_type' => $day, 'minutes' => 90, 'now' => time()] + $opts);
+// Every lift sits in a slot that accepts its movement (no Pull or Legs lifts on Push, etc).
+$fits = function (array $p) use ($exById, $db) {
+    $slots = [];
+    foreach (Generator::TEMPLATES[$p['day_type']] as $slot) {
+        $slots[$slot[0]] = $slot[1];
+    }
+    $slots['deadlift'] = ['hinge'];
+    foreach ($p['exercises'] as $b) {
+        if (in_array($b['kind'], ['cardio', 'stretch'], true)) {
+            continue;
+        }
+        if (!in_array($db->val('SELECT pattern FROM exercises WHERE id=?', [$b['exercise_id']]), $slots[$b['slot']] ?? [], true)) {
+            return false;
+        }
+    }
+    return true;
+};
+check('Mixed is the default for every account', $db->val('SELECT variety FROM users WHERE id=?', [$uid]) === 'mixed' && isset(Generator::VARIETY['steady'], Generator::VARIETY['varied']));
+$steadyU = $varUser('var-steady', 'steady');
+$mixedU = $varUser('var-mixed', 'mixed');
+foreach ([$steadyU, $mixedU] as $u) {
+    $doPlan($u, $gen2($u, 'push'), 9);
+}
+$s1 = $bySlot($gen2($steadyU, 'push'));
+$m0 = $bySlot($gen2($mixedU, 'push'));
+$doPlan($steadyU, $gen2($steadyU, 'push'), 5);
+$doPlan($mixedU, $gen2($mixedU, 'push'), 5);
+$s2 = $bySlot($gen2($steadyU, 'push'));
+$m1 = $gen2($mixedU, 'push');
+check('Steady repeats the same lifts session to session', $s1 === $s2, json_encode([$s1, $s2]));
+check('Mixed keeps the main lifts (flat press, overhead press)', $bySlot($m1)['press'] === $m0['press'] && $bySlot($m1)['overhead'] === $m0['overhead']);
+check('Mixed rotates the supporting lifts between sessions', count(array_diff_assoc(array_diff_key($bySlot($m1), ['press' => 1, 'overhead' => 1]), array_diff_key($m0, ['press' => 1, 'overhead' => 1]))) > 0, json_encode([$m0, $bySlot($m1)]));
+check('a rotated lift says why', (bool) array_filter($m1['exercises'], static fn($b) => strpos($b['reason'], 'Rotated in for variety') === 0));
+check('rotation never brings in a lift from outside the workout type', $fits($m1) && $fits($gen2($mixedU, 'pull')) && $fits($gen2($mixedU, 'legs')));
+$variedU = $varUser('var-varied', 'varied');
+$first = $bySlot($gen2($variedU, 'push'));
+foreach ([12, 9, 6] as $d) {
+    $doPlan($variedU, $gen2($variedU, 'push'), $d);
+}
+$v4 = $bySlot($gen2($variedU, 'push'));
+check('Varied also rotates a main lift once it has led three sessions in a row', $v4['press'] !== $first['press'] || $v4['overhead'] !== $first['overhead'], json_encode([$first, $v4]));
+$plU = $varUser('var-power', 'varied', 'powerlifting');
+foreach ([12, 9, 6] as $d) {
+    $doPlan($plU, $gen2($plU, 'push'), $d);
+}
+check('Powerlifting keeps the bench press on Varied', $slugOf($bySlot($gen2($plU, 'push'))['press']) === 'barbell-bench-press');
+$stU = $varUser('var-starter', 'mixed', 'starter');
+$doPlan($stU, $gen2($stU, 'push'), 6);
+$stPlan = array_filter($gen2($stU, 'push')['exercises'], static fn($b) => !in_array($b['kind'], ['cardio', 'stretch'], true));
+check('Get Started rotates only within manageable lifts', array_filter($stPlan, static fn($b) => !in_array($b['kind'], Generator::STARTER_KINDS, true)) === []);
+// Regenerate walks down the list: keep rejecting the flat press.
+$regU = $varUser('var-regen', 'mixed');
+$seen = [];
+$avoidList = [];
+for ($i = 0; $i < 6; $i++) {
+    $p = $bySlot($gen2($regU, 'push', ['avoid' => $avoidList]));
+    $seen[] = $p['press'];
+    $avoidList = array_values(array_unique(array_merge($avoidList, array_values($p))));
+}
+check('Regenerate shows a new flat press each time instead of flipping between two', count(array_unique($seen)) === count($seen), json_encode($seen));
+$pressCount = count(array_filter($exById, static fn($e) => $e['pattern'] === 'horizontal_push'));
+$all = array_values(array_filter(array_map(static fn($e) => $e['pattern'] === 'horizontal_push' ? $e['id'] : null, $exById)));
+$wrap = $bySlot($gen2($regU, 'push', ['avoid' => array_merge($all, [-1])]));
+check('once every option has been rejected, it starts again from the earliest rejected', $wrap['press'] === $all[0], json_encode([$wrap['press'], $all[0]]));
+
 unset($db);
 @unlink($file);
 @unlink($file . '-wal');

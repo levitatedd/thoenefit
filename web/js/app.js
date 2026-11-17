@@ -69,6 +69,12 @@ function goalPicker(value, onPick) {
   sync();
   return wrap;
 }
+// Variety (#211): how much generated workouts rotate their exercises.
+const VARIETY = [
+  ['steady', 'Steady', 'Same lifts each time'],
+  ['mixed', 'Mixed', 'Main lifts stay, others rotate'],
+  ['varied', 'Varied', 'Everything rotates'],
+];
 const LEVELS = [
   ['beginner', 'Beginner', 'Under a year'],
   ['intermediate', 'Intermediate', '1-3 years'],
@@ -560,6 +566,7 @@ function trainingFields(values, onChange) {
   return [
     field('Weight unit', choices([['lb', 'Pounds'], ['kg', 'Kilograms']], values.unit, (v) => onChange('unit', v), { columns: 2 })),
     field('Goal', goalPicker(values.goal, (v) => onChange('goal', v))),
+    field('Variety', choices(VARIETY, values.variety || 'mixed', (v) => onChange('variety', v), { columns: 3 })),
     field('Training experience', choices(LEVELS, values.experience, (v) => onChange('experience', v), { columns: 3 })),
     field('Usual workout length', stepper(values.minutes, { min: 15, max: 150, step: 5, suffix: ' min', onChange: (v) => onChange('minutes', v) })),
     field('Training split', choices(SPLITS, values.split_type, (v) => onChange('split_type', v), { columns: 1 })),
@@ -602,7 +609,7 @@ function equipmentPicker(gym) {
 }
 
 function viewOnboarding() {
-  const profile = { unit: S.user.unit, goal: S.user.goal, experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type };
+  const profile = { unit: S.user.unit, goal: S.user.goal, variety: S.user.variety || 'mixed', experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type };
   const gym = { name: 'My gym', equipment: S.vocab.presets[0].equipment.slice(), increments: {} };
   const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true });
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save and build my first workout');
@@ -650,14 +657,19 @@ async function loadDraft({ regenerate = false } = {}) {
   if (S.draftOpts.minutes) body.minutes = S.draftOpts.minutes;
   if (S.draft && regenerate) {
     body.locked = {};
-    body.avoid = [];
+    // Regenerate walks down the list (#211): everything rejected since this plan was first built,
+    // oldest first, so each tap brings new choices and a slot that runs out starts again from the top.
+    const avoid = [...(S.regenAvoid || [])];
     for (const b of S.draft.exercises) {
       if (b.locked) body.locked[b.slot] = b.exercise_id;
-      else body.avoid.push(b.exercise_id);
+      else avoid.push(b.exercise_id);
     }
-    body.avoid.push(...(S.draftRemoved || [])); // removed by hand (#155): do not bring them back
-  } else if (S.draft) {
-    body.locked = Object.fromEntries(S.draft.exercises.filter((b) => b.locked).map((b) => [b.slot, b.exercise_id]));
+    avoid.push(...(S.draftRemoved || [])); // removed by hand (#155): do not bring them back
+    body.avoid = [...new Set(avoid)];
+    S.regenAvoid = body.avoid;
+  } else {
+    S.regenAvoid = []; // a new day, gym or option starts the list again
+    if (S.draft) body.locked = Object.fromEntries(S.draft.exercises.filter((b) => b.locked).map((b) => [b.slot, b.exercise_id]));
   }
   S.draftLoading = true;
   S.draftError = null;

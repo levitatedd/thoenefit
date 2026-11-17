@@ -101,6 +101,44 @@ final class Generator
         'powerlifting' => [[3, 5], [6, 10], 210, 120],  // Squat, bench and deadlift, heavy
     ];
 
+    /** Variety (#211): how much generated workouts rotate their exercises. */
+    public const VARIETY = ['steady' => 'Steady', 'mixed' => 'Mixed', 'varied' => 'Varied'];
+
+    /** Varied (#211): a main lift rotates once it has led this many sessions of its workout type in a row. */
+    public const ANCHOR_RUN = 3;
+
+    /** When each exercise was last done, as a timestamp, over all history (#211). */
+    private function lastDone(int $uid): array
+    {
+        $out = [];
+        foreach ($this->db->all(
+            "SELECT we.exercise_id, MAX(w.started_at) AS t FROM workout_exercises we JOIN workouts w ON w.id=we.workout_id
+             WHERE we.user_id=? AND w.status='completed' GROUP BY we.exercise_id",
+            [$uid]
+        ) as $r) {
+            $out[(int) $r['exercise_id']] = strtotime($r['t'] . ' UTC');
+        }
+        return $out;
+    }
+
+    /** Whether an exercise was in each of the last ANCHOR_RUN finished workouts of this type (#211). */
+    private function anchorRun(int $uid, string $dayType, int $exerciseId): bool
+    {
+        $ids = array_column($this->db->all(
+            "SELECT id FROM workouts WHERE user_id=? AND status='completed' AND day_type=? ORDER BY started_at DESC LIMIT " . self::ANCHOR_RUN,
+            [$uid, $dayType]
+        ), 'id');
+        if (count($ids) < self::ANCHOR_RUN) {
+            return false;
+        }
+        foreach ($ids as $id) {
+            if (!$this->db->val('SELECT 1 FROM workout_exercises WHERE workout_id=? AND exercise_id=?', [$id, $exerciseId])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Get started (#192): at most this many working sets per lift. */
     public const STARTER_MAX_SETS = 2;
 
@@ -857,6 +895,17 @@ final class Generator
             // Powerlifting (#192): Pull days lead with the deadlift.
             array_unshift($slots, ['deadlift', ['hinge'], 'hamstrings', true]);
         }
+        // Variety (#211): the first required slot for each muscle is an anchor; the rest support it.
+        $variety = isset(self::VARIETY[$user['variety'] ?? '']) ? $user['variety'] : 'mixed';
+        $anchors = [];
+        $anchorMuscles = [];
+        foreach ($slots as $slot) {
+            if ($slot[3] && !isset($anchorMuscles[$slot[2]])) {
+                $anchorMuscles[$slot[2]] = true;
+                $anchors[$slot[0]] = true;
+            }
+        }
+        $lastDone = $variety === 'steady' ? [] : $this->lastDone($uid);
         $required = [];
         $optional = [];
         foreach ($slots as $i => $slot) {
@@ -911,23 +960,30 @@ final class Generator
                 $cands = [];
                 // Powerlifting (#192): the competition lift for this slot comes first, whatever else applies.
                 $power = $goalKey === 'powerlifting' && $template === null ? array_flip(self::powerPrefs($dayType, $patterns)) : [];
+                // Variety (#211): steady slots repeat recent lifts so progression continues; rotating
+                // slots prefer the qualifying lift done least recently (never done first).
+                $rotate = $variety !== 'steady' && !isset($anchors[$key]);
+                $rank = function (array $ex, int $pi, bool $rotate) use ($avoid, $power, $recent, $lastDone): array {
+                    return [
+                        isset($avoid[$ex['id']]) ? 1 + $avoid[$ex['id']] : 0, // Regenerate (#211): rejected ones last, earliest-rejected first
+                        $power ? ($power[$ex['slug'] ?? ''] ?? 99) : 0,
+                        $pi,                                                   // preferred movement pattern first
+                        $rotate ? 0 : (isset($recent[$ex['id']]) ? 0 : 1),
+                        $rotate ? ($lastDone[$ex['id']] ?? 0) : -($recent[$ex['id']] ?? 0),
+                        $ex['priority'],
+                        $ex['name'],
+                        $ex,
+                    ];
+                };
                 foreach ($patterns as $pi => $pattern) {
                     foreach ($by[$pattern] ?? [] as $ex) {
                         if (isset($chosen[$ex['id']]) || ($onlyMuscle && !in_array($muscle, $ex['muscles_main'], true))) {
                             continue;
                         }
-                        $cands[] = [
-                            isset($avoid[$ex['id']]) ? 1 : 0,   // steer away from what "Regenerate" just rejected
-                            $power ? ($power[$ex['slug'] ?? ''] ?? 99) : 0,
-                            $pi,                                // preferred movement pattern first
-                            isset($recent[$ex['id']]) ? 0 : 1,  // then lifts you have been doing, so progression continues
-                            -($recent[$ex['id']] ?? 0),
-                            $ex['priority'],
-                            $ex['name'],
-                            $ex,
-                        ];
+                        $cands[] = [$ex, $pi];
                     }
                 }
+                $cands = array_map(static fn($c) => $rank($c[0], $c[1], $rotate), $cands);
                 if ($goalKey === 'starter') {
                     // Get started (#192): manageable lifts only, unless the slot has none.
                     $easy = array_values(array_filter($cands, static fn($c) => self::starterFriendly($c[7])));
@@ -936,17 +992,31 @@ final class Generator
                     }
                 }
                 if ($cands) {
-                    usort($cands, static fn($a, $b) => array_slice($a, 0, 7) <=> array_slice($b, 0, 7));
+                    $sort = static fn(array &$list) => usort($list, static fn($a, $b) => array_slice($a, 0, 7) <=> array_slice($b, 0, 7));
+                    $sort($cands);
                     $pick = $cands[0][7];
+                    if (!$rotate && $variety === 'varied' && !$avoid && isset($recent[$pick['id']]) && $this->anchorRun($uid, $dayType, $pick['id'])) {
+                        // Varied (#211): this main lift has led its last few sessions, so rotate it too.
+                        $cands = array_map(fn($c) => $rank($c[7], (int) $c[2], true), $cands);
+                        $sort($cands);
+                        if ($cands[0][7]['id'] !== $pick['id'] && !($power && isset($power[$pick['slug'] ?? '']))) {
+                            $pick = $cands[0][7];
+                            $rotate = true;
+                        }
+                    }
                     if ($power && isset($power[$pick['slug'] ?? ''])) {
                         $how = 'power';
                     }
                     if ($how === 'power') {
                         // keeps its powerlifting reason
+                    } elseif ($avoid && isset($avoid[$pick['id']])) {
+                        $how = 'cycled';
+                    } elseif ($avoid) {
+                        $how = 'rotated';
+                    } elseif ($rotate) {
+                        $how = 'variety';
                     } elseif (isset($recent[$pick['id']])) {
                         $how = 'recent';
-                    } elseif ($avoid && !isset($avoid[$pick['id']])) {
-                        $how = 'rotated';
                     }
                 }
             }
@@ -989,6 +1059,12 @@ final class Generator
                 $why = "You did this $when, so repeating it keeps your progression moving.";
             } elseif ($how === 'rotated') {
                 $why = "A different $label option, as you asked.";
+            } elseif ($how === 'cycled') {
+                $why = "You've seen every $label option here, so this starts the list again.";
+            } elseif ($how === 'variety') {
+                $last = $lastDone[$pick['id']] ?? null;
+                $days = $last ? (int) floor(($now - $last) / 86400) : null;
+                $why = 'Rotated in for variety' . ($days === null ? ': new to you.' : ($days <= 0 ? '.' : ", last done $days day" . ($days === 1 ? '' : 's') . ' ago.'));
             } elseif ($isRequired) {
                 $why = "First choice for $label $equipmentContext.";
             } else {
