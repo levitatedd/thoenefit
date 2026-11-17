@@ -900,27 +900,20 @@ check('Settings shows the app version under its title, and no longer at the bott
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
-  // #192: four goals in the grid, then a collapsed Other goals row with three more.
+  // #216: one goal dropdown, in the agreed order, with the chosen goal's description under it.
   {
-    const grid = await page.$$eval('.goal-picker > .choices:first-child .choice-label', (els) => els.map((e) => e.textContent));
-    const others = await page.$$eval('.goal-picker > .choices:last-child .choice-label', (els) => els.map((e) => e.textContent));
-    check('the goal grid reads Get Started, Get Stronger, General Fitness, Muscular Endurance; Other Goals has Reduce Bodyweight, Powerlifting, Build Muscle', grid.join() === 'Get Started,Get Stronger,General Fitness,Muscular Endurance' && others.join() === 'Reduce Bodyweight,Powerlifting,Build Muscle', JSON.stringify([grid, others]));
-    const goal = async () => (await api('bootstrap')).user.goal;
-    const start = await goal();
-    const rowText = async () => (await page.textContent('.other-goals-row')).trim();
-    check('with Build muscle chosen, Other goals starts open and names it', start === 'muscle' && (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'true' && /Build Muscle/.test(await rowText()), `${start} | ${await rowText()}`);
-    await page.click('.other-goals-row');
-    check('Other goals collapses, and still shows the chosen goal', (await page.getAttribute('.other-goals-row', 'aria-expanded')) === 'false' && await page.locator('.goal-picker > .choices:last-child').isHidden() && /Build Muscle/.test(await rowText()));
-    await page.locator('.goal-picker .choice', { hasText: 'Get Started' }).click();
-    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'starter');
-    check('picking a grid goal saves it and clears the name from the Other goals row', (await rowText()) === 'Other Goals' && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
-    await page.click('.other-goals-row');
-    await page.locator('.goal-picker .choice', { hasText: 'Powerlifting' }).click();
+    const goalSel = page.locator('.goal-picker select[aria-label="Goal"]');
+    const opts = await goalSel.locator('option').allTextContents();
+    check('Goal is one dropdown with all seven goals in order (#216)', opts.join() === 'Get Started,General Fitness,Reduce Bodyweight,Build Muscle,Get Stronger,Muscular Endurance,Powerlifting' && (await page.locator('.settings-main .goal-picker .choice').count()) === 0, opts.join());
+    const shown = async () => [await goalSel.evaluate((s) => s.selectedOptions[0].textContent), (await page.textContent('.goal-hint')).trim()];
+    const start = await shown();
+    check('an existing user sees their goal chosen, with its description underneath', (await api('bootstrap')).user.goal === 'muscle' && start[0] === 'Build Muscle' && start[1] === '6-10 reps on big lifts', JSON.stringify(start));
+    await goalSel.selectOption('powerlifting');
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'powerlifting');
-    check('picking Powerlifting saves it as the only choice and names it on the row', /Powerlifting/.test(await rowText()) && (await page.locator('.goal-picker .choice[aria-pressed="true"]').count()) === 1);
-    const sel = await page.$eval('.goal-picker .choice[aria-pressed="true"]', (b) => { const c = getComputedStyle(b); return [c.borderTopColor, c.backgroundColor]; });
-    check('Other goals use the Pick muscle groups highlight too', sel[0] === 'rgb(58, 242, 156)' && sel[1] === 'rgba(58, 242, 156, 0.14)', JSON.stringify(sel));
-    await shot('11c-other-goals');
+    check('choosing a goal saves it and updates the description', JSON.stringify(await shown()) === JSON.stringify(['Powerlifting', 'Squat, bench, and deadlift']), JSON.stringify(await shown()));
+    await shot('11c-goal-dropdown');
+    await page.locator('.goal-picker select[aria-label="Goal"]').selectOption('muscle');
+    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
     // #211: Variety sits under Goal, Mixed by default.
     const variety = page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) });
     const vLabels = await variety.locator('.choice-label').allTextContents();
@@ -930,8 +923,6 @@ check('Settings shows the app version under its title, and no longer at the bott
     check('picking Varied saves it', (await api('bootstrap')).user.variety === 'varied');
     await page.locator('.field', { has: page.locator('.field-label', { hasText: /^Variety$/ }) }).locator('.choice', { hasText: 'Mixed' }).click();
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.variety === 'mixed');
-    await page.locator('.goal-picker .choice', { hasText: 'Build Muscle' }).click();
-    await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'muscle');
   }
   check('no divider line between the Settings header and Training', (await page.$eval('.settings-main > .top-head + .section', (el) => getComputedStyle(el).borderTopStyle)) === 'none');
   const links = await page.$$eval('.link-row .log-title', (els) => els.map((e) => e.textContent));
