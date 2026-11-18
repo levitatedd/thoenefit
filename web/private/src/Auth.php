@@ -171,25 +171,17 @@ final class Auth
         }
     }
 
-    /** Accounts only the admin may share workouts with (#36). */
-    public const ADMIN_ONLY_SHARE_TARGETS = ['chatgpt'];
-
     /**
-     * Who this account may share a workout with: every other active account,
-     * except that only the admin sees the accounts in ADMIN_ONLY_SHARE_TARGETS.
+     * Who this account may share a workout with: every other active account.
      * The picker shows this list and the server only accepts shares to it.
      *
      * @return array<int, array{id: int, name: string}>
      */
     public function shareTargets(array $viewer): array
     {
-        $admin = self::isAdmin($viewer);
         $out = [];
         foreach ($this->listUsers() as $u) {
             if ($u['id'] === (int) $viewer['id']) {
-                continue;
-            }
-            if (!$admin && in_array($u['username'], self::ADMIN_ONLY_SHARE_TARGETS, true)) {
                 continue;
             }
             $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
