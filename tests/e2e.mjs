@@ -101,6 +101,17 @@ const fav = await page.evaluate(async () => {
 const off = await page.$eval('img.brand-wide', (img) => { const r = img.getBoundingClientRect(); return Math.abs((r.left + r.right) / 2 - window.innerWidth / 2); });
 check('the logo is centred on the sign-in screen, with no other text above the form', off < 2 && !(await page.textContent('.page')).includes('Accounts are created'), `${off}px off centre`);
 check('the browser tab icon is the barbell logo', fav.links.some((l) => l.startsWith('favicon.ico')) && fav.links.some((l) => l.startsWith('icons/favicon-32.png')) && fav.ok.every(Boolean), JSON.stringify(fav));
+// App icons (#248): every manifest and Apple icon loads at the size it claims, maskable included.
+{
+  const icons = await page.evaluate(async () => {
+    const size = (src) => new Promise((done) => { const i = new Image(); i.onload = () => done(`${i.naturalWidth}x${i.naturalHeight}`); i.onerror = () => done('error'); i.src = src; });
+    const man = await (await fetch(document.querySelector('link[rel=manifest]').getAttribute('href'))).json();
+    const apple = document.querySelector('link[rel=apple-touch-icon]');
+    const all = [...man.icons.map((i) => [i.src, i.sizes, i.purpose]), [apple.getAttribute('href'), apple.getAttribute('sizes'), 'apple']];
+    return Promise.all(all.map(async ([src, want, purpose]) => ({ src, want, purpose, got: await size(src) })));
+  });
+  check('every app icon loads at its stated size, with a maskable one, and asks for the new version', icons.every((i) => i.got === i.want && /\?v=3$/.test(i.src)) && icons.some((i) => i.purpose === 'maskable') && icons.some((i) => i.purpose === 'apple'), JSON.stringify(icons));
+}
 await page.fill('input[name=username]', USER);
 await page.fill('input[name=password]', 'wrong-password-here');
 await page.click('button[type=submit]');
