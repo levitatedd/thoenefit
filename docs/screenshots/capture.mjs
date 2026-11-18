@@ -176,8 +176,10 @@ await A.evaluate(() => {
 await A.waitForTimeout(300);
 await jpg(A, 'exercise-progress');
 
-// 4. Trends
-await A.goto(URL + '#/trends');
+// 4. Trends, with the three most-logged weighted lifts pinned (#126).
+const pins = Object.entries(counts).filter(([k]) => weighted(k)).sort((a, b) => b[1] - a[1]).slice(0, 3);
+for (const [name] of pins) await alex.call('pin_exercise', { exercise_id: catalog.find((e) => e.name === name).id, pinned: true });
+await A.goto(URL + '#/trends'); await A.reload();
 await A.waitForSelector('.chart'); await ready(A); await A.waitForTimeout(400);
 // Taller than the others so weekly volume and the whole recovery estimate fit.
 const tall = await A.evaluate(() => document.documentElement.scrollHeight);
