@@ -35,14 +35,17 @@ final class Auth
         return strtolower(trim($u));
     }
 
+    /** Shortest password accepted anywhere: sign-up, changing it, and admin resets. */
+    public const MIN_PASSWORD = 8;
+
     public function createUser(string $username, string $password, string $displayName = '', string $status = 'active'): int
     {
         $username = self::normUsername($username);
         if (!preg_match('/^[a-z0-9._-]{2,64}$/', $username)) {
             throw new HttpError(422, 'Usernames use 2-64 letters, numbers, dots, dashes or underscores.');
         }
-        if (strlen($password) < 10) {
-            throw new HttpError(422, 'Passwords need at least 10 characters.');
+        if (strlen($password) < self::MIN_PASSWORD) {
+            throw new HttpError(422, 'Passwords need at least ' . self::MIN_PASSWORD . ' characters.');
         }
         if ($this->db->val('SELECT id FROM users WHERE username=?', [$username])) {
             throw new HttpError(409, 'That username is taken.');
@@ -106,6 +109,10 @@ final class Auth
         if (!password_verify(trim($token), (string) $hash)) {
             $this->db->run('INSERT INTO login_attempts (ident, attempted_at) VALUES (?, ?)', ['inv:' . $ip, now_utc()]);
             throw new HttpError(403, 'That invite code is not right.');
+        }
+        // A name is required: it is how other people find them when sharing a workout.
+        if (trim($displayName) === '') {
+            throw new HttpError(422, 'Enter your name. Others on this site see it when sharing workouts.');
         }
         if ((int) $this->db->val('SELECT COUNT(*) FROM login_attempts WHERE ident=? AND attempted_at>?', ['new:' . $ip, $since]) >= self::MAX_NEW_ACCOUNTS) {
             throw new HttpError(429, 'Several accounts were just created from here. Wait 15 minutes and try again.');
@@ -171,25 +178,17 @@ final class Auth
         }
     }
 
-    /** Accounts only the admin may share workouts with (#36). */
-    public const ADMIN_ONLY_SHARE_TARGETS = ['chatgpt'];
-
     /**
-     * Who this account may share a workout with: every other active account,
-     * except that only the admin sees the accounts in ADMIN_ONLY_SHARE_TARGETS.
+     * Who this account may share a workout with: every other active account.
      * The picker shows this list and the server only accepts shares to it.
      *
      * @return array<int, array{id: int, name: string}>
      */
     public function shareTargets(array $viewer): array
     {
-        $admin = self::isAdmin($viewer);
         $out = [];
         foreach ($this->listUsers() as $u) {
             if ($u['id'] === (int) $viewer['id']) {
-                continue;
-            }
-            if (!$admin && in_array($u['username'], self::ADMIN_ONLY_SHARE_TARGETS, true)) {
                 continue;
             }
             $out[] = ['id' => $u['id'], 'name' => $u['display_name']];
@@ -247,8 +246,8 @@ final class Auth
 
     public function setPassword(int $userId, string $password): void
     {
-        if (strlen($password) < 10) {
-            throw new HttpError(422, 'Passwords need at least 10 characters.');
+        if (strlen($password) < self::MIN_PASSWORD) {
+            throw new HttpError(422, 'Passwords need at least ' . self::MIN_PASSWORD . ' characters.');
         }
         $this->db->run('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $userId]);
     }

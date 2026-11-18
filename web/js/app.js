@@ -3610,7 +3610,7 @@ function viewStrava() {
 
 function viewPassword() {
   const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
-  const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 10, required: true });
+  const next = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
   const pwBtn = h('button', { class: 'btn primary block', type: 'submit' }, 'Change password');
   return h('main', { class: 'page' }, backLink('settings', 'Settings'), h('h1', {}, 'Change password'),
     h('p', { class: 'muted' }, 'Your other phones and computers are signed out. This one stays signed in.'),
@@ -3624,7 +3624,7 @@ function viewPassword() {
           next.value = '';
           toast('Password changed. Other devices are signed out.');
         }, pwBtn);
-      } }, field('Current password', current), field('New password', next, 'At least 10 characters.'), pwBtn));
+      } }, field('Current password', current), field('New password', next, 'At least 8 characters.'), pwBtn));
 }
 
 const FEEDBACK_KINDS = [['idea', 'Idea'], ['problem', 'Problem'], ['other', 'Other']];
@@ -3957,7 +3957,7 @@ function viewUsers() {
   };
   // A new password the admin passes on (#21). It signs that person out everywhere.
   const resetPassword = (u) => {
-    const input = h('input', { type: 'text', name: 'reset_password', minlength: 10, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+    const input = h('input', { type: 'text', name: 'reset_password', minlength: 8, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
     const err = h('p', { class: 'form-error', role: 'alert' });
     const go = h('button', { class: 'btn primary block', type: 'submit' }, 'Set new password');
     const close = sheet(`Reset ${u.username}'s password`, h('form', { class: 'stack', onsubmit: async (e) => {
@@ -3974,7 +3974,7 @@ function viewUsers() {
       go.disabled = false;
     } },
       h('p', { class: 'muted' }, 'They are signed out on every device and sign in again with the new password. Pass it on to them; they can change it under Settings.'),
-      field('New password', input, 'At least 10 characters.'),
+      field('New password', input, 'At least 8 characters.'),
       h('button', { class: 'btn block', type: 'button', onclick: () => { input.value = makeUp(); input.focus(); input.select(); } }, 'Make one up for me'),
       err,
       go));
@@ -4020,7 +4020,7 @@ function viewUsers() {
   const error = h('p', { class: 'form-error', role: 'alert' });
   const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'off', placeholder: 'For example: Sam' });
   const username = h('input', { type: 'text', name: 'new_username', maxlength: 64, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
-  const password = h('input', { type: 'text', name: 'new_password', minlength: 10, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const password = h('input', { type: 'text', name: 'new_password', minlength: 8, required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Create account');
   const form = h('form', { class: 'stack', onsubmit: async (e) => {
     e.preventDefault();
@@ -4037,7 +4037,7 @@ function viewUsers() {
   } },
     field('Name', name, 'Shown in the app. Leave empty to use the username.'),
     field('Username', username, 'What they sign in with: 2-64 letters, numbers, dots, dashes or underscores.'),
-    field('Starting password', password, 'At least 10 characters. Shown here so you can pass it on; they can change it under Settings once signed in.'),
+    field('Starting password', password, 'At least 8 characters. Shown here so you can pass it on; they can change it under Settings once signed in.'),
     error,
     btn);
 
@@ -4062,11 +4062,11 @@ function viewUsers() {
 function viewRequest() {
   const error = h('p', { class: 'form-error', role: 'alert' });
   const token = h('input', { type: 'text', name: 'invite_token', required: true, autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
-  const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, autocomplete: 'name' });
+  const name = h('input', { type: 'text', name: 'display_name', maxlength: 100, required: true, autocomplete: 'name' });
   const username = h('input', { type: 'text', name: 'username', maxlength: 64, required: true, autocomplete: 'username', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
-  const password = h('input', { type: 'password', name: 'password', minlength: 10, required: true, autocomplete: 'new-password' });
-  const again = h('input', { type: 'password', name: 'password_again', minlength: 10, required: true, autocomplete: 'new-password' });
-  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Create account');
+  const password = h('input', { type: 'password', name: 'password', minlength: 8, required: true, autocomplete: 'new-password' });
+  const again = h('input', { type: 'password', name: 'password_again', minlength: 8, required: true, autocomplete: 'new-password' });
+  const btn = h('button', { class: 'btn mint block', type: 'submit' }, 'Create account');
   const backToSignIn = () => {
     S.authView = null;
     render();
@@ -4091,9 +4091,9 @@ function viewRequest() {
     }
   } },
     field('Invite code', token, 'Ask the person who runs this ThoeneFit site for an invite code.'),
-    field('Your name', name, 'Shown in the app. Optional.'),
+    field('Your name', name, 'Shown in the app. Visible to others on this site.'),
     field('Username', username, '2-64 letters, numbers, dots, dashes or underscores.'),
-    field('Password', password, 'At least 10 characters. This is your own sign-in password, not the invite code.'),
+    field('Password', password, 'At least 8 characters. This is your own sign-in password, not the invite code.'),
     field('Password again', again),
     error,
     btn,

@@ -865,7 +865,7 @@ const newUser = `buddy${Date.now() % 100000}`;
 await page.fill('input[name=new_username]', newUser);
 await page.fill('input[name=new_password]', 'short');
 await page.click('button:has-text("Create account")');
-check('a too-short password is refused with a reason', /at least 10/.test(await page.textContent('.form-error')) || !(await page.$eval('input[name=new_password]', (el) => el.checkValidity())));
+check('a too-short password is refused with a reason', /at least 8/.test(await page.textContent('.form-error')) || !(await page.$eval('input[name=new_password]', (el) => el.checkValidity())));
 await page.fill('input[name=display_name]', 'Training Buddy');
 await page.fill('input[name=new_password]', 'buddy-password-1');
 await page.click('button:has-text("Create account")');
@@ -901,6 +901,12 @@ await gp.click('button:has-text("Create an account")');
 await gp.waitForSelector('input[name=invite_token]');
 if (SHOTS) await gp.screenshot({ path: `${SHOTS}/32-request-invite-code.png` });
 check('the sign-up form asks for an Invite code and says where to get one (#137)', (await gp.textContent('h1')) === 'Create an account' && (await gp.locator('.field', { has: gp.locator('input[name=invite_token]') }).textContent()).includes('Invite code') && (await gp.textContent('.page')).includes('Ask the person who runs this ThoeneFit site for an invite code.') && !(await gp.textContent('.page')).includes('invite token'));
+{
+  const nameField = gp.locator('.field', { has: gp.locator('input[name=display_name]') });
+  check('Your name is required and says others on this site see it', (await gp.getAttribute('input[name=display_name]', 'required')) !== null && (await nameField.locator('.field-hint').textContent()) === 'Shown in the app. Visible to others on this site.');
+  check('passwords need 8 characters', (await gp.getAttribute('input[name=password]', 'minlength')) === '8' && /At least 8 characters/.test(await gp.textContent('.page')));
+  check('Create account is the solid mint button', (await gp.$eval('button:has-text("Create account")', (b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color].join('|'))) === 'rgb(58, 242, 156)|rgb(14, 17, 21)');
+}
 await gp.fill('input[name=invite_token]', 'wrong-token-zzz');
 await gp.fill('input[name=display_name]', 'New Lifter');
 await gp.fill('input[name=username]', applicant);
@@ -1017,26 +1023,6 @@ await pp.click('.sheet button:has-text("Finish and save")');
 await closeRecap(pp);
 await pp.waitForSelector('.plan-row');
 check('after finishing, the partner is back to their own plan', (await pp.locator('.shared-note').count()) === 0 && (await pp.locator('.share-card').count()) === 0);
-// #36: only the admin can share with the chatgpt account.
-{
-  const adminBoot = await api('bootstrap');
-  const made = await page.evaluate(async (t) => (await fetch('api.php?a=create_user', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ username: 'chatgpt', display_name: 'ChatGPT', password: 'chatgpt-long-password' }) })).status, adminBoot.csrf);
-  await page.click('button[aria-label="Share this workout"]');
-  await page.waitForSelector('.share-row');
-  check('the admin sees the chatgpt account in the share picker', made === 200 && (await page.locator('.share-row', { hasText: 'ChatGPT' }).count()) === 1);
-  await page.click('.sheet button:has-text("Close")');
-  await pp.click('button[aria-label="Share this workout"]');
-  await pp.waitForSelector('.share-row');
-  check('a regular user does not see the chatgpt account in the share picker', (await pp.locator('.share-row', { hasText: 'ChatGPT' }).count()) === 0 && (await pp.locator('.share-row', { hasText: myName }).count()) === 1);
-  await pp.click('.sheet button:has-text("Close")');
-  const gptId = (await page.evaluate(async () => (await (await fetch('api.php?a=people', { credentials: 'same-origin' })).json()).people)).find((p) => p.name === 'ChatGPT').id;
-  const ppBoot = await pp.evaluate(async () => (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json());
-  const refused = await pp.evaluate(async ([t, id]) => {
-    const r = await fetch('api.php?a=share_workout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ share_key: crypto.randomUUID(), to: [id], plan: { day_type: 'push', exercises: [{ exercise_id: 1, target_sets: 3, rep_min: 6, rep_max: 10, rest_seconds: 90 }] } }) });
-    return r.status;
-  }, [ppBoot.csrf, gptId]);
-  check('the server refuses a share from a regular user to chatgpt, even sent directly', refused === 422, String(refused));
-}
 await pp.click('.tab:has-text("History")');
 await pp.waitForSelector('.log-row');
 await pp.click('.log-row');
