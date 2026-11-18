@@ -865,7 +865,7 @@ const newUser = `buddy${Date.now() % 100000}`;
 await page.fill('input[name=new_username]', newUser);
 await page.fill('input[name=new_password]', 'short');
 await page.click('button:has-text("Create account")');
-check('a too-short password is refused with a reason', /at least 10/.test(await page.textContent('.form-error')) || !(await page.$eval('input[name=new_password]', (el) => el.checkValidity())));
+check('a too-short password is refused with a reason', /at least 8/.test(await page.textContent('.form-error')) || !(await page.$eval('input[name=new_password]', (el) => el.checkValidity())));
 await page.fill('input[name=display_name]', 'Training Buddy');
 await page.fill('input[name=new_password]', 'buddy-password-1');
 await page.click('button:has-text("Create account")');
@@ -901,6 +901,12 @@ await gp.click('button:has-text("Create an account")');
 await gp.waitForSelector('input[name=invite_token]');
 if (SHOTS) await gp.screenshot({ path: `${SHOTS}/32-request-invite-code.png` });
 check('the sign-up form asks for an Invite code and says where to get one (#137)', (await gp.textContent('h1')) === 'Create an account' && (await gp.locator('.field', { has: gp.locator('input[name=invite_token]') }).textContent()).includes('Invite code') && (await gp.textContent('.page')).includes('Ask the person who runs this ThoeneFit site for an invite code.') && !(await gp.textContent('.page')).includes('invite token'));
+{
+  const nameField = gp.locator('.field', { has: gp.locator('input[name=display_name]') });
+  check('Your name is required and says others on this site see it', (await gp.getAttribute('input[name=display_name]', 'required')) !== null && (await nameField.locator('.field-hint').textContent()) === 'Shown in the app. Visible to others on this site.');
+  check('passwords need 8 characters', (await gp.getAttribute('input[name=password]', 'minlength')) === '8' && /At least 8 characters/.test(await gp.textContent('.page')));
+  check('Create account is the solid mint button', (await gp.$eval('button:has-text("Create account")', (b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color].join('|'))) === 'rgb(58, 242, 156)|rgb(14, 17, 21)');
+}
 await gp.fill('input[name=invite_token]', 'wrong-token-zzz');
 await gp.fill('input[name=display_name]', 'New Lifter');
 await gp.fill('input[name=username]', applicant);

@@ -134,6 +134,8 @@ $listed = $auth->listUsers();
 check('the account list shows who is who without password hashes', count($listed) === 2 && $listed[0]['role'] === 'admin' && $listed[1]['username'] === 'sam' && !isset($listed[0]['password_hash']) && strpos(json_encode($listed), '$2y$') === false);
 check('passwords are stored hashed', password_verify('correct horse battery', $db->val('SELECT password_hash FROM users WHERE id=?', [$uid])) && strpos($db->val('SELECT password_hash FROM users WHERE id=?', [$uid]), 'correct') === false);
 check('short passwords are rejected', throws(fn() => $auth->createUser('tiny', 'short'), 422));
+check('passwords need 8 characters: 7 is refused, 8 is fine', throws(fn() => $auth->createUser('seven', 'abcdefg'), 422) && $auth->createUser('eight', 'abcdefgh') > 0);
+$db->run("DELETE FROM users WHERE username='eight'");
 check('duplicate usernames are rejected', throws(fn() => $auth->createUser('MIKE', 'correct horse battery'), 409));
 check('wrong password is refused', throws(fn() => $auth->login('mike', 'nope'), 401));
 $u = $auth->login('mike', 'correct horse battery');
@@ -227,18 +229,19 @@ check('the person\'s password is their own, separate from the invite token', pas
 check('the invite token does not work as a sign-in password', throws(fn() => $ra->login('dana', 'gym-crew-2026'), 401));
 $in = $ra->login('dana', 'dana-own-password');
 check('they can sign in again later with the password they chose', (int) $in['id'] === $rid && $in['role'] === 'user');
-check('a username cannot be taken twice', throws(fn() => $ra->requestAccount('gym-crew-2026', 'dana', 'another-password-1'), 409) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'boss', 'another-password-1'), 409));
-check('the usual username and password rules apply', throws(fn() => $ra->requestAccount('gym-crew-2026', 'x', 'long-enough-password'), 422) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'okname', 'short'), 422));
+check('a username cannot be taken twice', throws(fn() => $ra->requestAccount('gym-crew-2026', 'dana', 'another-password-1', 'Dana Two'), 409) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'boss', 'another-password-1', 'Boss Two'), 409));
+check('the usual username and password rules apply', throws(fn() => $ra->requestAccount('gym-crew-2026', 'x', 'long-enough-password', 'X'), 422) && throws(fn() => $ra->requestAccount('gym-crew-2026', 'okname', 'short', 'Ok Name'), 422));
+check('a name is required to sign up, since others share workouts by it', throws(fn() => $ra->requestAccount('gym-crew-2026', 'noname', 'noname-password', '   '), 422) && !$reqDb->val("SELECT 1 FROM users WHERE username='noname'"));
 $ra->setInviteToken('brand-new-token');
 check('changing the token stops the old one working', throws(fn() => $ra->requestAccount('gym-crew-2026', 'late', 'late-password-123'), 403));
-$ra->requestAccount('brand-new-token', 'late', 'late-password-123');
+$ra->requestAccount('brand-new-token', 'late', 'late-password-123', 'Late Lifter');
 $ra->setInviteToken('');
 check('clearing the token closes sign-ups and keeps the accounts already made', $ra->inviteStatus()['set'] === false && throws(fn() => $ra->requestAccount('brand-new-token', 'later', 'later-password-12'), 403) && count($ra->listUsers()) === 3);
 $ra->setInviteToken('third-token-here');
-$ra->requestAccount('third-token-here', 'third', 'third-password-12'); // the third from this connection in 15 minutes
-check('three accounts from one connection, then a pause', throws(fn() => $ra->requestAccount('third-token-here', 'fourth', 'fourth-password-1'), 429) && (int) $reqDb->val("SELECT COUNT(*) FROM users WHERE username='fourth'") === 0);
+$ra->requestAccount('third-token-here', 'third', 'third-password-12', 'Third Lifter'); // the third from this connection in 15 minutes
+check('three accounts from one connection, then a pause', throws(fn() => $ra->requestAccount('third-token-here', 'fourth', 'fourth-password-1', 'Fourth Lifter'), 429) && (int) $reqDb->val("SELECT COUNT(*) FROM users WHERE username='fourth'") === 0);
 $reqDb->run("DELETE FROM login_attempts WHERE ident LIKE 'new:%'");
-$ra->requestAccount('third-token-here', 'fourth', 'fourth-password-1');
+$ra->requestAccount('third-token-here', 'fourth', 'fourth-password-1', 'Fourth Lifter');
 check('after the pause, sign-ups work again', (int) $reqDb->val("SELECT COUNT(*) FROM users WHERE username='fourth'") === 1);
 $reqDb->run("DELETE FROM login_attempts WHERE ident LIKE 'inv:%'");
 for ($i = 0; $i < 5; $i++) {

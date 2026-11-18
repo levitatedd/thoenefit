@@ -357,6 +357,14 @@ body.scrolled .top-head {
   font-weight: 700;
 }
 
+/* Solid mint, for the one big go-ahead on a screen (Create account, Build my first workout). */
+.btn.mint {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .btn.danger {
   border-color: var(--red);
   color: var(--red);
