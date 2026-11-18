@@ -253,6 +253,35 @@ $reqDb->run("UPDATE users SET status='pending' WHERE username='late'");
 $reqDb->run("UPDATE users SET status='inactive' WHERE username='fourth'");
 (require dirname(__DIR__) . '/web/private/migrations/030_no_account_approval.php')($reqDb, new Migrator($reqDb));
 check('migration 030 lets anyone still waiting sign in, and leaves deactivated accounts alone', $reqDb->val("SELECT status FROM users WHERE username='late'") === 'active' && $reqDb->val("SELECT status FROM users WHERE username='fourth'") === 'inactive');
+// Migration 032: the chatgpt account and everything it owns go; nobody else's data changes.
+$gpt = $ra->createUser('chatgpt', 'chatgpt-long-password', 'ChatGPT');
+$keep = (int) $reqDb->val("SELECT id FROM users WHERE username='dana'");
+$gGym = $reqDb->insert('gyms', ['user_id' => $gpt, 'name' => 'GPT gym', 'equipment' => '[]', 'increments' => '{}', 'created_at' => TF\now_utc()]);
+$gEx = $reqDb->insert('exercises', ['user_id' => $gpt, 'slug' => 'gpt-' . uuid(), 'name' => 'GPT Lift', 'kind' => 'dumbbell', 'equipment' => '[]', 'pattern' => 'horizontal_push', 'muscles_main' => '["chest"]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 5]);
+$gUsed = $reqDb->insert('exercises', ['user_id' => $gpt, 'slug' => 'gpt-' . uuid(), 'name' => 'GPT Shared Lift', 'kind' => 'dumbbell', 'equipment' => '[]', 'pattern' => 'horizontal_push', 'muscles_main' => '["chest"]', 'muscles_assist' => '[]', 'cues' => '', 'priority' => 5]);
+$rw = new Workouts($reqDb);
+$wdoc = fn(int $exId, int $gym) => ['id' => uuid(), 'gym_id' => $gym, 'day_type' => 'push', 'status' => 'completed', 'unit' => 'lb', 'started_at' => gmdate('Y-m-d\TH:i:s\Z'), 'completed_at' => gmdate('Y-m-d\TH:i:s\Z'), 'rev' => 1, 'exercises' => [['id' => uuid(), 'exercise_id' => $exId, 'rep_min' => 8, 'rep_max' => 12, 'target_sets' => 1, 'sets' => [['id' => uuid(), 'weight' => 40, 'reps' => 10, 'warmup' => false, 'done' => true, 'done_at' => gmdate('Y-m-d\TH:i:s\Z')]]]]];
+$rw->save($gpt, $wdoc($gEx, $gGym));
+$dGym = $reqDb->insert('gyms', ['user_id' => $keep, 'name' => 'Dana gym', 'equipment' => '[]', 'increments' => '{}', 'created_at' => TF\now_utc()]);
+// Someone else logged one of its exercises (only possible if it was ever shared more widely).
+$reqDb->run('UPDATE exercises SET user_id=NULL WHERE id=?', [$gUsed]);
+$rw->save($keep, $wdoc($gUsed, $dGym));
+$reqDb->run('UPDATE exercises SET user_id=? WHERE id=?', [$gpt, $gUsed]);
+$reqDb->insert('workout_shares', ['share_key' => uuid(), 'from_user' => $keep, 'to_user' => $gpt, 'plan' => '{}', 'status' => 'pending', 'created_at' => TF\now_utc(), 'updated_at' => TF\now_utc()]);
+$before = fn(string $t) => (int) $reqDb->val("SELECT COUNT(*) FROM $t");
+$keptSets = (int) $reqDb->val('SELECT COUNT(*) FROM workout_sets WHERE workout_id IN (SELECT id FROM workouts WHERE user_id=?)', [$keep]);
+$mig = require dirname(__DIR__) . '/web/private/migrations/032_remove_chatgpt_account.php';
+$mig($reqDb, new Migrator($reqDb));
+$left = 0;
+foreach (['workouts', 'workout_exercises', 'gyms', 'auth_sessions'] as $t) {
+    $left += (int) $reqDb->val("SELECT COUNT(*) FROM $t WHERE user_id=?", [$gpt]);
+}
+check('migration 032 removes the chatgpt account with its workouts, gyms, sessions and shares', !$reqDb->val("SELECT 1 FROM users WHERE username='chatgpt'") && $left === 0 && (int) $reqDb->val('SELECT COUNT(*) FROM workout_shares WHERE to_user=? OR from_user=?', [$gpt, $gpt]) === 0 && !$reqDb->val('SELECT 1 FROM exercises WHERE id=?', [$gEx]));
+check('it leaves everyone else alone, keeping an exercise someone else logged', (int) $reqDb->val('SELECT COUNT(*) FROM workout_sets WHERE workout_id IN (SELECT id FROM workouts WHERE user_id=?)', [$keep]) === $keptSets && $keptSets === 1 && (bool) $reqDb->val('SELECT 1 FROM exercises WHERE id=?', [$gUsed]) && (bool) $reqDb->val('SELECT 1 FROM users WHERE id=?', [$keep]));
+$mig($reqDb, new Migrator($reqDb));
+$reqDb->run("UPDATE users SET username='chatgpt' WHERE id=?", [$boss]);
+$mig($reqDb, new Migrator($reqDb));
+check('running it again does nothing, and an admin is never removed', (bool) $reqDb->val('SELECT 1 FROM users WHERE id=?', [$boss]));
 unset($ra, $reqDb);
 @unlink("$file-requests");
 @unlink("$file-requests-wal");
@@ -621,18 +650,8 @@ check('one account\'s import is invisible to another', $wk->get($uid, $hist[0]['
 check('undo removes only imported workouts', $imp->purge($uid3) === 2 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid3]) === 0 && (int) $db->val('SELECT COUNT(*) FROM workouts WHERE user_id=?', [$uid]) > 0);
 
 echo "Sharing a workout\n";
-// #36: only the admin can share with the chatgpt account.
-$gptId = $auth->createUser('ChatGPT', 'chatgpt-long-password', 'ChatGPT');
-$adminSees = array_column($auth->shareTargets($db->one('SELECT * FROM users WHERE id=?', [$uid])), 'id');
 $memberSees = array_column($auth->shareTargets($db->one('SELECT * FROM users WHERE id=?', [$uid2])), 'id');
-check('the admin can pick the chatgpt account when sharing', in_array($gptId, $adminSees, true) && !in_array($uid, $adminSees, true));
-check('a regular user does not see the chatgpt account, but still sees everyone else', !in_array($gptId, $memberSees, true) && in_array($uid, $memberSees, true) && !in_array($uid2, $memberSees, true));
-$gptPlan = ['day_type' => 'push', 'exercises' => [['exercise_id' => $bench, 'target_sets' => 3, 'rep_min' => 6, 'rep_max' => 10, 'rest_seconds' => 120]]];
-check('the server refuses a share from a regular user to chatgpt', throws(fn() => (new Shares($db))->send($uid2, uuid(), [$gptId], $memberSees, $gptPlan), 422) && (int) $db->val('SELECT COUNT(*) FROM workout_shares WHERE to_user=?', [$gptId]) === 0);
-(new Shares($db))->send($uid, uuid(), [$gptId], $adminSees, $gptPlan);
-check('the admin can send a share to chatgpt', (int) $db->val('SELECT COUNT(*) FROM workout_shares WHERE to_user=? AND from_user=?', [$gptId, $uid]) === 1);
-$db->run('DELETE FROM workout_shares WHERE to_user=?', [$gptId]);
-$db->run('DELETE FROM users WHERE id=?', [$gptId]);
+check('everyone sees every other active account when sharing, admin included', in_array($uid, $memberSees, true) && !in_array($uid2, $memberSees, true));
 
 $sh = new Shares($db);
 $uid3 = $auth->createUser('third', 'third-long-password');
