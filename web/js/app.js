@@ -578,10 +578,15 @@ function trainingFields(values, onChange) {
 /** The weekdays someone usually trains (#228), Monday first. The calendar on History plans the split onto them. */
 const WEEKDAYS = [[1, 'M', 'Monday'], [2, 'T', 'Tuesday'], [3, 'W', 'Wednesday'], [4, 'T', 'Thursday'], [5, 'F', 'Friday'], [6, 'S', 'Saturday'], [7, 'S', 'Sunday']];
 
-function trainingDaysField(initial, onChange) {
+function trainingDaysField(initial, onChange, { optional = false } = {}) {
   let days = [...initial];
   const hint = h('span', { class: 'field-hint' });
   const say = () => {
+    if (optional) {
+      // First-time setup (#238): make clear it can be left for later.
+      hint.textContent = 'Pick the days you usually train and the calendar on History plans ahead. Skip this if your week changes; you can add them later in Settings.';
+      return;
+    }
     hint.textContent = days.length
       ? `${days.length} day${days.length === 1 ? '' : 's'} a week. The calendar on History plans your split onto these days.`
       : 'Pick the days you usually train, and the calendar on History plans your split onto them.';
@@ -599,23 +604,33 @@ function trainingDaysField(initial, onChange) {
     },
   }, h('span', { class: 'choice-label' }, letter))));
   say();
-  return h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Training days'), picker, hint);
+  return h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Training days', optional && h('span', { class: 'badge' }, 'Optional')), picker, hint);
 }
 
-function equipmentPicker(gym) {
+function equipmentPicker(gym, { setup = false } = {}) {
   const boxes = new Map();
-  const groups = S.vocab.equipment.map((g) =>
-    h(
+  // In setup (#238) each group is a card with a running count, so the list reads as several sections.
+  const counts = [];
+  const recount = () => counts.forEach(([el, keys]) => (el.textContent = `${keys.filter((k) => gym.equipment.includes(k)).length} of ${keys.length}`));
+  const groups = S.vocab.equipment.map((g) => {
+    const count = setup && h('span', { class: 'muted small equip-count' });
+    if (count) counts.push([count, Object.keys(g.items)]);
+    return h(
       'fieldset',
-      { class: 'checks' },
-      h('legend', {}, g.group),
+      { class: setup ? 'checks equip-card' : 'checks' },
+      h('legend', {}, setup ? [h('span', {}, g.group), count] : g.group),
       Object.entries(g.items).map(([key, label]) => {
-        const box = h('input', { type: 'checkbox', checked: gym.equipment.includes(key), onchange: () => (gym.equipment = [...boxes].filter(([, b]) => b.checked).map(([k]) => k)) });
+        const box = h('input', { type: 'checkbox', checked: gym.equipment.includes(key), onchange: () => {
+          gym.equipment = [...boxes].filter(([, b]) => b.checked).map(([k]) => k);
+          recount();
+        } });
         boxes.set(key, box);
         return h('label', { class: 'check' }, box, h('span', {}, label));
       }),
-    ),
-  );
+    );
+  });
+  recount();
+  if (setup) return h('div', { class: 'stack' }, groups);
   const presets = h(
     'div',
     { class: 'chips' },
@@ -637,38 +652,120 @@ function equipmentPicker(gym) {
   return h('div', { class: 'stack' }, field('Start from a preset', presets, 'Then tick or untick anything below. Exercises that need no equipment are always available.'), groups);
 }
 
+/** Gym types for first-time setup (#238), simplest first; names match the server's presets. */
+const SETUP_GYMS = [
+  ['Dumbbells and a bench', 'A simple home setup. Start here if unsure.'],
+  ['Garage barbell setup', 'Barbell, rack, bench and dumbbells'],
+  ['Commercial gym', 'Machines, cables and free weights'],
+  ['Bodyweight only', 'No equipment'],
+];
+
+/**
+ * First-time setup (#238), one short step at a time: about you, where you
+ * train (with the full equipment list on its own screen), and your week.
+ * Starts simple: General Fitness, Beginner, and dumbbells and a bench.
+ * Everything can be changed later in Settings.
+ */
 function viewOnboarding() {
-  const profile = { unit: S.user.unit, goal: S.user.goal, variety: S.user.variety || 'mixed', experience: S.user.experience, minutes: S.user.minutes, split_type: S.user.split_type, training_days: S.user.training_days || [] };
-  const gym = { name: 'My gym', equipment: S.vocab.presets[0].equipment.slice(), increments: {} };
-  const name = h('input', { type: 'text', value: gym.name, maxlength: 100, required: true });
-  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Save and build my first workout');
-  return h(
-    'main',
-    { class: 'page' },
-    brandWide('small'),
-    h('h1', {}, `Welcome, ${S.user.display_name}`),
-    h('p', { class: 'muted' }, 'A few choices so the first workout fits. Everything here can be changed later in Settings.'),
-    h(
-      'form',
-      {
-        class: 'stack',
-        onsubmit: async (e) => {
-          e.preventDefault();
-          await act(async () => {
-            const g = await api.post('save_gym', { name: name.value, equipment: gym.equipment, increments: {} });
-            S.gyms = g.gyms;
-            const u = await api.post('save_profile', { ...profile, active_gym_id: g.gym.id, onboarded: true });
-            S.user = u.user;
-            S.draft = null;
-            go('today');
-          }, btn);
-        },
-      },
-      section('How you train', trainingFields(profile, (k, v) => (profile[k] = v))),
-      section('Where you train', field('Gym name', name, 'For example the name of your gym, or "Home". You can add more locations later.'), equipmentPicker(gym)),
-      btn,
-    ),
-  );
+  const profile = { unit: S.user.unit, goal: 'general', variety: S.user.variety || 'mixed', experience: 'beginner', minutes: S.user.minutes, split_type: S.user.split_type, training_days: S.user.training_days || [] };
+  const presetOf = (n) => S.vocab.presets.find((p) => p.name === n);
+  const gym = { name: 'My gym', equipment: (presetOf(SETUP_GYMS[0][0]) || S.vocab.presets[0]).equipment.slice(), increments: {} };
+  let preset = SETUP_GYMS[0][0];
+  const name = h('input', { type: 'text', name: 'gym_name', value: gym.name, maxlength: 100, required: true, oninput: (e) => (gym.name = e.target.value) });
+  const main = h('main', { class: 'page setup' });
+  const STEPS = 3;
+
+  const head = (n, title, lead) => [
+    h('div', { class: 'setup-progress' },
+      h('span', { class: 'setup-step' }, `Step ${n} of ${STEPS}`),
+      h('div', { class: 'setup-bars', 'aria-hidden': 'true' }, Array.from({ length: STEPS }, (_, k) => h('span', { class: k < n ? 'on' : '' })))),
+    h('h1', {}, title),
+    h('p', { class: 'muted' }, lead),
+  ];
+  // Back is the usual grey button; Next is outlined mint; the last step's button is solid mint.
+  const foot = (back, next, label, last = false) => h('div', { class: 'setup-foot' },
+    back && h('button', { type: 'button', class: 'btn setup-back', onclick: back }, 'Back'),
+    h('button', { type: 'button', class: `btn setup-next${last ? ' solid' : ''}`, onclick: next }, label));
+  const show = (...kids) => {
+    fill(main, ...kids);
+    window.scrollTo(0, 0);
+  };
+
+  const about = () => show(brandWide('small'), ...head(1, 'About you', `Welcome, ${S.user.display_name}. A few quick choices so the first workouts fit you. You can change all of this later in Settings.`),
+    h('div', { class: 'stack' },
+      field('Goal', goalPicker(profile.goal, (v) => (profile.goal = v))),
+      field('Training experience', choices(LEVELS, profile.experience, (v) => (profile.experience = v), { columns: 3 })),
+      field('Weight unit', choices([['lb', 'Pounds'], ['kg', 'Kilograms']], profile.unit, (v) => (profile.unit = v), { columns: 2 }))),
+    foot(null, where, 'Next'));
+
+  const where = () => {
+    const adjustCount = h('span', { class: 'muted' });
+    const sayCount = () => (adjustCount.textContent = `${gym.equipment.length} item${gym.equipment.length === 1 ? '' : 's'} ›`);
+    sayCount();
+    const err = h('p', { class: 'form-error', role: 'alert' });
+    show(brandWide('small'), ...head(2, 'Where you train', 'Pick what is closest. You can fine-tune the equipment now or later.'),
+      h('div', { class: 'stack' },
+        field('Gym name', name, 'For example the name of your gym, or "Home". You can add more locations later.'),
+        field('What do you have?', choices(SETUP_GYMS.map(([n, hint]) => [n, n, hint]), preset, (v) => {
+          preset = v;
+          gym.equipment = (presetOf(v)?.equipment || []).slice();
+          sayCount();
+        }, { columns: 1 })),
+        h('button', { type: 'button', class: 'btn block setup-adjust', onclick: equipment }, h('span', {}, 'Adjust equipment'), adjustCount),
+        err),
+      foot(about, () => {
+        if (!gym.name.trim()) {
+          err.textContent = 'Give the gym a name, for example "Home".';
+          name.focus();
+          return;
+        }
+        week();
+      }, 'Next'));
+  };
+
+  // The full checklist on its own screen. Next first scrolls to the bottom so the
+  // rest of the list is seen, then moves on.
+  const equipment = () => {
+    const atBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 8;
+    const more = h('button', { type: 'button', class: 'setup-more', onclick: () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }) }, 'More equipment below', icon('down', 16));
+    const onScroll = () => {
+      if (!main.isConnected) return window.removeEventListener('scroll', onScroll);
+      more.hidden = atBottom();
+    };
+    show(...head(2, 'Your equipment', `Started from ${preset}. Tick anything else you have.`),
+      equipmentPicker(gym, { setup: true }),
+      more,
+      foot(where, () => {
+        if (!atBottom()) {
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+          return;
+        }
+        window.removeEventListener('scroll', onScroll);
+        week();
+      }, 'Next'));
+    window.addEventListener('scroll', onScroll, { passive: true });
+    requestAnimationFrame(onScroll);
+  };
+
+  const week = () => {
+    const build = h('button', { type: 'button', class: 'btn setup-next solid', onclick: () => act(async () => {
+      const g = await api.post('save_gym', { name: gym.name.trim(), equipment: gym.equipment, increments: {} });
+      S.gyms = g.gyms;
+      const u = await api.post('save_profile', { ...profile, active_gym_id: g.gym.id, onboarded: true });
+      S.user = u.user;
+      S.draft = null;
+      go('today');
+    }, build) }, 'Build my first workout');
+    show(brandWide('small'), ...head(3, 'Your week', 'How long and how often you train.'),
+      h('div', { class: 'stack' },
+        field('Training split', choices(SPLITS, profile.split_type, (v) => (profile.split_type = v), { columns: 1 })),
+        field('Usual workout length', stepper(profile.minutes, { min: 15, max: 150, step: 5, suffix: ' min', onChange: (v) => (profile.minutes = v) })),
+        trainingDaysField(profile.training_days, (v) => (profile.training_days = v), { optional: true })),
+      h('div', { class: 'setup-foot' }, h('button', { type: 'button', class: 'btn setup-back', onclick: where }, 'Back'), build));
+  };
+
+  about();
+  return main;
 }
 
 // ---------------------------------------------------------------- today

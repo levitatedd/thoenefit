@@ -76,6 +76,16 @@ const closeRecap = async (pg) => {
   await pg.click('.sheet button:has-text("Close")');
   return text;
 };
+// Through first-time setup (#238) with its defaults: Next, Next, then Build my first workout.
+const finishSetup = async (pg) => {
+  await pg.waitForSelector('.page.setup .setup-next');
+  while (!(await pg.locator('button:has-text("Build my first workout")').count())) {
+    const step = await pg.textContent('.setup-step');
+    await pg.click('.setup-next');
+    await pg.waitForFunction((s) => document.querySelector('.setup-step')?.textContent !== s, step);
+  }
+  await pg.click('button:has-text("Build my first workout")');
+};
 const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
 console.log('Sign in and onboarding');
@@ -99,12 +109,38 @@ check('wrong password shows an error', (await page.textContent('.form-error')).i
 await shot('01-sign-in');
 await page.fill('input[name=password]', PASS);
 await page.click('button[type=submit]');
-await page.waitForSelector('text=Where you train');
-check('first sign-in opens setup', true);
+await page.waitForSelector('.page.setup');
+// Step-by-step setup (#238).
+check('first sign-in opens setup at step 1 of 3, About you, greeting the person', (await page.textContent('.setup-step')) === 'Step 1 of 3' && (await page.textContent('.page.setup h1')) === 'About you' && (await page.textContent('.page.setup')).includes(`Welcome, ${(await (await page.request.get(`${URL}api.php?a=bootstrap`)).json()).user.display_name}.`));
+check('setup starts on General Fitness and Beginner', (await page.$eval('select[aria-label=Goal]', (s) => s.value)) === 'general' && (await page.textContent('.choice[aria-pressed="true"] .choice-label')) === 'Beginner');
+check('step 1 has no Back, and Next is the outlined mint button', (await page.locator('.setup-back').count()) === 0 && (await page.$eval('.setup-next', (b) => [getComputedStyle(b).borderTopColor, getComputedStyle(b).color, b.textContent].join('|'))) === 'rgb(58, 242, 156)|rgb(58, 242, 156)|Next');
 await shot('02-setup');
+await page.click('.setup-next');
+await page.waitForSelector('.page.setup h1:has-text("Where you train")');
+check('step 2 starts on Dumbbells and a bench, with 3 items to adjust', (await page.textContent('.choice[aria-pressed="true"] .choice-label')) === 'Dumbbells and a bench' && /3 items/.test(await page.textContent('.setup-adjust')));
+check('Back is the usual grey button', (await page.$eval('.setup-back', (b) => getComputedStyle(b).borderTopColor)) === 'rgb(59, 69, 83)');
+await page.click('.choice:has-text("Garage barbell setup")');
+check('picking a gym type updates the equipment count', /6 items/.test(await page.textContent('.setup-adjust')));
+await shot('02b-setup-gym');
+await page.click('.setup-adjust');
+await page.waitForSelector('.page.setup h1:has-text("Your equipment")');
+check('Adjust equipment shows each group as a card with a count, and says there is more below', (await page.locator('.equip-card').count()) >= 4 && (await page.textContent('.equip-card .equip-count')) === '2 of 7' && (await page.isVisible('.setup-more')) && (await page.textContent('.setup-next')) === 'Next');
+await page.locator('.equip-card label', { hasText: 'Kettlebells' }).click();
+check('ticking an item updates its group count', (await page.textContent('.equip-card .equip-count')) === '3 of 7');
+await shot('02c-setup-equipment');
+await page.click('.setup-next');
+await page.waitForFunction(() => window.scrollY + innerHeight >= document.documentElement.scrollHeight - 8);
+check('Next on Your equipment first scrolls to the bottom of the list and stays there', (await page.textContent('.page.setup h1')) === 'Your equipment' && (await page.evaluate(() => scrollY)) > 0);
+await page.waitForSelector('.setup-more', { state: 'hidden' });
+await page.click('.setup-next');
+await page.waitForSelector('.page.setup h1:has-text("Your week")');
+check('then Next moves on to step 3', (await page.textContent('.setup-step')) === 'Step 3 of 3');
+check('Training days are marked Optional and none are picked', /Optional/.test(await page.textContent('.field:has(.dow-picker)')) && (await page.locator('.dow-picker .choice[aria-pressed="true"]').count()) === 0);
+check('the last button is solid mint: Build my first workout', (await page.$eval('.setup-next.solid', (b) => [getComputedStyle(b).backgroundColor, b.textContent].join('|'))) === 'rgb(58, 242, 156)|Build my first workout');
+check('no sideways scrolling in setup', (await overflow()) <= 0);
 await page.click('.choice:has-text("Push / pull / legs")');
-await page.click('.chip:has-text("Garage barbell setup")');
-await page.click('button:has-text("Save and build my first workout")');
+await shot('02d-setup-week');
+await page.click('button:has-text("Build my first workout")');
 
 console.log('Generate, lock, swap, regenerate');
 await page.waitForSelector('.plan-row');
@@ -881,8 +917,8 @@ await gp.fill('input[name=password_again]', 'my-own-password-1');
 check('no sideways scrolling on the sign-up form', (await gp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0);
 if (SHOTS) await gp.screenshot({ path: `${SHOTS}/12a-request-account.png` });
 await gp.click('button:has-text("Create account")');
-await gp.waitForSelector('text=Where you train');
-check('the right code creates the account and goes straight to setup, with no approval', (await gp.textContent('h1')).includes('New Lifter'));
+await gp.waitForSelector('.page.setup');
+check('the right code creates the account and goes straight to setup, with no approval', (await gp.textContent('.page.setup')).includes('Welcome, New Lifter.'));
 const gBoot = await gp.evaluate(async () => (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json());
 const gDenied = await gp.evaluate(async (t) => (await fetch('api.php?a=set_invite_token', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': t }, body: JSON.stringify({ token: 'hijacked-token' }) })).status, gBoot.csrf);
 check('the new account is a regular user and cannot touch the invite token', gBoot.user.role === 'user' && gDenied === 403);
@@ -903,13 +939,13 @@ await page.waitForSelector('input[name=username]');
 await page.fill('input[name=username]', newUser);
 await page.fill('input[name=password]', 'buddy-password-1');
 await page.click('button[type=submit]');
-await page.waitForSelector('text=Where you train');
-check('the new person can sign in and gets their own setup', (await page.textContent('h1')).includes('Training Buddy'));
+await page.waitForSelector('.page.setup');
+check('the new person can sign in and gets their own setup', (await page.textContent('.page.setup')).includes('Welcome, Training Buddy.'));
 const theirs = await api('bootstrap');
 const denied = await post('create_user', { username: 'sneaky', password: 'sneaky-password' }, theirs.csrf);
 const deniedList = await page.evaluate(async () => (await fetch('api.php?a=users', { credentials: 'same-origin' })).status);
 check('the server refuses account management from a regular user', theirs.user.role === 'user' && denied.status === 403 && deniedList === 403, `${denied.status} ${deniedList}`);
-await page.click('button:has-text("Save and build my first workout")');
+await finishSetup(page);
 await page.waitForSelector('.plan-row');
 await page.goto(`${URL}#/settings`);
 await page.waitForSelector('text=Add to your Home Screen');
@@ -1047,7 +1083,7 @@ check('Settings shows the app version under its title, and no longer at the bott
     check('Goal is one dropdown with all seven goals in order (#216)', opts.join() === 'Get Started,General Fitness,Reduce Bodyweight,Build Muscle,Get Stronger,Muscular Endurance,Powerlifting' && (await page.locator('.settings-main .goal-picker .choice').count()) === 0, opts.join());
     const shown = async () => [await goalSel.evaluate((s) => s.selectedOptions[0].textContent), (await page.textContent('.goal-hint')).trim()];
     const start = await shown();
-    check('an existing user sees their goal chosen, with its description underneath', (await api('bootstrap')).user.goal === 'muscle' && start[0] === 'Build Muscle' && start[1] === '6-10 reps on big lifts', JSON.stringify(start));
+    check('an existing user sees their goal chosen, with its description underneath', (await api('bootstrap')).user.goal === 'general' && start[0] === 'General Fitness' && start[1] === '8-12 reps, steady pace', JSON.stringify(start));
     await goalSel.selectOption('powerlifting');
     await page.waitForFunction(async () => (await (await fetch('api.php?a=bootstrap')).json()).user.goal === 'powerlifting');
     check('choosing a goal saves it and updates the description', JSON.stringify(await shown()) === JSON.stringify(['Powerlifting', 'Squat, bench, and deadlift']), JSON.stringify(await shown()));
@@ -1368,7 +1404,7 @@ console.log('Admin password resets and deactivation');
   };
   const status = () => cp.evaluate(async () => (await fetch('api.php?a=history', { credentials: 'same-origin' })).status);
   await signIn('crew-password-1');
-  await cp.waitForSelector('h1:has-text("Welcome")');
+  await cp.waitForSelector('.page.setup');
   check('the new account can sign in', (await status()) === 200);
 
   await page.goto(`${URL}#/settings/users`);
@@ -1389,7 +1425,7 @@ console.log('Admin password resets and deactivation');
   await cp.waitForSelector('.form-error:not(:empty)');
   check('the old password no longer works', /Wrong username or password/.test(await cp.textContent('.form-error')));
   await signIn('crew-password-2');
-  await cp.waitForSelector('h1:has-text("Welcome")');
+  await cp.waitForSelector('.page.setup');
   check('the new password works', (await status()) === 200);
 
   await row.locator('button:has-text("Deactivate")').click();
@@ -1409,7 +1445,7 @@ console.log('Admin password resets and deactivation');
   await waitForToast(page, /can sign in again/);
   check('turning it back on moves it back to Accounts', (await page.locator('.account-row', { hasText: name }).locator('button:has-text("Deactivate")').count()) === 1 && (await page.locator('[data-list=inactive] .account-row').count()) === 0);
   await signIn('crew-password-2');
-  await cp.waitForSelector('h1:has-text("Welcome")');
+  await cp.waitForSelector('.page.setup');
   check('a turned-back-on account signs in with the same password', (await status()) === 200);
   check('no sideways scrolling on Manage users', (await overflow()) <= 0);
   await cctx.close();
@@ -1428,7 +1464,7 @@ console.log("Seeing each other's history");
   await vp.fill('input[name=username]', viewerName);
   await vp.fill('input[name=password]', 'viewer-password-1');
   await vp.click('button[type=submit]');
-  await vp.waitForSelector('h1:has-text("Welcome")');
+  await vp.waitForSelector('.page.setup');
   await vp.evaluate(async () => {
     const b = await (await fetch('api.php?a=bootstrap', { credentials: 'same-origin' })).json();
     await fetch('api.php?a=save_profile', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': b.csrf }, body: JSON.stringify({ onboarded: true }) });
