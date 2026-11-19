@@ -26,11 +26,17 @@ first, then becomes available to guides.
 
 ## The rig: `standing-side-v1`
 
-Standing figure seen from its right side, facing right (towards +x).
+Standing figure seen from its right side, facing right (towards +x). It is
+drawn as a mint mannequin: tapered limbs with a slight muscle curve, ball joints
+at the shoulder, elbow, knee and ankle, a chest, waist and hip block that lean
+together with `torso`, an egg-shaped head on a short neck, shaped feet, and a
+closed fist on whatever is held. The far leg is drawn a little behind and darker.
+All of it is worked out from the joint positions, so poses never need to know
+about the drawing.
 
 | | |
 | --- | --- |
-| viewBox | `48 42 160 190` (x, y, width, height) |
+| viewBox | `44 30 168 202` (x, y, width, height) |
 | ground | y = 224 |
 | hip (root of the figure) | (118, 132) |
 | lengths | torso 54, neck 9, upper arm 34, forearm 30, thigh 44, shin 44, foot 20 |
