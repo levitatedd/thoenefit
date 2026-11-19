@@ -47,7 +47,7 @@ final class Api
         $this->routines = new Routines($app->db);
         $this->strava = new Strava($app->db, $app->config);
         $this->feedback = new Feedback($app->db, $app->config);
-        $this->guideReviews = new GuideReviews($app->db);
+        $this->guideReviews = new GuideReviews($app->db, null, $app->config);
     }
 
     private static function json($data, int $status = 200): void
@@ -249,6 +249,10 @@ final class Api
             case 'review_guide':
                 self::json($this->guideReviews->decide($user, (string) ($in['slug'] ?? ''), (string) ($in['revision'] ?? ''),
                     (string) ($in['decision'] ?? ''), (string) ($in['note'] ?? ''), (string) ($in['pose'] ?? '')));
+                return;
+            case 'flag_guide':
+                $this->guideReviews->flag($user, (string) ($in['slug'] ?? ''), (string) ($in['reason'] ?? ''), (string) ($in['pose'] ?? ''), (string) ($in['note'] ?? ''));
+                self::json(['ok' => true]);
                 return;
             case 'reopen_guide':
                 self::json($this->guideReviews->reopen($user, (string) ($in['slug'] ?? '')));

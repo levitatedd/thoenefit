@@ -1423,7 +1423,7 @@ let guideCount = 0;
  * when scrolled away, hidden or closed, and stays still for people who ask for
  * reduced motion (they can still press Play, and it steps without moving).
  */
-function guidePlayer(g) {
+function guidePlayer(g, { flag = true } = {}) {
   const id = `guide${++guideCount}`;
   const rig = rigOf(g);
   const poses = g.poses;
@@ -1476,7 +1476,8 @@ function guidePlayer(g) {
       h('button', { type: 'button', class: 'btn ghost guide-step guide-next', 'aria-label': 'Next pose', onclick: () => go(i + 1) }, 'Next', icon('back', 18))),
     status,
     desc,
-    thumbRow);
+    thumbRow,
+    flag && g.exercise && flagGuide(g, () => poses[i].id));
   // Gone from the page (a sheet closed, another screen opened): stop for good.
   const gone = () => seen && !card.isConnected;
   const frame = (now) => {
@@ -1538,6 +1539,54 @@ function guidePlayer(g) {
   still();
   paint();
   return card;
+}
+
+const FLAG_REASONS = [['position', 'Body position looks wrong'], ['equipment', 'Wrong grip or equipment'], ['unclear', 'Too fast or hard to follow'], ['other', 'Something else']];
+
+/**
+ * "Something look off?" under a movement guide (#282): anyone can say what looks
+ * wrong, and the guide goes back in the admin's review queue. Opens in place,
+ * so it works inside a sheet too.
+ */
+function flagGuide(g, currentPose) {
+  const box = h('div', { class: 'guide-flag' });
+  let reason = '';
+  const closed = () => fill(box, h('button', { type: 'button', class: 'btn ghost guide-flag-open', onclick: open }, 'Something look off?'));
+  function open() {
+    reason = '';
+    const choices = FLAG_REASONS.map(([k, label]) => h('button', { type: 'button', class: 'choice', 'aria-pressed': 'false', 'data-reason': k, onclick: () => {
+      reason = k;
+      error.textContent = '';
+      choices.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.reason === k)));
+    } }, label));
+    const pose = h('select', { name: 'flag_pose', 'aria-label': 'Which pose' }, h('option', { value: '' }, 'The whole movement'),
+      g.poses.map((p) => h('option', { value: p.id, selected: p.id === currentPose() }, p.label)));
+    const note = h('textarea', { name: 'flag_note', rows: 3, maxlength: 500, placeholder: 'Optional: what would look right?' });
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const send = h('button', { type: 'button', class: 'btn mint', onclick: async () => {
+      error.textContent = '';
+      if (!reason) {
+        error.textContent = 'Choose what looks wrong.';
+        return;
+      }
+      send.disabled = true;
+      try {
+        await api.post('flag_guide', { slug: g.exercise, reason, pose: pose.value, note: note.value });
+        fill(box, h('p', { class: 'guide-flag-done', role: 'status' }, 'Thanks. The admin will take a look at this guide.'));
+      } catch (e) {
+        error.textContent = e.offline ? 'This needs a connection. Try again when you are back online.' : e.message;
+        send.disabled = false;
+      }
+    } }, 'Send');
+    fill(box, h('div', { class: 'stack guide-flag-form', role: 'group', 'aria-label': 'Flag this movement guide' },
+      h('h4', {}, 'What looks wrong?'),
+      h('div', { class: 'guide-flag-reasons' }, choices),
+      field('Pose', pose), field('Note', note), error,
+      h('div', { class: 'review-actions' }, send, h('button', { type: 'button', class: 'btn ghost', onclick: closed }, 'Cancel'))));
+    choices[0].focus();
+  }
+  closed();
+  return box;
 }
 
 function dayLabel(d) {
@@ -3860,7 +3909,8 @@ function viewGuideReview() {
     const label = d.decision === 'reopened' ? 'Reopened' : REVIEW_STATUS[d.decision];
     return h('li', { class: 'review-note' },
       h('span', { class: `status-pill ${d.decision}` }, label),
-      h('span', { class: 'log-meta' }, [pose && `Pose: ${pose}`, d.reviewer, when(d.at), d.revision !== g.revision && 'earlier version'].filter(Boolean).join(' · ')),
+      h('span', { class: 'log-meta' }, [pose && `Pose: ${pose}`, d.reviewer, when(d.at), d.revision !== g.revision && 'earlier version'].filter(Boolean).join(' · '),
+        d.issue_url && [' · ', h('a', { href: d.issue_url, target: '_blank', rel: 'noopener' }, `#${d.issue_number}`)]),
       d.note && h('p', { class: 'review-note-text' }, d.note));
   };
   const pending = () => data.guides.filter((g) => g.status === 'pending');
@@ -3876,6 +3926,7 @@ function viewGuideReview() {
       h('span', { class: 'log-title' }, g.name),
       h('span', { class: 'log-meta' }, [data.batches[g.batch], g.status === 'pending' && g.history.length ? 'Updated since last review' : '', g.status !== 'pending' && g.decision && `${g.decision.reviewer}, ${when(g.decision.at)}`].filter(Boolean).join(' · ')),
       g.status !== 'pending' && h('span', { class: `status-pill ${g.status}` }, REVIEW_STATUS[g.status]),
+      g.open_flags > 0 && h('span', { class: 'status-pill flagged' }, `Flagged by users (${g.open_flags})`),
       h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('back', 20))));
   const reviewOf = (g) => {
     const note = h('textarea', { name: 'review_note', rows: 4, maxlength: 2000, placeholder: 'What should change? Required for Needs revision.' });
@@ -3883,7 +3934,7 @@ function viewGuideReview() {
     const error = h('p', { class: 'form-error', role: 'alert' });
     const playerSlot = h('div', { class: 'guide-slot' }, h('p', { class: 'muted pad' }, 'Loading the guide'));
     fetch(`guides/${g.file}?r=${g.revision}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error('missing'))))
-      .then((guide) => playerSlot.replaceChildren(guidePlayer(guide)), () => playerSlot.replaceChildren(h('p', { class: 'muted' }, 'This guide could not be loaded.')));
+      .then((guide) => playerSlot.replaceChildren(guidePlayer(guide, { flag: false })), () => playerSlot.replaceChildren(h('p', { class: 'muted' }, 'This guide could not be loaded.')));
     const save = async (decision, button) => {
       error.textContent = '';
       if (decision === 'revise' && !note.value.trim()) {
@@ -3916,6 +3967,13 @@ function viewGuideReview() {
       h('p', { class: 'muted small' }, `${data.batches[g.batch]} · version ${g.revision}`),
       g.cues && section('Form cues', h('p', { class: 'cues' }, g.cues)),
       playerSlot,
+      g.flags.length > 0 && section(`Flags from people using the app${g.open_flags ? ` (${g.open_flags} new)` : ''}`, h('ul', { class: 'log review-history review-flags' }, g.flags.map((f) => {
+        const pose = f.pose && (g.poses.find((p) => p.id === f.pose)?.label || f.pose);
+        return h('li', { class: 'review-note' },
+          h('span', { class: `status-pill ${f.open ? 'flagged' : 'closed'}` }, data.reasons[f.reason] || f.reason),
+          h('span', { class: 'log-meta' }, [pose && `Pose: ${pose}`, f.by, when(f.at), f.revision !== g.revision ? 'earlier version' : !f.open && 'resolved'].filter(Boolean).join(' · ')),
+          f.note && h('p', { class: 'review-note-text' }, f.note));
+      }))),
       g.history.length > 0 && section('Earlier feedback', h('ul', { class: 'log review-history' }, g.history.map((d) => decisionLine(d, g)))),
       section(g.status === 'pending' ? 'Your decision' : 'Change the decision',
         h('div', { class: 'stack' }, field('Pose', pose, 'Optional: the pose the note is about.'), field('Note', note), error,

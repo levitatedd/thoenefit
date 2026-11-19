@@ -17,14 +17,28 @@ final class GuideReviews
 {
     public const DECISIONS = ['good', 'revise'];
     public const MAX_NOTE = 2000;
+    /** Why someone flags a guide (#282). */
+    public const REASONS = ['position' => 'Body position looks wrong', 'equipment' => 'Wrong grip or equipment', 'unclear' => 'Too fast or hard to follow', 'other' => 'Something else'];
+    public const MAX_FLAG_NOTE = 500;
+    public const FLAGS_PER_DAY = 5;
     /** The common-lift batch (#261) from docs/movement-guide-inventory.md. */
     private const COMMON = ['barbell-bench-press', 'dumbbell-bench-press', 'overhead-press', 'lat-pulldown', 'one-arm-dumbbell-row', 'seated-cable-row',
         'barbell-curl', 'hammer-curl', 'back-squat', 'goblet-squat', 'deadlift', 'dumbbell-rdl'];
     public const BATCHES = ['pilot' => 'Pilot (#259)', 'common' => 'Common lifts (#261)', 'strength' => 'Strength (#262)', 'bodyweight' => 'Bodyweight, stretch and cardio (#263)'];
 
-    public function __construct(private Db $db, private ?string $dir = null)
+    /** Needs revision issues are filed under this one: Create reviewed movement guides. */
+    public const PARENT_ISSUE = 261;
+    private string $token;
+    private string $repo;
+    private \Closure $http;
+
+    public function __construct(private Db $db, private ?string $dir = null, array $config = [], ?\Closure $http = null)
     {
         $this->dir ??= dirname(__DIR__, 2) . '/guides';
+        $gh = $config['github'] ?? [];
+        $this->token = trim((string) ($gh['token'] ?? ''));
+        $this->repo = trim((string) ($gh['repo'] ?? 'levitatedd/thoenefit'));
+        $this->http = $http ?? Feedback::request(...);
     }
 
     /** Each listed guide that exists, by slug: file, revision, title and pose ids. */
@@ -62,12 +76,21 @@ final class GuideReviews
                 $ex[$e['slug']] = $e;
             }
             $rows = $this->db->all("SELECT r.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS reviewer FROM guide_reviews r LEFT JOIN users u ON u.id = r.reviewer_id WHERE r.slug IN ($in) ORDER BY r.id DESC", $slugs);
+            $flagRows = $this->db->all("SELECT f.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS person FROM guide_flags f LEFT JOIN users u ON u.id = f.user_id WHERE f.slug IN ($in) ORDER BY f.id DESC", $slugs);
+        }
+        $flags = [];
+        foreach ($flagRows ?? [] as $f) {
+            $flags[$f['slug']][] = [
+                'id' => (int) $f['id'], 'revision' => $f['revision'], 'reason' => $f['reason'], 'pose' => $f['pose'] ?: null,
+                'note' => (string) ($f['note'] ?? ''), 'by' => (string) ($f['person'] ?? 'Someone'), 'at' => $f['created_at'],
+            ];
         }
         $history = [];
         foreach ($rows as $r) {
             $history[$r['slug']][] = [
                 'id' => (int) $r['id'], 'revision' => $r['revision'], 'decision' => $r['decision'], 'pose' => $r['pose'] ?: null,
                 'note' => (string) ($r['note'] ?? ''), 'reviewer' => (string) ($r['reviewer'] ?? 'Someone'), 'at' => $r['created_at'],
+                'issue_number' => isset($r['issue_number']) ? (int) $r['issue_number'] : null, 'issue_url' => $r['issue_url'] ?? null,
             ];
         }
         $counts = ['pending' => 0, 'good' => 0, 'revise' => 0];
@@ -75,7 +98,12 @@ final class GuideReviews
         foreach ($guides as $slug => $g) {
             $h = $history[$slug] ?? [];
             $latest = $h[0] ?? null;
-            $status = $latest && $latest['revision'] === $g['revision'] && in_array($latest['decision'], self::DECISIONS, true) ? $latest['decision'] : 'pending';
+            $decided = $latest && $latest['revision'] === $g['revision'] && in_array($latest['decision'], self::DECISIONS, true);
+            // A flag on this revision since the last decision (or reopen) is open, and puts the guide back in the queue.
+            $since = $latest && $latest['revision'] === $g['revision'] ? $latest['at'] : '';
+            $f = array_map(fn($x) => $x + ['open' => $x['revision'] === $g['revision'] && $x['at'] > $since], $flags[$slug] ?? []);
+            $open = count(array_filter($f, fn($x) => $x['open']));
+            $status = $decided && !$open ? $latest['decision'] : 'pending';
             $counts[$status]++;
             $e = $ex[$slug] ?? null;
             $out[] = $g + [
@@ -86,9 +114,11 @@ final class GuideReviews
                 'status' => $status,
                 'decision' => $status === 'pending' ? null : $latest,
                 'history' => $h,
+                'flags' => $f,
+                'open_flags' => $open,
             ];
         }
-        return ['guides' => $out, 'counts' => $counts, 'batches' => self::BATCHES];
+        return ['guides' => $out, 'counts' => $counts, 'batches' => self::BATCHES, 'reasons' => self::REASONS];
     }
 
     public static function batch(string $slug, string $kind): string
@@ -126,10 +156,13 @@ final class GuideReviews
         if ($pose !== '' && !in_array($pose, array_column($g['poses'], 'id'), true)) {
             throw new HttpError(422, 'That pose is not in this guide.');
         }
-        $this->db->insert('guide_reviews', [
+        $id = $this->db->insert('guide_reviews', [
             'slug' => $slug, 'revision' => $revision, 'decision' => $decision, 'pose' => $pose !== '' ? $pose : null,
             'note' => $note !== '' ? $note : null, 'reviewer_id' => (int) $admin['id'], 'created_at' => now_utc(),
         ]);
+        if ($decision === 'revise') {
+            $this->fileIssue($id, $slug, $g, $note, $pose);
+        }
         return $this->queue();
     }
 
@@ -146,5 +179,83 @@ final class GuideReviews
             'reviewer_id' => (int) $admin['id'], 'created_at' => now_utc(),
         ]);
         return $this->queue();
+    }
+
+    /**
+     * Anyone signed in can flag the guide they are looking at (#282). It is saved
+     * against the current revision and shows in the admin's queue; it never
+     * changes what anyone sees.
+     */
+    public function flag(array $user, string $slug, string $reason, string $pose, string $note, ?int $now = null): void
+    {
+        $now ??= time();
+        $g = $this->guides()[$slug] ?? null;
+        if (!$g) {
+            throw new HttpError(404, 'There is no guide for that exercise.');
+        }
+        if (!isset(self::REASONS[$reason])) {
+            throw new HttpError(422, 'Choose what looks wrong.');
+        }
+        if ($pose !== '' && !in_array($pose, array_column($g['poses'], 'id'), true)) {
+            throw new HttpError(422, 'That pose is not in this guide.');
+        }
+        $note = trim($note);
+        if (mb_strlen($note) > self::MAX_FLAG_NOTE) {
+            throw new HttpError(422, 'Keep the note under ' . self::MAX_FLAG_NOTE . ' characters.');
+        }
+        $today = (int) $this->db->val('SELECT COUNT(*) FROM guide_flags WHERE user_id=? AND created_at>=?', [(int) $user['id'], now_utc($now - 86400)]);
+        if ($today >= self::FLAGS_PER_DAY) {
+            throw new HttpError(429, 'Thanks, that is plenty for today. Try again tomorrow.');
+        }
+        $this->db->insert('guide_flags', [
+            'slug' => $slug, 'revision' => $g['revision'], 'reason' => $reason, 'pose' => $pose !== '' ? $pose : null,
+            'note' => $note !== '' ? $note : null, 'user_id' => (int) $user['id'], 'created_at' => now_utc($now),
+        ]);
+    }
+
+    /**
+     * Needs revision becomes a GitHub issue (a sub-issue of #261), so the fix
+     * lands in the backlog for whoever authors the poses. The repository is
+     * public: the issue names the guide and carries the admin's note, never a
+     * person. If GitHub can't be reached the decision is still saved.
+     */
+    private function fileIssue(int $id, string $slug, array $g, string $note, string $pose): void
+    {
+        if ($this->token === '') {
+            return;
+        }
+        $name = (string) ($this->db->val('SELECT name FROM exercises WHERE user_id IS NULL AND slug=?', [$slug]) ?: $g['title']);
+        $poseLabel = 'The whole guide';
+        foreach ($g['poses'] as $p) {
+            if ($p['id'] === $pose) {
+                $poseLabel = "{$p['label']} (`{$p['id']}`)";
+            }
+        }
+        $quoted = implode("\n", array_map(fn($l) => '> ' . $l, explode("\n", str_replace("\r\n", "\n", $note))));
+        $body = "Marked **Needs revision** in the app's movement guide review (#277).\n\n"
+            . "- Exercise: {$name} (`{$slug}`)\n- Guide file: `web/guides/{$g['file']}`\n- Version reviewed: `{$g['revision']}`\n- Pose: {$poseLabel}\n\n"
+            . "## What should change\n\n{$quoted}\n\n"
+            . "## Approach\n\n- Update the poses in `web/guides/{$g['file']}` following `docs/movement-guides.md`.\n"
+            . "- Run `node tests/guides.test.mjs` and `node docs/guides/render-previews.mjs`, and check the sheet.\n"
+            . "- Once the changed file is on fit-test, the guide returns to the review queue by itself.\n\n"
+            . "**Done when:** the admin marks the new version Good in the review queue.\n\n"
+            . 'Follow-up to #' . self::PARENT_ISSUE . '. Tracked in #1.';
+        try {
+            [$status, $issue] = ($this->http)('POST', "https://api.github.com/repos/{$this->repo}/issues", $this->token, [
+                'title' => "Revise the {$name} movement guide",
+                'body' => $body,
+                'labels' => ['bug'],
+            ]);
+            if ($status !== 201 || !isset($issue['number'])) {
+                error_log('ThoeneFit guide review: GitHub answered ' . $status);
+                return;
+            }
+            $this->db->update('guide_reviews', ['issue_number' => (int) $issue['number'], 'issue_url' => mb_substr((string) ($issue['html_url'] ?? ''), 0, 200)], 'id=?', [$id]);
+            if (isset($issue['id'])) {
+                ($this->http)('POST', "https://api.github.com/repos/{$this->repo}/issues/" . self::PARENT_ISSUE . '/sub_issues', $this->token, ['sub_issue_id' => (int) $issue['id']]);
+            }
+        } catch (\Throwable $e) {
+            error_log('ThoeneFit guide review: ' . $e->getMessage());
+        }
     }
 }
