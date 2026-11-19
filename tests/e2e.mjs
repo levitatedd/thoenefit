@@ -973,6 +973,13 @@ check('a regular user has no Manage users link', (await page.locator('a:has-text
 await page.goto(`${URL}#/settings/users`);
 await page.waitForSelector('text=Only the admin');
 check('and opening the page directly shows nothing', (await page.locator('input[name=new_username]').count()) === 0);
+{
+  const reviews = await page.evaluate(async () => (await fetch('api.php?a=guide_reviews', { credentials: 'same-origin' })).status);
+  const decide = await post('review_guide', { slug: 'dumbbell-curl', revision: 'x', decision: 'good' }, theirs.csrf);
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Add to your Home Screen');
+  check('a regular user has no movement guide review, and the server refuses it (#277)', reviews === 403 && decide.status === 403 && (await page.locator('a:has-text("Movement guide review")').count()) === 0, `${reviews} ${decide.status}`);
+}
 await page.goto(`${URL}#/settings`);
 await page.click('button:has-text("Sign out")');
 await page.waitForSelector('input[name=username]');
@@ -1648,6 +1655,71 @@ console.log('Squat, bench press and row guides in the real player (#261)');
     }
   }
   await page.setViewportSize({ width: 402, height: 874 });
+}
+
+console.log('Movement guide review for the admin (#277)');
+{
+  const { readFileSync } = await import('node:fs');
+  const listed = Object.keys(JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8')).guides).length;
+  const counts = () => page.$$eval('.review-count', (els) => Object.fromEntries(els.map((e) => [e.dataset.count, Number(e.querySelector('strong').textContent)])));
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/settings`);
+  await page.click('a:has-text("Movement guide review")');
+  await page.waitForSelector('[data-list=review-queue]');
+  let c = await counts();
+  check(`the queue lists every guide as pending at first (${listed})`, c.pending === listed && c.good === 0 && c.revise === 0 && (await page.locator('[data-list=review-queue] li').count()) === listed, JSON.stringify(c));
+  await page.fill('.page input[type=search]', 'goblet');
+  check('the queue can be searched', (await page.locator('[data-list=review-queue] li').count()) === 1);
+  await page.fill('.page input[type=search]', '');
+  await page.selectOption('.filters select', 'common');
+  check('and filtered by batch', (await page.locator('[data-list=review-queue] li').count()) === listed - 1);
+  await page.selectOption('.filters select', '');
+  await page.click('[data-list=review-queue] li:first-child button');
+  await page.waitForSelector('.guide .guide-figure');
+  const first = await page.textContent('.review-title h2');
+  check('a guide opens in place with its written cues and the same player people see', (await page.locator('.cues').count()) === 1 && (await page.locator('.guide-thumb').count()) >= 1 && (await page.locator('.guide-step').count()) === 2);
+  await page.click('.guide-next');
+  check('its poses can be stepped through', /^2 \//.test(await page.textContent('.guide-status')));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/49-guide-review.png`, fullPage: true });
+  await page.click('.review-actions button:has-text("Needs revision")');
+  check('Needs revision without a note is stopped with a message, and nothing is saved', /Say what should change/.test(await page.textContent('.form-error')) && (await counts()).revise === 0);
+  const poseId = await page.$eval('select[name=review_pose] option:nth-child(2)', (o) => o.value);
+  await page.selectOption('select[name=review_pose]', poseId);
+  await page.fill('textarea[name=review_note]', 'The arrow covers the hand.');
+  await page.click('.review-actions button:has-text("Needs revision")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, first);
+  c = await counts();
+  check('saving moves straight on to the next pending guide and takes this one out of the queue', c.revise === 1 && c.pending === listed - 1, JSON.stringify(c));
+  const second = await page.textContent('.review-title h2');
+  await page.click('.review-actions button:has-text("Mark good")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);
+  await page.reload();
+  await page.waitForSelector('[data-list=review-queue]');
+  c = await counts();
+  check('decisions are still there after a reload', c.good === 1 && c.revise === 1 && c.pending === listed - 2 && (await page.locator('[data-list=review-queue] li').count()) === listed - 2, JSON.stringify(c));
+  await page.click('.review-tabs button:has-text("History")');
+  await page.waitForSelector('[data-list=review-history]');
+  check('the history keeps both decisions', (await page.locator('[data-list=review-history] li').count()) === 2);
+  await page.selectOption('.filters select', 'revise');
+  check('and filters by decision', (await page.locator('[data-list=review-history] li').count()) === 1);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/49b-guide-review-history.png` });
+  await page.click('[data-list=review-history] li button');
+  await page.waitForSelector('.review-history');
+  check('the note and pose are shown on the guide when it is opened again', /The arrow covers the hand\./.test(await page.textContent('.review-history')) && /Pose:/.test(await page.textContent('.review-history')));
+  await page.click('button:has-text("Reopen for review")');
+  await page.waitForSelector('[data-list=review-queue]');
+  c = await counts();
+  check('reopening puts it back in the queue', c.revise === 0 && c.pending === listed - 1, JSON.stringify(c));
+  await page.click(`[data-list=review-queue] li button:has-text("${first}")`);
+  await page.waitForSelector('.review-history');
+  check('with its earlier feedback still shown', /The arrow covers the hand\./.test(await page.textContent('.review-history')) && /Reopened/.test(await page.textContent('.review-history')));
+  for (const [w, hgt] of [[320, 640], [402, 874]]) {
+    await page.setViewportSize({ width: w, height: hgt });
+    await page.waitForTimeout(200);
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    const small = await page.$$eval('.review-actions button, .review-back', (els) => els.filter((e) => e.getBoundingClientRect().height < 44).length);
+    check(`the review screen fits at ${w}px with 44px buttons`, wide <= 0 && small === 0, `${wide} ${small}`);
+  }
 }
 
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
