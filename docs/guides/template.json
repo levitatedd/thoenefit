@@ -1,0 +1,39 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "built-in-exercise-slug",
+  "title": "Exercise name, sentence case",
+  "rig": "standing-side-v1",
+  "camera": "Side view, figure facing right",
+  "equipment": ["dumbbell-v1"],
+  "timing": { "move_ms": 1100, "hold_ms": 650 },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "One sentence on what to do in this position, matching the written cue.",
+      "hold_ms": 900,
+      "joints": { "torso": 0, "shoulder": 0, "elbow": 0, "supination": 0 },
+      "arrow": null
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "One sentence for this position.",
+      "joints": { "torso": 0, "shoulder": 0, "elbow": 120, "supination": 1 },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "YYYY-MM-DD",
+    "checked_by": "Who checked the poses",
+    "checks": ["What was compared against the references: setup, grip, joint paths, range."],
+    "references": ["https://a reputable source for this exercise"],
+    "limitations": ["Anything the simplified figure does not show."]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

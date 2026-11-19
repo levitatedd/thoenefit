@@ -120,6 +120,25 @@ check('stability ball and medicine ball exercises no longer count as bodyweight-
 check('the Commercial gym preset includes the new gear', !array_diff(['medicine_ball', 'stability_ball', 'decline_bench', 'preacher_bench', 'biceps_machine', 'triceps_machine', 'ab_crunch', 'rotary_torso', 'hip_abduction', 'glute_kickback', 'back_extension_machine'], Catalog::presets()[0]['equipment']));
 check('machines with a checkbox can be suggested where they fit; ones with no slot still cannot', $shapes['machine-biceps-curl']['pattern'] === 'biceps' && $shapes['machine-triceps-dip']['pattern'] === 'triceps' && $shapes['ab-crunch-machine']['pattern'] === 'core' && $shapes['hip-adductor-machine']['pattern'] === 'other' && $shapes['partner-medicine-ball-twist']['pattern'] === 'other');
 
+require __DIR__ . "/form-cues-upgrade.php";
+
+// Migrations 033 then 034, as production gets them (#254, #265): the Bulgarian Split Squat
+// moves to a dumbbell pair and the clearer cue, and nobody's edited cue is overwritten.
+$mDb = $freshDb('m033');
+Migrator::ensure($mDb, 32);
+$bOld = 'Rest your back foot on the bench and hop your front foot forward. Drop your back knee straight down, lean slightly forward, and stand through your front heel. Count reps per side.';
+$mDb->run("UPDATE exercises SET equipment=?, cues=? WHERE slug='bulgarian-split-squat' AND user_id IS NULL", [json_encode(['single_dumbbell', 'bench']), $bOld]);
+$mDb->run("UPDATE exercises SET cues='Our own goblet squat notes.' WHERE slug='goblet-squat' AND user_id IS NULL");
+Migrator::ensure($mDb);
+$bss = $mDb->one("SELECT equipment, cues FROM exercises WHERE slug='bulgarian-split-squat' AND user_id IS NULL");
+$bNew = array_values(array_filter(Catalog::exercises(), static fn($e) => $e[0] === 'bulgarian-split-squat'))[0][8];
+check('033 then 034 give the Bulgarian Split Squat a dumbbell pair and the clearer cue', json_decode($bss['equipment'], true) === ['dumbbells', 'bench'] && $bss['cues'] === $bNew, $bss['cues']);
+check('033 does not overwrite a built-in cue someone edited', $mDb->val("SELECT cues FROM exercises WHERE slug='goblet-squat' AND user_id IS NULL") === 'Our own goblet squat notes.');
+unset($mDb);
+foreach (['', '-wal', '-shm'] as $sfx) {
+    @unlink("$file-m033$sfx");
+}
+
 echo "Accounts\n";
 $auth = new Auth($db, []);
 $uid = $auth->createUser('Mike', 'correct horse battery', 'Mike');
@@ -1558,6 +1577,14 @@ $rd2 = $doc($rg, 'push', [[$bench, 6, 10, [[135, 10], [135, 10], [135, 10]]]], $
 $wk->save($ru, $rd2);
 $rb2 = $gen->block($ruser, $rg, $exById[$bench]);
 check('an unrated latest session uses the usual rules, not an older rating', $rb2['previous']['reps_left'] === null && $rb2['suggested_weight'] === 140.0, json_encode([$rb2['suggested_weight'], $rb2['previous']['reps_left'] ?? 'x']));
+
+echo "Bulgarian split squat needs a pair (#254)\n";
+$bss = $db->one("SELECT id, equipment FROM exercises WHERE slug='bulgarian-split-squat' AND user_id IS NULL");
+check('the Bulgarian Split Squat asks for a dumbbell pair and a bench, not a single dumbbell', json_decode($bss['equipment'], true) === ['dumbbells', 'bench']);
+$oneDb = $mkGym($uid, 'One dumbbell', ['single_dumbbell', 'bench']);
+$pairGym = $mkGym($uid, 'A pair', ['dumbbells', 'bench']);
+$avail = fn(array $g) => array_column(array_filter(Catalog::forUser($db, $uid), static fn($e) => Catalog::supports($e, $g['equipment'])), 'id');
+check('a gym with one dumbbell no longer gets it; a gym with a pair does', !in_array((int) $bss['id'], $avail($oneDb), true) && in_array((int) $bss['id'], $avail($pairGym), true));
 
 echo "Stalled lifts (#124)\n";
 $su = $auth->createUser('staller', 'staller long password');

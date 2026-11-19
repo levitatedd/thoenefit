@@ -1,0 +1,7 @@
+{
+  "format": "thoenefit-movement-guides-index",
+  "version": 1,
+  "guides": {
+    "dumbbell-curl": "dumbbell-curl.json"
+  }
+}

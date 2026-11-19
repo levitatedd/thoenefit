@@ -2617,3 +2617,133 @@ button.setup-note {
 .setup-more[hidden] {
   display: none;
 }
+
+/* ---- Shared workout waiting: a count on the Workout tab (#257) ------------ */
+.tab .tab-icon {
+  position: relative;
+}
+
+.tab-badge {
+  position: absolute;
+  top: -6px;
+  left: calc(50% + 9px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--mint);
+  color: var(--ink);
+  font: 700 11px/18px var(--body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* ---- Movement guides (#256, pilot #259) ---------------------------------- */
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.guide-head h3 {
+  color: var(--mint);
+  font: 700 19px/1.2 var(--display);
+}
+
+.guide-stage {
+  display: flex;
+  justify-content: center;
+}
+
+.guide-stage .guide-figure {
+  display: block;
+  width: 100%;
+  height: clamp(190px, 58vw, 290px);
+}
+
+.guide-controls {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-step {
+  min-height: 48px;
+  padding: 0 8px;
+  color: var(--chalk);
+}
+
+.guide-step:first-child {
+  justify-self: start;
+}
+
+.guide-next {
+  justify-self: end;
+}
+
+.guide-next .icon {
+  transform: rotate(180deg);
+}
+
+.guide-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.guide-play:focus-visible,
+.guide-thumb:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.guide-status {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.guide-desc {
+  min-height: 2.9em; /* two lines, so the card doesn't jump as poses change */
+  color: var(--chalk);
+  font-size: 15px;
+  text-align: center;
+}
+
+.guide-thumbs {
+  display: grid; /* one column per pose, set by the player */
+  gap: 8px;
+}
+
+.choice.guide-thumb {
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 2px 8px;
+  text-align: center;
+}
+
+.guide-thumb-art .guide-figure {
+  display: block;
+  width: 100%;
+  height: 64px;
+}
+
+.guide-thumb-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
