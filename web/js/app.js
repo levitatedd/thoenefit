@@ -2723,9 +2723,8 @@ async function shareWorkoutSheet(workout, recap) {
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   fill(actions,
     canShare && h('button', { class: 'btn primary block', type: 'button', onclick: async () => {
-      // Named after the workout itself (#255), e.g. "Push workout, Nov 18".
-      const title = `${dayLabel(workout.day_type)} workout, ${fmtDate(workout.started_at, { month: 'short', day: 'numeric' })}`;
-      try { await navigator.share({ files: [file], title }); } catch (e) { /* cancelled */ }
+      // Only the image (#255): no title or text, which some apps would send as a message alongside it.
+      try { await navigator.share({ files: [file] }); } catch (e) { /* cancelled */ }
     } }, icon('share', 18), 'Share'),
     h('a', { class: `btn block${canShare ? '' : ' primary'}`, href: canvas.toDataURL('image/png'), download: name }, 'Save image'),
     h('p', { class: 'muted small center' }, 'Only your lifts and the date are on the image.'));

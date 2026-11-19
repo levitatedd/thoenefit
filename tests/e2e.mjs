@@ -1877,7 +1877,7 @@ console.log('Workout recap and records (#123)');
   check('no sideways scrolling on the recap', (await overflow()) <= 0);
   await shot('37-history-recap');
   // Share as an image (#160): drawn on the phone when asked, released on close.
-  // #255: the phone's share sheet gets the workout's own name, not "My ThoeneFit workout".
+  // #255: the phone's share sheet gets just the image, no "My ThoeneFit workout" or any other text.
   await page.evaluate(() => {
     navigator.canShare = () => true;
     navigator.share = (d) => { window.__shared = d; return Promise.resolve(); };
@@ -1885,8 +1885,8 @@ console.log('Workout recap and records (#123)');
   await page.click('.recap ~ button:has-text("Share workout"), button:has-text("Share workout")');
   await page.waitForSelector('.sheet canvas.share-card');
   await page.click('.sheet button:has-text("Share")');
-  const sharedTitle = await page.evaluate(() => window.__shared && window.__shared.title);
-  check('sharing the image names it after the workout and its date', /^[A-Z][a-z]+( [a-z]+)? workout, [A-Z][a-z]{2} \d{1,2}$/.test(sharedTitle || '') && !/ThoeneFit/.test(sharedTitle), sharedTitle);
+  const shared = await page.evaluate(() => window.__shared && { keys: Object.keys(window.__shared).sort().join(), files: window.__shared.files.length, type: window.__shared.files[0].type });
+  check('sharing sends only the image, with no title or text', shared && shared.keys === 'files' && shared.files === 1 && shared.type === 'image/png', JSON.stringify(shared));
   const shareCard = await page.$eval('.sheet canvas.share-card', (cv) => ({ w: cv.width, h: cv.height, data: cv.toDataURL('image/png') }));
   const save = await page.$eval('.sheet a:has-text("Save image")', (a) => [a.getAttribute('download'), a.getAttribute('href').slice(0, 22)]);
   check('Share workout draws a phone-width PNG of the workout', shareCard.w === 1080 && shareCard.h > 900 && shareCard.data.startsWith('data:image/png'), `${shareCard.w}x${shareCard.h}`);
