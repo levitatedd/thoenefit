@@ -122,6 +122,23 @@ check('machines with a checkbox can be suggested where they fit; ones with no sl
 
 require __DIR__ . "/form-cues-upgrade.php";
 
+// Migrations 033 then 034, as production gets them (#254, #265): the Bulgarian Split Squat
+// moves to a dumbbell pair and the clearer cue, and nobody's edited cue is overwritten.
+$mDb = $freshDb('m033');
+Migrator::ensure($mDb, 32);
+$bOld = 'Rest your back foot on the bench and hop your front foot forward. Drop your back knee straight down, lean slightly forward, and stand through your front heel. Count reps per side.';
+$mDb->run("UPDATE exercises SET equipment=?, cues=? WHERE slug='bulgarian-split-squat' AND user_id IS NULL", [json_encode(['single_dumbbell', 'bench']), $bOld]);
+$mDb->run("UPDATE exercises SET cues='Our own goblet squat notes.' WHERE slug='goblet-squat' AND user_id IS NULL");
+Migrator::ensure($mDb);
+$bss = $mDb->one("SELECT equipment, cues FROM exercises WHERE slug='bulgarian-split-squat' AND user_id IS NULL");
+$bNew = array_values(array_filter(Catalog::exercises(), static fn($e) => $e[0] === 'bulgarian-split-squat'))[0][8];
+check('033 then 034 give the Bulgarian Split Squat a dumbbell pair and the clearer cue', json_decode($bss['equipment'], true) === ['dumbbells', 'bench'] && $bss['cues'] === $bNew, $bss['cues']);
+check('033 does not overwrite a built-in cue someone edited', $mDb->val("SELECT cues FROM exercises WHERE slug='goblet-squat' AND user_id IS NULL") === 'Our own goblet squat notes.');
+unset($mDb);
+foreach (['', '-wal', '-shm'] as $sfx) {
+    @unlink("$file-m033$sfx");
+}
+
 echo "Accounts\n";
 $auth = new Auth($db, []);
 $uid = $auth->createUser('Mike', 'correct horse battery', 'Mike');
