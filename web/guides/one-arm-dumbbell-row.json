@@ -1,0 +1,83 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "one-arm-dumbbell-row",
+  "title": "One-arm dumbbell row",
+  "rig": "hinge-bench-side-v1",
+  "camera": "side-three-quarter",
+  "equipment": [
+    "flat-bench-v1",
+    "dumbbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1100,
+    "hold_ms": 600
+  },
+  "poses": [
+    {
+      "id": "reach",
+      "label": "Reach",
+      "description": "Brace one hand and the same-side knee on the bench, plant your other foot, and let the dumbbell hang from your free hand.",
+      "hold_ms": 900,
+      "joints": {
+        "torso": 76,
+        "shoulder": 2,
+        "elbow": 2
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "pull",
+      "label": "Pull",
+      "joints": {
+        "torso": 76,
+        "shoulder": -24,
+        "elbow": 48.800000000000004
+      },
+      "arrow": "up",
+      "description": "Drive your working elbow back, keeping your torso steady."
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Bring the dumbbell toward your hip without twisting your torso.",
+      "joints": {
+        "torso": 76,
+        "shoulder": -48,
+        "elbow": 92
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "return",
+      "label": "Return",
+      "joints": {
+        "torso": 76,
+        "shoulder": -22,
+        "elbow": 45.199999999999996
+      },
+      "arrow": "down",
+      "description": "Lower until your arm straightens, then repeat on the other side after your set."
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-19",
+    "checked_by": "Codex",
+    "checks": [
+      "Compared the supported setup and controlled return with Mayo Clinic. Used the ThoeneFit cue for the hip-directed path and fixed torso.",
+      "Validated joint ranges, equipment anchors, contact and framing through the complete loop."
+    ],
+    "references": [
+      "https://www.mayoclinic.org/healthy-lifestyle/fitness/multimedia/bent-over-row/vid-20084680"
+    ],
+    "limitations": [
+      "The loop demonstrates one side. The written cue covers switching sides.",
+      "Fit-test playback and screen-size review are pending integration."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
