@@ -1830,9 +1830,9 @@ select.trends-range {
   overflow: hidden;
   border: 1px solid var(--mint);
   border-radius: 14px;
-  background: rgba(22, 27, 34, 0.9);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  background: rgba(22, 27, 34, 0.78);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   color: var(--chalk);
   font-weight: 600;
@@ -1893,6 +1893,21 @@ body:has(.rest:not([hidden])) .toast {
 
 .toast.bad {
   border-color: var(--red);
+}
+
+/* "ThoeneFit has received an update!" (#279): two centred lines, no icon. */
+.toast.update {
+  justify-content: center;
+  text-align: center;
+}
+
+.toast.update > .icon {
+  display: none;
+}
+
+.toast.update .toast-text {
+  flex: none;
+  white-space: pre-line;
 }
 
 .toast.bad > .icon {
