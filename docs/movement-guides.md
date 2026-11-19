@@ -24,6 +24,19 @@ Asset creators write **JSON only**: no SVG drawing, no images. New equipment or 
 new rig (for example lying on a bench) is added to `web/js/guides.js` by Claude
 first, then becomes available to guides.
 
+## Rigs at a glance
+
+| rig | for | camera | equipment | sample to start from |
+| --- | --- | --- | --- | --- |
+| `standing-side-v1` | standing, arms only | free text | `dumbbell-v1` | `web/guides/dumbbell-curl.json` |
+| `grounded-side-v1` | standing, both feet planted (squats, standing holds) | `side` | `dumbbell-goblet-v1` or `dumbbell-v1` | `docs/guides/samples/goblet-squat.json` |
+| `supine-bench-v1` | lying face up on a flat bench, feet on the floor | `front-three-quarter` | `flat-bench-v1`, `dumbbell-pair-v1` | `docs/guides/samples/dumbbell-bench-press.json` |
+| `hinge-bench-side-v1` | hinged over a bench, braced on one hand and knee | `side-three-quarter` | `flat-bench-v1`, `dumbbell-v1` | `docs/guides/samples/one-arm-dumbbell-row.json` |
+
+All four draw the same mint mannequin with the same limb lengths. The sample
+files are **rig samples, not final poses**: they prove contacts, grips and fit.
+Copy the one for your setup, then write the real poses against the references.
+
 ## The rig: `standing-side-v1`
 
 Standing figure seen from its right side, facing right (towards +x). It is
@@ -62,14 +75,103 @@ equipment.
 | --- | --- |
 | `dumbbell-v1` | A dumbbell in the near hand, handle square to the forearm. At `supination` 0 the handle is side on (a plate at each end); at 1 it is end on (one round plate); it turns smoothly between. |
 
+## Shared-figure rigs (#261)
+
+The three newer rigs pose the figure in 3D and draw it through a fixed camera.
+Things that touch the floor or a bench are **contacts**: fixed points that the
+legs or arms are solved to reach, so they stay put while everything else moves,
+at every pose and every frame between poses. The checks fail a guide whose
+contact drifts more than 0.05 units or whose figure or equipment leaves the
+picture at any point in the loop.
+
+World units: x forward (the figure faces +x, or its head is at −x when lying
+down), y up from the floor (y = 0), z towards the camera. Lengths are the same as
+the pilot: torso 54, neck 9, upper arm 34, forearm 30, thigh 44, shin 44, foot 20;
+shoulders 26 apart, hips 14 apart.
+
+### Cameras
+
+A point (x, y, z) is drawn at screen (origin x + x + z·kx, origin y − y + z·ky).
+The camera is fixed per rig; `camera` in the guide must be its id.
+
+| id | kx | ky | what it shows |
+| --- | --- | --- | --- |
+| `side` | 0.35 | 0.22 | Right side, a touch from above so a goblet dumbbell's plates show |
+| `front-three-quarter` | 0.36 | 0.26 | From the feet end and above, so both arms of a lying figure show |
+| `side-three-quarter` | −0.32 | 0.38 | From the near side and above, so the bench and both braced limbs show |
+
+### `grounded-side-v1`
+
+Standing, facing right. Built up from the ankles at (0, 4, ±7), which never move.
+viewBox `44 40 168 196`, origin (118, 224). Arrows sit 24 units behind the hips.
+
+| joint | meaning | allowed | default |
+| --- | --- | --- | --- |
+| `shin` | shin lean from straight up; positive brings the knees forward | -10 to 45 | 0 |
+| `knee` | bend; 0 is a straight leg. The thigh's angle is `shin − knee`, so bending sends the hips back and down | 0 to 150 | 0 |
+| `torso` | lean from straight up; positive leans forward | -10 to 70 | 0 |
+| `shoulder` | upper arm from the line of the torso; positive forward | -40 to 160 | 0 |
+| `elbow` | bend; 0 is a straight arm | 0 to 160 | 0 |
+| `supination` | `dumbbell-v1` grip turn: 0 palm facing the thigh, 1 palm up | 0 to 1 | 0 |
+
+Arm angles follow the torso, so a hold at the chest stays at the chest as the
+torso leans. Contacts: near and far foot on the floor.
+
+### `supine-bench-v1`
+
+Lying face up on a flat bench, head to the left, feet planted. Hips at (0, 49, 0),
+shoulders 54 to the left; legs are solved to the feet at (44, 4, ±9). Each arm is
+posed on its own with a `near_` or `far_` joint. viewBox `18 70 240 166`, origin
+(150, 222). Arrows sit beside the near hand.
+
+| joint | meaning | allowed | default |
+| --- | --- | --- | --- |
+| `near_shoulder`, `far_shoulder` | upper arm from pointing straight up (0) out to the side (90 is level with the bench) | 0 to 95 | 0 |
+| `near_elbow`, `far_elbow` | bend; 0 is a straight arm. With elbow equal to shoulder the forearm is vertical | 0 to 130 | 0 |
+| `near_tuck`, `far_tuck` | upper arm swung from square to the body towards the hips | 0 to 70 | 0 |
+
+Contacts: back and hips on the bench, near and far foot on the floor.
+
+### `hinge-bench-side-v1`
+
+Braced on a flat bench, facing right: far knee on the bench at (−4, 47.5, −9),
+far hand on the bench at (52, 47, −14), near foot on the floor at (−4, 4, 13). The
+near leg and the far arm are solved to reach them; the near arm works. viewBox
+`14 80 184 156`, origin (104, 222). Arrows sit beside the near hand.
+
+| joint | meaning | allowed | default |
+| --- | --- | --- | --- |
+| `torso` | lean from straight up; 90 would be flat | 60 to 88 | 75 |
+| `shoulder` | near upper arm from straight down (not from the torso); positive towards the head, negative back towards the hip | -90 to 60 | 0 |
+| `elbow` | bend; 0 is a straight arm | 0 to 150 | 0 |
+
+Below a torso of about 68 the far hand can't reach the bench, and the checks say
+so. Contacts: far knee and far hand on the bench, near foot on the floor.
+
+### Equipment and anchors
+
+| id | rigs | where it sits |
+| --- | --- | --- |
+| `dumbbell-v1` | `standing-side-v1`, `grounded-side-v1`, `hinge-bench-side-v1` | Centred on the near hand. Standing: handle square to the forearm and turned by `supination`. Hinge rig: neutral grip, handle along x (front to back). |
+| `dumbbell-goblet-v1` | `grounded-side-v1` | One dumbbell held upright at the chest by both hands: the forearms angle in so the hands meet, and the dumbbell's centre is the middle of the hands + (3, −10, 0). |
+| `dumbbell-pair-v1` | `supine-bench-v1` | One dumbbell in each hand, handle along z (across the body), each moving only with its own arm. |
+| `flat-bench-v1` | `supine-bench-v1`, `hinge-bench-side-v1` | Fixed. Supine: x −118 to 16, z −13 to 13, pad top 39. Hinge: x −62 to 64, z −27 to 3, pad top 44. 7-unit pad on two legs. |
+
+The weights are always placed from the hand in the same frame, so they can't lag
+or float; the checks confirm the gap is 0.
+
 ## The guide file
 
-Copy `docs/guides/template.json`. Fields:
+Copy the sample for your rig (see **Rigs at a glance**), or
+`docs/guides/template.json` and delete its `_help` block, which lists every rig,
+camera, equipment id and joint range (the checks report a guide that still has
+it). Fields:
 
 - `format`: always `"thoenefit-movement-guide"`. `version`: 1.
 - `exercise`: the built-in slug from `web/private/src/Catalog.php`, for example `dumbbell-curl`.
 - `title`: the exercise name in sentence case, shown under "Show movement".
-- `rig`, `camera`, `equipment`: as above.
+- `rig`, `camera`, `equipment`: as above. On the shared-figure rigs `camera` must
+  be the rig's camera id and `equipment` lists only ids that rig supports.
 - `timing`: `move_ms` (time to move between poses, 300 to 3000) and `hold_ms`
   (pause on each pose, 200 to 3000). A pose can set its own `hold_ms`.
 - `poses`: 1 to 6, in order. The player loops back from the last to the first,
@@ -79,8 +181,9 @@ Copy `docs/guides/template.json`. Fields:
   - `description`: one sentence, at most 160 characters, agreeing with the
     exercise's written cue. Screen readers read it, and it shows under the figure.
   - `joints`: the angles above.
-  - `arrow`: `"up"`, `"down"` or `null`, a curved arrow at the hand showing the
-    direction of the next movement.
+  - `arrow`: `"up"`, `"down"` or `null`, showing the direction of the next
+    movement: curved at the hand on `standing-side-v1`, straight beside the
+    rig's arrow point on the others.
 - `review`: `status` (`draft`, then `pilot-checked` or `reviewed`), `checked`
   (date), `checked_by`, `checks` (what was compared), `references` (at least one
   reputable source), `limitations`.
@@ -94,9 +197,14 @@ Then add the exercise to `web/guides/index.json`.
 1. Run `node tests/guides.test.mjs`. It checks the format, that the slug exists,
    joint limits, labels and descriptions, the review record, that limbs keep
    their length through the whole loop, and that the SVG has no inline styles
-   (the site's security policy blocks them).
+   (the site's security policy blocks them). On the shared-figure rigs it also
+   checks contacts, that weights stay in the hands, and that everything fits the
+   picture, at each pose and 9 frames between each pair. Files in
+   `docs/guides/samples/` are checked the same way.
 2. Run `node docs/guides/render-previews.mjs` and look at
-   `docs/guides/<exercise>/sheet.svg`: every pose side by side.
+   `docs/guides/<exercise>/sheet.svg`: every pose side by side. Samples go to
+   `docs/guides/samples/<exercise>/`. To preview only some files, pass them:
+   `node docs/guides/render-previews.mjs docs/guides/samples/goblet-squat.json`.
 3. Compare each pose with the references: setup and stance, grip, which joints
    move and which stay fixed, range at the top and bottom, and the path of the
    weight. Write what you checked in `review.checks`.
@@ -136,7 +244,8 @@ Generated pictures are never the authority on form; the references are.
 
 | | |
 | --- | --- |
-| Guides | 1 (`dumbbell-curl`, pilot) |
+| Guides | 5 (`dumbbell-curl` pilot; `goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`, `hammer-curl`) |
+| Rig samples (not shown in the app) | 3 (`goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`) |
 | Built-in exercises | see `node tests/guides.test.mjs` (it counts them) |
 
 The full inventory and batches come next (#260). Don't call the library complete

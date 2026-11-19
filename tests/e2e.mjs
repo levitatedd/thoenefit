@@ -290,6 +290,11 @@ check('the exercise picker tolerates typos but only offers what the gym has (no 
 await page.fill('.sheet input[type=search]', 'pushup');
 check('no stray text in the picker', !/\b(false|undefined|null)\b/.test(await page.textContent('.sheet-body')));
 check('picker: "pushup" puts Push-Up first', (await page.textContent('.sheet .pick .pick-name')) === 'Push-Up');
+{
+  const head = await page.waitForSelector('.sheet .list-head', { timeout: 3000 }).catch(() => null);
+  const mint = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--mint').trim());
+  check('picker: the Similar exercises heading is mint (#269)', head && (await head.evaluate((e) => getComputedStyle(e).color)) === 'rgb(58, 242, 156)' && mint === '#3af29c');
+}
 await shot('05a-picker');
 await page.click('.sheet button:has-text("Close")');
 await page.click('.lift:nth-of-type(2) button:has-text("Add set")');
@@ -718,6 +723,8 @@ const found = await page.$$eval('[data-list=matches] .log-title', (els) => els.m
 const alike = await page.$$eval('[data-list=similar] .log-title', (els) => els.map((e) => e.textContent));
 check(`a misspelled search still finds the exercise ("psuh up" -> ${found[0]})`, found[0] === 'Push-Up' && found.slice(1).every((n) => /Push-Up/.test(n)), found.join(', '));
 check('related movements appear under Similar exercises without repeating a match', alike.length > 0 && !alike.some((n) => found.includes(n)) && (await page.textContent('.list-head')) === 'Similar exercises', alike.join(', '));
+check('exercise library: the Similar exercises heading is mint (#269)', (await page.$eval('.list-head', (e) => getComputedStyle(e).color)) === 'rgb(58, 242, 156)');
+await shot('22a-similar-mint');
 check('no stray text in the results', !/\b(false|undefined|null)\b/.test(await page.textContent('.page')));
 await page.fill('input[type=search]', 'RDL');
 check('"RDL" finds Romanian deadlifts', (await page.$$eval('[data-list=matches] .log-title', (els) => els.every((e) => /Romanian Deadlift/.test(e.textContent)))) === true);
@@ -973,6 +980,13 @@ check('a regular user has no Manage users link', (await page.locator('a:has-text
 await page.goto(`${URL}#/settings/users`);
 await page.waitForSelector('text=Only the admin');
 check('and opening the page directly shows nothing', (await page.locator('input[name=new_username]').count()) === 0);
+{
+  const reviews = await page.evaluate(async () => (await fetch('api.php?a=guide_reviews', { credentials: 'same-origin' })).status);
+  const decide = await post('review_guide', { slug: 'dumbbell-curl', revision: 'x', decision: 'good' }, theirs.csrf);
+  await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('text=Add to your Home Screen');
+  check('a regular user has no movement guide review, and the server refuses it (#277)', reviews === 403 && decide.status === 403 && (await page.locator('a:has-text("Movement guide review")').count()) === 0, `${reviews} ${decide.status}`);
+}
 await page.goto(`${URL}#/settings`);
 await page.click('button:has-text("Sign out")');
 await page.waitForSelector('input[name=username]');
@@ -1612,6 +1626,138 @@ console.log('Movement guide: dumbbell curl pilot (#259)');
   await page.click('button:has-text("Discard workout")');
   await page.click('.sheet button:has-text("Discard workout")');
   await page.waitForSelector('.plan-row');
+}
+
+console.log('Squat, bench press and row guides in the real player (#261)');
+{
+  // Every guide on the shared-figure rigs, straight from the app's guide list.
+  const { readFileSync } = await import('node:fs');
+  const read = (f) => readFileSync(new globalThis.URL(`../web/guides/${f}`, import.meta.url), 'utf8');
+  const listed = JSON.parse(read('index.json')).guides;
+  const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([k]) => k !== 'dumbbell-curl'));
+  check('the goblet squat, dumbbell bench press, one-arm row and hammer curl have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row', 'hammer-curl'].every((k) => samples[k]));
+  const boot = await api('bootstrap');
+  for (const slug of Object.keys(samples)) {
+    const ex = boot.exercises.find((e) => e.slug === slug);
+    await page.goto(`${URL}#/exercises/${ex.id}`);
+    await page.reload();
+    await page.waitForSelector('.guide .guide-figure');
+    await page.evaluate(() => document.querySelector('.guide').scrollIntoView({ block: 'center' }));
+    const before = await page.textContent('.guide-status');
+    const n = (await page.locator('.guide-thumb').count());
+    await page.waitForFunction((b) => document.querySelector('.guide-status').textContent !== b, before, { timeout: 8000 });
+    check(`${ex.name} plays in the player (${n} poses)`, n === JSON.parse(samples[slug]).poses.length);
+    for (const [w, h] of [[320, 640], [402, 874]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(250);
+      const fit = await page.evaluate(() => {
+        const svg = document.querySelector('.guide-stage svg');
+        const box = svg.getBoundingClientRect();
+        const art = svg.getBBox();
+        const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(' ').map(Number);
+        return { scroll: document.documentElement.scrollWidth - innerWidth, stageW: Math.round(box.width), inside: art.x >= vx - 0.5 && art.y >= vy - 0.5 && art.x + art.width <= vx + vw + 0.5 && art.y + art.height <= vy + vh + 0.5, controls: [...document.querySelectorAll('.guide-play, .guide-step, .guide-thumb')].every((e) => Math.min(e.getBoundingClientRect().width, e.getBoundingClientRect().height) >= 44) };
+      });
+      check(`${ex.name} fits at ${w}px: drawing inside its frame, controls 44px, no sideways scroll`, fit.scroll <= 0 && fit.inside && fit.controls, JSON.stringify(fit));
+      if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-guide-${slug}.png` });
+    }
+  }
+  await page.setViewportSize({ width: 402, height: 874 });
+}
+
+console.log('Movement guide review for the admin (#277)');
+{
+  const { readFileSync } = await import('node:fs');
+  const listed = Object.keys(JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8')).guides).length;
+  const counts = () => page.$$eval('.review-count', (els) => Object.fromEntries(els.map((e) => [e.dataset.count, Number(e.querySelector('strong').textContent)])));
+  await page.setViewportSize({ width: 402, height: 874 });
+  await page.goto(`${URL}#/settings`);
+  await page.click('a:has-text("Movement guide review")');
+  await page.waitForSelector('[data-list=review-queue]');
+  let c = await counts();
+  check(`the queue lists every guide as pending at first (${listed})`, c.pending === listed && c.good === 0 && c.revise === 0 && (await page.locator('[data-list=review-queue] li').count()) === listed, JSON.stringify(c));
+  await page.fill('.page input[type=search]', 'goblet');
+  check('the queue can be searched', (await page.locator('[data-list=review-queue] li').count()) === 1);
+  await page.fill('.page input[type=search]', '');
+  await page.selectOption('.filters select', 'common');
+  check('and filtered by batch', (await page.locator('[data-list=review-queue] li').count()) === listed - 1);
+  await page.selectOption('.filters select', '');
+  await page.click('[data-list=review-queue] li:first-child button');
+  await page.waitForSelector('.guide .guide-figure');
+  const first = await page.textContent('.review-title h2');
+  check('a guide opens in place with its written cues and the same player people see', (await page.locator('.cues').count()) === 1 && (await page.locator('.guide-thumb').count()) >= 1 && (await page.locator('.guide-step').count()) === 2);
+  await page.click('.guide-next');
+  check('its poses can be stepped through', /^2 \//.test(await page.textContent('.guide-status')));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/49-guide-review.png`, fullPage: true });
+  await page.click('.review-actions button:has-text("Needs revision")');
+  check('Needs revision without a note is stopped with a message, and nothing is saved', /Say what should change/.test(await page.textContent('.form-error')) && (await counts()).revise === 0);
+  const poseId = await page.$eval('select[name=review_pose] option:nth-child(2)', (o) => o.value);
+  await page.selectOption('select[name=review_pose]', poseId);
+  await page.fill('textarea[name=review_note]', 'The arrow covers the hand.');
+  await page.click('.review-actions button:has-text("Needs revision")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, first);
+  c = await counts();
+  check('saving moves straight on to the next pending guide and takes this one out of the queue', c.revise === 1 && c.pending === listed - 1, JSON.stringify(c));
+  const second = await page.textContent('.review-title h2');
+  await page.click('.review-actions button:has-text("Mark good")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);
+  await page.reload();
+  await page.waitForSelector('[data-list=review-queue]');
+  c = await counts();
+  check('decisions are still there after a reload', c.good === 1 && c.revise === 1 && c.pending === listed - 2 && (await page.locator('[data-list=review-queue] li').count()) === listed - 2, JSON.stringify(c));
+  await page.click('.review-tabs button:has-text("History")');
+  await page.waitForSelector('[data-list=review-history]');
+  check('the history keeps both decisions', (await page.locator('[data-list=review-history] li').count()) === 2);
+  await page.selectOption('.filters select', 'revise');
+  check('and filters by decision', (await page.locator('[data-list=review-history] li').count()) === 1);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/49b-guide-review-history.png` });
+  await page.click('[data-list=review-history] li button');
+  await page.waitForSelector('.review-history');
+  check('the note and pose are shown on the guide when it is opened again', /The arrow covers the hand\./.test(await page.textContent('.review-history')) && /Pose:/.test(await page.textContent('.review-history')));
+  await page.click('button:has-text("Reopen for review")');
+  await page.waitForSelector('[data-list=review-queue]');
+  c = await counts();
+  check('reopening puts it back in the queue', c.revise === 0 && c.pending === listed - 1, JSON.stringify(c));
+  await page.click(`[data-list=review-queue] li button:has-text("${first}")`);
+  await page.waitForSelector('.review-history');
+  check('with its earlier feedback still shown', /The arrow covers the hand\./.test(await page.textContent('.review-history')) && /Reopened/.test(await page.textContent('.review-history')));
+  for (const [w, hgt] of [[320, 640], [402, 874]]) {
+    await page.setViewportSize({ width: w, height: hgt });
+    await page.waitForTimeout(200);
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    const small = await page.$$eval('.review-actions button, .review-back', (els) => els.filter((e) => e.getBoundingClientRect().height < 44).length);
+    check(`the review screen fits at ${w}px with 44px buttons`, wide <= 0 && small === 0, `${wide} ${small}`);
+  }
+  check('the review player has no flag link of its own', (await page.locator('.guide-flag-open').count()) === 0);
+
+  console.log('Flagging a guide that looks wrong (#282)');
+  const boot = await api('bootstrap');
+  const ex = boot.exercises.find((e) => e.name === second);
+  await page.goto(`${URL}#/exercises/${ex.id}`);
+  await page.waitForSelector('.guide .guide-figure');
+  await page.click('.guide-flag-open');
+  await page.click('.guide-flag-form button:has-text("Send")');
+  check('a flag needs a reason before it is sent', /Choose what looks wrong/.test(await page.textContent('.guide-flag-form .form-error')));
+  await page.click('.guide-flag-reasons button[data-reason=position]');
+  await page.selectOption('select[name=flag_pose]', { index: 1 });
+  await page.fill('textarea[name=flag_note]', 'The knees look too far forward.');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/50-guide-flag.png` });
+  const wideFlag = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  await page.click('.guide-flag-form button:has-text("Send")');
+  await page.waitForSelector('.guide-flag-done');
+  check('anyone can flag a guide from the exercise page and gets a thank-you', /Thanks/.test(await page.textContent('.guide-flag-done')) && wideFlag <= 0);
+  await page.goto(`${URL}#/settings/guides`);
+  await page.waitForSelector('[data-list=review-queue]');
+  const flaggedRow = page.locator(`[data-list=review-queue] li:has-text("${second}")`);
+  check('the flagged guide goes back in the review queue, marked as flagged', (await flaggedRow.count()) === 1 && /Flagged by users \(1\)/.test(await flaggedRow.textContent()));
+  await flaggedRow.locator('button').click();
+  await page.waitForSelector('.review-flags');
+  check('the review screen shows the reason, pose and note', /Body position looks wrong/.test(await page.textContent('.review-flags')) && /The knees look too far forward\./.test(await page.textContent('.review-flags')) && /Pose:/.test(await page.textContent('.review-flags')));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/50b-guide-flag-review.png`, fullPage: true });
+  await page.click('.review-actions button:has-text("Mark good")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);
+  await page.reload();
+  await page.waitForSelector('[data-list=review-queue]');
+  check('deciding again resolves the flag and takes it out of the queue', (await page.locator(`[data-list=review-queue] li:has-text("${second}")`).count()) === 0);
 }
 
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,

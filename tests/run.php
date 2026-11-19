@@ -741,6 +741,87 @@ check('it can be shared again with someone who already trained from it', count($
 $db->run('UPDATE workout_shares SET updated_at=? WHERE id=?', [TF\now_utc(time() - 25 * 3600), $third]);
 check('a share nobody answers lapses after a day', $sh->incoming($uid3) === [] && array_column($sh->outgoing($uid, $key), 'status', 'name')['third'] === 'expired');
 
+echo "Movement guide review queue (#277)\n";
+$gr_gdir = sys_get_temp_dir() . '/tf-guides-' . getmypid();
+@mkdir($gr_gdir);
+$gr_guide = fn(string $slug, array $poses) => json_encode(['exercise' => $slug, 'title' => $slug, 'poses' => array_map(fn($p) => ['id' => $p, 'label' => ucfirst($p)], $poses)]);
+file_put_contents("$gr_gdir/dumbbell-curl.json", $gr_guide('dumbbell-curl', ['setup', 'top']));
+file_put_contents("$gr_gdir/goblet-squat.json", $gr_guide('goblet-squat', ['upright', 'bottom']));
+file_put_contents("$gr_gdir/index.json", json_encode(['guides' => ['dumbbell-curl' => 'dumbbell-curl.json', 'goblet-squat' => 'goblet-squat.json', 'push-up' => 'missing.json']]));
+$gr_gr = new \TF\GuideReviews($db, $gr_gdir);
+$gr_q = $gr_gr->queue();
+$gr_bySlug = fn($gr_q) => array_column($gr_q['guides'], null, 'slug');
+check('the queue lists guides that exist, all pending at first, never an exercise without a guide', array_keys($gr_bySlug($gr_q)) === ['dumbbell-curl', 'goblet-squat'] && $gr_q['counts'] === ['pending' => 2, 'good' => 0, 'revise' => 0]);
+check('each guide carries its exercise name, written cues and batch', $gr_bySlug($gr_q)['goblet-squat']['name'] === 'Dumbbell Goblet Squat' && $gr_bySlug($gr_q)['goblet-squat']['cues'] !== '' && $gr_bySlug($gr_q)['goblet-squat']['batch'] === 'common' && $gr_bySlug($gr_q)['dumbbell-curl']['batch'] === 'pilot');
+$gr_rev = $gr_bySlug($gr_q)['goblet-squat']['revision'];
+check('only the admin can see or decide', throws(fn() => $gr_gr->decide($samRow, 'goblet-squat', $gr_rev, 'good', '', ''), 403) && throws(fn() => $gr_gr->reopen($samRow, 'goblet-squat'), 403));
+check('Needs revision needs a note', throws(fn() => $gr_gr->decide($adminRow, 'goblet-squat', $gr_rev, 'revise', '  ', 'bottom'), 422));
+check('a pose that is not in the guide is refused', throws(fn() => $gr_gr->decide($adminRow, 'goblet-squat', $gr_rev, 'revise', 'Deeper', 'lift'), 422));
+check('an unknown decision or a guide that does not exist is refused', throws(fn() => $gr_gr->decide($adminRow, 'goblet-squat', $gr_rev, 'maybe', '', ''), 422) && throws(fn() => $gr_gr->decide($adminRow, 'push-up', 'x', 'good', '', ''), 404));
+check('a decision for an old revision is refused', throws(fn() => $gr_gr->decide($adminRow, 'goblet-squat', 'abc', 'good', '', ''), 409));
+$gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_rev, 'revise', 'Go deeper at the bottom.', 'bottom');
+$gr_sq = $gr_bySlug($gr_q)['goblet-squat'];
+check('Needs revision is saved with the note, pose, admin and time, and the guide leaves the queue', $gr_sq['status'] === 'revise' && $gr_sq['decision']['note'] === 'Go deeper at the bottom.' && $gr_sq['decision']['pose'] === 'bottom' && $gr_sq['decision']['reviewer'] === 'Mike' && $gr_sq['decision']['at'] !== '' && $gr_q['counts'] === ['pending' => 1, 'good' => 0, 'revise' => 1]);
+$gr_q = $gr_gr->decide($adminRow, 'dumbbell-curl', $gr_bySlug($gr_q)['dumbbell-curl']['revision'], 'good', '', '');
+check('Mark good needs no note', $gr_bySlug($gr_q)['dumbbell-curl']['status'] === 'good' && $gr_q['counts']['pending'] === 0);
+$gr_q = $gr_gr->decide($adminRow, 'dumbbell-curl', $gr_bySlug($gr_q)['dumbbell-curl']['revision'], 'revise', 'Arrow overlaps the hand.', '');
+check('a saved decision can be corrected, keeping the earlier one in the history', $gr_bySlug($gr_q)['dumbbell-curl']['status'] === 'revise' && count($gr_bySlug($gr_q)['dumbbell-curl']['history']) === 2);
+check('decisions survive a fresh load', $gr_bySlug((new \TF\GuideReviews($db, $gr_gdir))->queue())['goblet-squat']['status'] === 'revise');
+file_put_contents("$gr_gdir/goblet-squat.json", $gr_guide('goblet-squat', ['upright', 'lower', 'bottom']));
+$gr_q = $gr_gr->queue();
+$gr_sq = $gr_bySlug($gr_q)['goblet-squat'];
+check('a new revision of the guide puts it back in the queue with its earlier feedback', $gr_sq['status'] === 'pending' && $gr_sq['revision'] !== $gr_rev && $gr_sq['history'][0]['note'] === 'Go deeper at the bottom.' && $gr_sq['decision'] === null);
+$gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_sq['revision'], 'good', 'Depth fixed.', '');
+$gr_q = $gr_gr->reopen($adminRow, 'goblet-squat');
+$gr_sq = $gr_bySlug($gr_q)['goblet-squat'];
+check('reopening puts a reviewed guide back in the queue and keeps every decision', $gr_sq['status'] === 'pending' && count($gr_sq['history']) === 3 && $gr_sq['history'][0]['decision'] === 'reopened');
+echo "People flagging a guide (#282)\n";
+$gr_flagged = fn() => $gr_bySlug($gr_gr->queue())['goblet-squat'];
+$gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_flagged()['revision'], 'good', '', '');
+check('before any flag the guide is reviewed and out of the queue', $gr_flagged()['status'] === 'good' && $gr_flagged()['open_flags'] === 0);
+check('a flag needs a known reason, and a pose from the guide if one is given', throws(fn() => $gr_gr->flag($samRow, 'goblet-squat', 'ugly', '', ''), 422) && throws(fn() => $gr_gr->flag($samRow, 'goblet-squat', 'position', 'nope', ''), 422) && throws(fn() => $gr_gr->flag($samRow, 'push-up', 'position', '', ''), 404));
+$gr_gr->flag($samRow, 'goblet-squat', 'position', 'bottom', 'Heels look like they lift.', time() + 2);
+$gr_f = $gr_flagged();
+check('anyone signed in can flag a guide, and it goes back in the admin queue with the details', $gr_f['status'] === 'pending' && $gr_f['open_flags'] === 1 && $gr_f['flags'][0]['reason'] === 'position' && $gr_f['flags'][0]['pose'] === 'bottom' && $gr_f['flags'][0]['note'] === 'Heels look like they lift.' && $gr_f['flags'][0]['by'] === 'sam');
+check('a flag changes nothing else: the decision history is untouched', $gr_f['history'][0]['decision'] === 'good');
+for ($gr_i = 0; $gr_i < 4; $gr_i++) {
+    $gr_gr->flag($samRow, 'dumbbell-curl', 'unclear', '', '', time() - 60);
+}
+check('one person can send only a few flags a day', throws(fn() => $gr_gr->flag($samRow, 'dumbbell-curl', 'other', '', ''), 429) && throws(fn() => $gr_gr->flag($samRow, 'dumbbell-curl', 'other', '', '', time() + 86400 - 120), 429));
+$gr_gr->flag($samRow, 'dumbbell-curl', 'other', '', '', time() + 86400 + 120);
+check('and can flag again the next day', count($gr_bySlug($gr_gr->queue())['dumbbell-curl']['flags']) === 5);
+sleep(3);
+$gr_gr->decide($adminRow, 'goblet-squat', $gr_f['revision'], 'revise', 'Keep the heels down.', 'bottom');
+$gr_f = $gr_flagged();
+check('the admin deciding resolves the flags for that version and keeps them', $gr_f['status'] === 'revise' && $gr_f['open_flags'] === 0 && count($gr_f['flags']) === 1 && $gr_f['flags'][0]['open'] === false);
+file_put_contents("$gr_gdir/goblet-squat.json", $gr_guide('goblet-squat', ['upright', 'bottom']));
+$gr_f = $gr_flagged();
+check('a new version keeps earlier flags in its history without counting them as open', $gr_f['status'] === 'pending' && $gr_f['open_flags'] === 0 && count($gr_f['flags']) === 1);
+echo "Needs revision opens a GitHub issue (#282)\n";
+$gr_calls = [];
+$gr_http = function (string $method, string $url, string $token, ?array $json) use (&$gr_calls) {
+    $gr_calls[] = [$method, $url, $json];
+    return str_ends_with($url, '/issues') ? [201, ['number' => 901, 'id' => 77001, 'html_url' => 'https://github.com/levitatedd/thoenefit/issues/901']] : [201, []];
+};
+$gr_gh = new \TF\GuideReviews($db, $gr_gdir, ['github' => ['token' => 't', 'repo' => 'levitatedd/thoenefit']], $gr_http);
+$gr_r = $gr_bySlug($gr_gh->queue())['goblet-squat']['revision'];
+$gr_q = $gr_gh->decide($adminRow, 'goblet-squat', $gr_r, 'revise', "Heels lift at the bottom.\nKeep them down.", 'bottom');
+$gr_issue = $gr_calls[0][2] ?? [];
+check('Needs revision files a bug issue naming the exercise, file, version, pose and note', count($gr_calls) === 2 && $gr_calls[0][1] === 'https://api.github.com/repos/levitatedd/thoenefit/issues'
+    && $gr_issue['labels'] === ['bug'] && str_contains($gr_issue['title'], 'Dumbbell Goblet Squat') && str_contains($gr_issue['body'], '`goblet-squat`') && str_contains($gr_issue['body'], $gr_r)
+    && str_contains($gr_issue['body'], 'Bottom (`bottom`)') && str_contains($gr_issue['body'], "> Heels lift at the bottom.\n> Keep them down.") && str_contains($gr_issue['body'], 'Tracked in #1'), json_encode($gr_calls));
+check('the issue never names who reviewed it (the repository is public)', !str_contains(json_encode($gr_issue), 'Mike'));
+check('it is added under #261 and linked from the decision', str_ends_with($gr_calls[1][1], '/issues/261/sub_issues') && $gr_calls[1][2] === ['sub_issue_id' => 77001]
+    && $gr_bySlug($gr_q)['goblet-squat']['history'][0]['issue_number'] === 901 && str_ends_with($gr_bySlug($gr_q)['goblet-squat']['history'][0]['issue_url'], '/901'));
+$gr_calls = [];
+$gr_gh->decide($adminRow, 'goblet-squat', $gr_r, 'good', '', '');
+check('Mark good opens no issue', $gr_calls === []);
+$gr_down = new \TF\GuideReviews($db, $gr_gdir, ['github' => ['token' => 't']], fn() => [503, null]);
+$gr_q = $gr_down->decide($adminRow, 'goblet-squat', $gr_r, 'revise', 'Try again.', '');
+check('if GitHub is down the decision is still saved, without an issue', $gr_bySlug($gr_q)['goblet-squat']['status'] === 'revise' && $gr_bySlug($gr_q)['goblet-squat']['history'][0]['issue_number'] === null);
+array_map('unlink', glob("$gr_gdir/*"));
+@rmdir($gr_gdir);
+
 echo "Strava export\n";
 $stravaConfig = ['strava' => [
     'client_id' => '1234',

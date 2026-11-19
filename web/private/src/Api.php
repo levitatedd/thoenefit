@@ -16,6 +16,7 @@ final class Api
     private Routines $routines;
     private Strava $strava;
     private Feedback $feedback;
+    private GuideReviews $guideReviews;
 
     public static function handle(): void
     {
@@ -46,6 +47,7 @@ final class Api
         $this->routines = new Routines($app->db);
         $this->strava = new Strava($app->db, $app->config);
         $this->feedback = new Feedback($app->db, $app->config);
+        $this->guideReviews = new GuideReviews($app->db, null, $app->config);
     }
 
     private static function json($data, int $status = 200): void
@@ -180,6 +182,11 @@ final class Api
                 Auth::requireAdmin($user);
                 return $this->accounts();
             },
+            // Movement guide review queue (#277), admin only.
+            'guide_reviews' => function () use ($user) {
+                Auth::requireAdmin($user);
+                return $this->guideReviews->queue();
+            },
         ];
         if ($method === 'GET' && $action === 'export') {
             header('Content-Type: text/csv; charset=utf-8');
@@ -238,6 +245,17 @@ final class Api
             case 'reactivate_user':
                 $this->auth->reactivate($user, (int) ($in['id'] ?? 0));
                 self::json($this->accounts());
+                return;
+            case 'review_guide':
+                self::json($this->guideReviews->decide($user, (string) ($in['slug'] ?? ''), (string) ($in['revision'] ?? ''),
+                    (string) ($in['decision'] ?? ''), (string) ($in['note'] ?? ''), (string) ($in['pose'] ?? '')));
+                return;
+            case 'flag_guide':
+                $this->guideReviews->flag($user, (string) ($in['slug'] ?? ''), (string) ($in['reason'] ?? ''), (string) ($in['pose'] ?? ''), (string) ($in['note'] ?? ''));
+                self::json(['ok' => true]);
+                return;
+            case 'reopen_guide':
+                self::json($this->guideReviews->reopen($user, (string) ($in['slug'] ?? '')));
                 return;
             case 'send_feedback':
                 $sent = $this->feedback->send($uid, (string) ($in['kind'] ?? ''), (string) ($in['title'] ?? ''), (string) ($in['body'] ?? ''), app_version());
