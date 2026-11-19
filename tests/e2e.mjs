@@ -1727,6 +1727,37 @@ console.log('Movement guide review for the admin (#277)');
     const small = await page.$$eval('.review-actions button, .review-back', (els) => els.filter((e) => e.getBoundingClientRect().height < 44).length);
     check(`the review screen fits at ${w}px with 44px buttons`, wide <= 0 && small === 0, `${wide} ${small}`);
   }
+  check('the review player has no flag link of its own', (await page.locator('.guide-flag-open').count()) === 0);
+
+  console.log('Flagging a guide that looks wrong (#282)');
+  const boot = await api('bootstrap');
+  const ex = boot.exercises.find((e) => e.name === second);
+  await page.goto(`${URL}#/exercises/${ex.id}`);
+  await page.waitForSelector('.guide .guide-figure');
+  await page.click('.guide-flag-open');
+  await page.click('.guide-flag-form button:has-text("Send")');
+  check('a flag needs a reason before it is sent', /Choose what looks wrong/.test(await page.textContent('.guide-flag-form .form-error')));
+  await page.click('.guide-flag-reasons button[data-reason=position]');
+  await page.selectOption('select[name=flag_pose]', { index: 1 });
+  await page.fill('textarea[name=flag_note]', 'The knees look too far forward.');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/50-guide-flag.png` });
+  const wideFlag = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  await page.click('.guide-flag-form button:has-text("Send")');
+  await page.waitForSelector('.guide-flag-done');
+  check('anyone can flag a guide from the exercise page and gets a thank-you', /Thanks/.test(await page.textContent('.guide-flag-done')) && wideFlag <= 0);
+  await page.goto(`${URL}#/settings/guides`);
+  await page.waitForSelector('[data-list=review-queue]');
+  const flaggedRow = page.locator(`[data-list=review-queue] li:has-text("${second}")`);
+  check('the flagged guide goes back in the review queue, marked as flagged', (await flaggedRow.count()) === 1 && /Flagged by users \(1\)/.test(await flaggedRow.textContent()));
+  await flaggedRow.locator('button').click();
+  await page.waitForSelector('.review-flags');
+  check('the review screen shows the reason, pose and note', /Body position looks wrong/.test(await page.textContent('.review-flags')) && /The knees look too far forward\./.test(await page.textContent('.review-flags')) && /Pose:/.test(await page.textContent('.review-flags')));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/50b-guide-flag-review.png`, fullPage: true });
+  await page.click('.review-actions button:has-text("Mark good")');
+  await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);
+  await page.reload();
+  await page.waitForSelector('[data-list=review-queue]');
+  check('deciding again resolves the flag and takes it out of the queue', (await page.locator(`[data-list=review-queue] li:has-text("${second}")`).count()) === 0);
 }
 
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,

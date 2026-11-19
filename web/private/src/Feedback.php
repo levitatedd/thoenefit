@@ -162,7 +162,8 @@ final class Feedback
         ];
     }
 
-    private static function request(string $method, string $url, string $token, ?array $json): array
+    /** One GitHub API call: [status, decoded body]. Also used for guide revision issues (#282). */
+    public static function request(string $method, string $url, string $token, ?array $json): array
     {
         $headers = [
             'Accept: application/vnd.github+json',
