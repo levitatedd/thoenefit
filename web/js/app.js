@@ -2,6 +2,7 @@ import { Api, WorkoutSync, uuid, clearLocalData } from './store.js';
 import { searchExercises, byUsage } from './search.js';
 import { bestEstimate, estimateLabel, convertWeight, roundEstimate } from './strength.js';
 import { loadBar, plateHint, plateStep, sideText, BARS, PLATES } from './plates.js';
+import { render as drawGuide, between as guideBetween, ease as guideEase, rigOf } from './guides.js';
 import { APP_VERSION } from './version.js';
 import { h, icon, fmtW, parseNum, fmtDate, fmtTime, fmtClock, fmtSets, fmtCardio, distUnit, metresTo, toMetres, toast, sheet, confirmSheet, choices, stepper, lineChart } from './ui.js';
 import * as install from './install.js';
@@ -1385,13 +1386,158 @@ function viewToday() {
   );
 }
 
+// ---------------------------------------------------------------- movement guides (#256)
+
 /**
- * Video demos for when the written cues aren't enough (#256): a YouTube search
- * for the exercise, opened outside the app. Nothing is sent until it's tapped.
+ * The movement guide for an exercise, if it has one (pilot #259: the dumbbell
+ * curl). Guides are small JSON files fetched only when an exercise with a
+ * guide is opened; the service worker keeps what was fetched, so a guide seen
+ * once also works offline until the next deploy. Custom exercises never get one.
  */
-function demoLink(name) {
-  const q = encodeURIComponent(`how to do ${name} exercise form`);
-  return h('a', { class: 'demo-link', href: `https://www.youtube.com/results?search_query=${q}`, target: '_blank', rel: 'noopener noreferrer' }, icon('play', 16), "Watch how it's done");
+let guideIndex = null;
+async function guideFor(ex) {
+  if (!ex || ex.custom || !ex.slug) return null;
+  try {
+    if (!guideIndex) guideIndex = (await fetch('guides/index.json')).json();
+    const file = (await guideIndex).guides?.[ex.slug];
+    if (!file) return null;
+    const res = await fetch(`guides/${file}`);
+    return res.ok ? await res.json() : null;
+  } catch (e) {
+    guideIndex = null; // offline and never fetched: try again next time
+    return null;
+  }
+}
+
+/** A slot under the form cues that fills in with the guide, or stays empty. */
+function movementGuide(ex) {
+  const slot = h('div', { class: 'guide-slot' });
+  guideFor(ex).then((g) => g && slot.replaceChildren(guidePlayer(g)), () => {});
+  return slot;
+}
+
+let guideCount = 0;
+/**
+ * The player: the figure, Previous / Play-Pause / Next, which pose is showing,
+ * and a thumbnail for each pose. It plays on its own while on screen, pauses
+ * when scrolled away, hidden or closed, and stays still for people who ask for
+ * reduced motion (they can still press Play, and it steps without moving).
+ */
+function guidePlayer(g) {
+  const id = `guide${++guideCount}`;
+  const rig = rigOf(g);
+  const poses = g.poses;
+  const n = poses.length;
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const holdOf = (k) => (reduced ? 1800 : poses[k].hold_ms ?? g.timing.hold_ms);
+  let i = 0;
+  let playing = false;
+  let userPaused = reduced; // reduced motion: still until Play is pressed
+  let onScreen = false;
+  let t0 = 0;
+  let raf = 0;
+  let seen = false;
+  const stage = h('div', { class: 'guide-stage' });
+  const draw = (joints, arrowDir, label) => (stage.innerHTML = drawGuide(g, joints, { id, arrowDir, label }));
+  const still = () => draw(poses[i].joints, poses[i].arrow, `${g.title}, ${poses[i].label}: ${poses[i].description}`);
+  const status = h('p', { class: 'guide-status', 'aria-live': 'polite' });
+  const desc = h('p', { class: 'guide-desc' });
+  const play = h('button', { type: 'button', class: 'guide-play', onclick: () => {
+    if (playing) {
+      userPaused = true;
+      stop();
+    } else {
+      userPaused = false;
+      start();
+    }
+  } });
+  const thumbs = poses.map((p, k) => {
+    const art = h('span', { class: 'guide-thumb-art', 'aria-hidden': 'true' });
+    art.innerHTML = drawGuide(g, p.joints, { id: `${id}t${k}` });
+    return h('button', { type: 'button', class: 'choice guide-thumb', 'aria-label': `Show ${p.label}`, onclick: () => go(k) }, art, h('span', { class: 'guide-thumb-label' }, p.label));
+  });
+  const thumbRow = h('div', { class: 'guide-thumbs', role: 'group', 'aria-label': 'Poses' }, thumbs);
+  thumbRow.style.setProperty('grid-template-columns', `repeat(${n}, minmax(0, 1fr))`);
+  const paint = () => {
+    status.textContent = `${i + 1} / ${n} · ${poses[i].label}`;
+    // Announced when someone steps through the poses, not on every turn of the loop.
+    status.setAttribute('aria-live', playing ? 'off' : 'polite');
+    desc.textContent = poses[i].description;
+    thumbs.forEach((t, k) => t.setAttribute('aria-pressed', String(k === i)));
+    play.setAttribute('aria-label', playing ? 'Pause the movement' : 'Play the movement');
+    play.replaceChildren(icon(playing ? 'pause' : 'play', 22));
+  };
+  const card = h('section', { class: 'guide', 'aria-label': `Movement guide: ${g.title}` },
+    h('div', { class: 'guide-head' }, h('h3', {}, 'Show movement'), h('p', { class: 'muted small' }, g.title)),
+    stage,
+    h('div', { class: 'guide-controls' },
+      h('button', { type: 'button', class: 'btn ghost guide-step', 'aria-label': 'Previous pose', onclick: () => go(i - 1) }, icon('back', 18), 'Previous'),
+      play,
+      h('button', { type: 'button', class: 'btn ghost guide-step guide-next', 'aria-label': 'Next pose', onclick: () => go(i + 1) }, 'Next', icon('back', 18))),
+    status,
+    desc,
+    thumbRow);
+  // Gone from the page (a sheet closed, another screen opened): stop for good.
+  const gone = () => seen && !card.isConnected;
+  const frame = (now) => {
+    if (gone()) return finish();
+    if (card.isConnected) seen = true;
+    const since = now - t0;
+    const hold = holdOf(i);
+    if (since >= hold) {
+      const k = reduced ? 1 : (since - hold) / g.timing.move_ms;
+      if (k >= 1) {
+        i = (i + 1) % n;
+        t0 = now;
+        still();
+        paint();
+      } else {
+        draw(guideBetween(rig, poses[i].joints, poses[(i + 1) % n].joints, guideEase(k)), null, '');
+      }
+    }
+    raf = requestAnimationFrame(frame);
+  };
+  function start() {
+    if (playing) return;
+    playing = true;
+    t0 = performance.now();
+    raf = requestAnimationFrame(frame);
+    paint();
+  }
+  function stop() {
+    playing = false;
+    cancelAnimationFrame(raf);
+    still();
+    paint();
+  }
+  function go(k) {
+    userPaused = true; // picking a pose means looking at it
+    i = (k + n) % n;
+    stop();
+  }
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+    onScreen = entries[entries.length - 1].isIntersecting;
+    if (gone()) return finish();
+    if (onScreen) seen = true;
+    if (onScreen && !userPaused && !document.hidden) start();
+    else if (!onScreen && playing) stop();
+  }, { threshold: 0.4 }) : null;
+  const onVisibility = () => {
+    if (gone()) return finish();
+    if (document.hidden && playing) stop();
+    else if (!document.hidden && onScreen && !userPaused) start();
+  };
+  function finish() {
+    playing = false;
+    cancelAnimationFrame(raf);
+    if (io) io.disconnect();
+    document.removeEventListener('visibilitychange', onVisibility);
+  }
+  if (io) io.observe(card);
+  document.addEventListener('visibilitychange', onVisibility);
+  still();
+  paint();
+  return card;
 }
 
 function dayLabel(d) {
@@ -2134,7 +2280,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       'div',
       { class: 'stack' },
       ex && ex.cues && h('p', { class: 'cues' }, ex.cues),
-      demoLink(e.name),
+      ex && movementGuide(ex),
       h('button', { type: 'button', class: 'btn block', onclick: () => { close(); noteSheet(e, edit, doc.gym_id && doc.gym_name); } }, icon('pencil', 18), e.note ? 'Edit setup note' : 'Add setup note'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === 0, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx - 1)); } }, icon('up', 18), 'Move earlier'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === doc.exercises.length - 1, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx + 1)); } }, icon('down', 18), 'Move later'),
@@ -3493,7 +3639,7 @@ function viewExercise(id) {
       art,
       h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]), p1rm),
       pinButton(ex)),
-    section('Form cues', ex.cues && h('p', { class: 'cues' }, ex.cues), demoLink(ex.name)),
+    ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues), movementGuide(ex)),
     section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),
     ex.shared && h('p', { class: 'muted small' }, S.user.role === 'admin' ? 'This is in the default library for everyone. As the admin you can still edit or archive it; archiving hides it from suggestions for all accounts.' : 'Added to the default library by the admin.'),

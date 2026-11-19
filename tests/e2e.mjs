@@ -184,12 +184,9 @@ await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
 check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
 check('the way back is labelled Today', (await page.textContent('.back')).trim() === 'Today');
-{
-  // #256: a video search for when the written cues aren't enough, opening outside the app.
-  const demo = await page.$eval('.exercise-page .demo-link', (a) => [a.textContent, a.href, a.target, a.rel]);
-  const q = new globalThis.URL(demo[1]).searchParams.get('search_query');
-  check("the exercise page offers Watch how it's done, a YouTube search for that exercise", demo[0] === "Watch how it's done" && demo[1].startsWith('https://www.youtube.com/results?') && q === `how to do ${first[2]} exercise form` && demo[2] === '_blank' && /noopener/.test(demo[3]), JSON.stringify(demo));
-}
+// #256: the YouTube link is gone; an exercise without a movement guide shows just its written cues.
+await page.waitForLoadState('networkidle');
+check(`no video link, and ${first[2]} (no guide yet) shows just its written cues`, (await page.locator('a[href*="youtube"]').count()) === 0 && (await page.locator('.guide').count()) === 0 && (await page.locator('.section:has(h2:has-text("Form cues")) .cues').count()) === 1);
 await shot('03a-history-from-today');
 await page.click('.back');
 await page.waitForSelector('.plan-row');
@@ -1540,6 +1537,81 @@ console.log("Seeing each other's history");
   await waitForToast(page, /now private/);
   check('switching back to Only me hides it again', (await viewerGet(`member_history&user=${myId}`)) === 404 && (await viewerGet(`member_workout&user=${myId}&id=${wid}`)) === 404);
   await vctx.close();
+}
+
+console.log('Movement guide: dumbbell curl pilot (#259)');
+{
+  const boot = await api('bootstrap');
+  const curl = boot.exercises.find((e) => e.slug === 'dumbbell-curl');
+  await page.goto(`${URL}#/exercises/${curl.id}`);
+  await page.waitForSelector('.guide');
+  const status = () => page.textContent('.guide-status');
+  const playLabel = () => page.getAttribute('.guide-play', 'aria-label');
+  const order = await page.evaluate(() => {
+    const cues = [...document.querySelectorAll('.section')].find((x) => x.querySelector('h2')?.textContent === 'Form cues');
+    const next = cues && cues.nextElementSibling;
+    return [!!cues?.querySelector('.cues + .guide-slot .guide'), next?.querySelector('h2')?.textContent];
+  });
+  check('Dumbbell Curl shows Show movement under its written cues, with Setup notes after it', order[0] && order[1] === 'Setup notes' && (await page.textContent('.guide-head h3')) === 'Show movement' && (await page.textContent('.guide-head p')) === 'Dumbbell curl', JSON.stringify(order));
+  check('four poses as thumbnails: Setup, Lift, Top, Lower, with Setup chosen', (await page.$$eval('.guide-thumb-label', (els) => els.map((e) => e.textContent).join())) === 'Setup,Lift,Top,Lower' && (await page.getAttribute('.guide-thumb >> nth=0', 'aria-pressed')) === 'true');
+  check('the figure is a described picture with no inline styles', /Dumbbell curl, Setup: Stand tall/.test(await page.getAttribute('.guide-stage svg', 'aria-label')) && !(await page.innerHTML('.guide-stage')).includes('style='));
+  await page.evaluate(() => document.querySelector('.guide').scrollIntoView({ block: 'center' }));
+  await page.waitForFunction(() => !/^1 \/ 4/.test(document.querySelector('.guide-status').textContent), null, { timeout: 8000 });
+  check('on screen it plays by itself, moving on through the poses', (await playLabel()) === 'Pause the movement' && /^[2-4] \/ 4/.test(await status()), await status());
+  await shot('46-movement-guide');
+  await page.click('.guide-play');
+  const held = await status();
+  await page.waitForTimeout(2500);
+  check('Pause stops it on the pose it was showing', (await playLabel()) === 'Play the movement' && (await status()) === held, `${held} -> ${await status()}`);
+  await page.click('.guide-thumb:has-text("Top")');
+  check('tapping a thumbnail shows that pose, with the mint selected style', (await status()) === '3 / 4 · Top' && (await page.getAttribute('.guide-thumb >> nth=2', 'aria-pressed')) === 'true' && (await page.$eval('.guide-thumb[aria-pressed="true"]', (b) => getComputedStyle(b).borderTopColor)) === 'rgb(58, 242, 156)');
+  await page.click('button[aria-label="Next pose"]');
+  check('Next steps forward', (await status()) === '4 / 4 · Lower' && /Lower it slowly/.test(await page.textContent('.guide-desc')));
+  await page.click('button[aria-label="Next pose"]');
+  check('and wraps round to the start', (await status()) === '1 / 4 · Setup');
+  await page.click('button[aria-label="Previous pose"]');
+  check('Previous steps back, wrapping to the end', (await status()) === '4 / 4 · Lower');
+  check('stepping is announced to screen readers; the playing loop is not', (await page.getAttribute('.guide-status', 'aria-live')) === 'polite');
+  const sizes = await page.$$eval('.guide-play, .guide-step, .guide-thumb', (els) => els.map((e) => Math.round(Math.min(e.getBoundingClientRect().width, e.getBoundingClientRect().height))));
+  check('every control is at least 44px to tap', sizes.every((n) => n >= 44), sizes.join());
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.waitForTimeout(200);
+  check('no sideways scrolling with the guide at 320px', (await overflow()) <= 0);
+  await page.setViewportSize({ width: 402, height: 874 });
+  // Reduced motion: still until asked, and Play steps without moving.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.reload();
+  await page.waitForSelector('.guide');
+  await page.evaluate(() => document.querySelector('.guide').scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(2500);
+  check('with reduced motion it starts still, on Setup, with Play', (await status()) === '1 / 4 · Setup' && (await playLabel()) === 'Play the movement');
+  await page.emulateMedia({ reducedMotion: null });
+  // Offline: a guide opened once is kept by the service worker.
+  await page.context().setOffline(true);
+  await page.reload();
+  await page.waitForSelector('.guide', { timeout: 10000 }).catch(() => {});
+  check('a guide seen once still shows offline', (await page.locator('.guide .guide-thumb').count()) === 4);
+  await page.context().setOffline(false);
+  // During a workout: the exercise's ••• sheet has the same guide, and closing it stops the player.
+  await page.goto(`${URL}#/today`);
+  await page.waitForSelector('button:has-text("Start workout")');
+  await page.click('button:has-text("Start workout")');
+  await page.waitForSelector('.lift');
+  await page.click('button:has-text("Add exercise")');
+  await page.fill('.sheet input[type=search]', 'dumbbell curl');
+  await page.waitForSelector('.sheet .pick');
+  await page.locator('.sheet .pick', { has: page.locator('.pick-name', { hasText: /^Dumbbell Curl$/ }) }).first().click();
+  await page.waitForSelector('button[aria-label="Options for Dumbbell Curl"]');
+  await page.click('button[aria-label="Options for Dumbbell Curl"]');
+  await page.waitForSelector('.sheet .guide');
+  check('during a workout, the exercise\'s ••• sheet shows the movement guide under its cues', (await page.locator('.sheet .cues + .guide-slot .guide').count()) === 1 && (await page.locator('.sheet a[href*="youtube"]').count()) === 0);
+  await shot('47-movement-guide-sheet');
+  await page.click('.sheet button:has-text("Close")');
+  check('closing the sheet removes the player', (await page.locator('.guide').count()) === 0);
+  await page.goto(`${URL}#/today`);
+  await page.click('button:has-text("Discard workout")');
+  await page.click('.sheet button:has-text("Discard workout")');
+  await page.waitForSelector('.plan-row');
 }
 
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
