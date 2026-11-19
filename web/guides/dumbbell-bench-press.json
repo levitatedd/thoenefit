@@ -33,12 +33,12 @@
       "id": "lower",
       "label": "Lower",
       "joints": {
-        "near_shoulder": 43.44,
-        "near_elbow": 43.44,
-        "near_tuck": 24.64,
-        "far_shoulder": 43.44,
-        "far_elbow": 43.44,
-        "far_tuck": 24.64
+        "near_shoulder": 43,
+        "near_elbow": 43,
+        "near_tuck": 25,
+        "far_shoulder": 43,
+        "far_elbow": 43,
+        "far_tuck": 25
       },
       "arrow": "down",
       "description": "Bend both elbows to lower the dumbbells evenly toward the sides of your chest."
@@ -61,31 +61,33 @@
       "id": "press",
       "label": "Press",
       "joints": {
-        "near_shoulder": 40.56,
-        "near_elbow": 40.56,
-        "near_tuck": 23.36,
-        "far_shoulder": 40.56,
-        "far_elbow": 40.56,
-        "far_tuck": 23.36
+        "near_shoulder": 41,
+        "near_elbow": 41,
+        "near_tuck": 23,
+        "far_shoulder": 41,
+        "far_elbow": 41,
+        "far_tuck": 23
       },
       "arrow": "up",
       "description": "Press both dumbbells back up under control."
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "reviewed",
     "checked": "2026-11-19",
-    "checked_by": "Codex",
+    "checked_by": "Codex (poses); Claude (pose review and in-app checks)",
     "checks": [
       "Compared the flat bench setup, foot support, paired loads and controlled descent and press against ACE and the built-in cue.",
-      "Validated joint ranges, equipment anchors, contact and framing through the complete loop."
+      "Validated joint ranges, equipment anchors, contact and framing through the complete loop.",
+      "Claude review: Bottom has forearms vertical (wrists over elbows) and upper arms about 40 degrees from square, angled away from the ribs as the cue says; both arms move together; midpoints rounded to whole degrees.",
+      "In the app: plays, steps and fits at 320px and 402px with no sideways scroll; contacts and fit checked across the whole loop by node tests/guides.test.mjs."
     ],
     "references": [
       "https://www.acefitness.org/resources/everyone/exercise-library/19/chest-press/"
     ],
     "limitations": [
       "The three-quarter projection foreshortens the far arm. The lower position illustrates a controlled range.",
-      "Fit-test playback and screen-size review are pending integration."
+      "The Claude review compared poses with the built-in cue and standard technique; the reference pages could not be opened from the review environment."
     ]
   },
   "source": {

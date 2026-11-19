@@ -32,9 +32,9 @@
       "label": "Lower",
       "description": "Bend your hips and knees together, keeping your heels down and knees in line with your toes.",
       "joints": {
-        "shin": 22,
-        "knee": 62,
-        "torso": 18,
+        "shin": 18,
+        "knee": 60,
+        "torso": 16,
         "shoulder": 8,
         "elbow": 146
       },
@@ -45,9 +45,9 @@
       "label": "Bottom",
       "description": "Stop at a depth you can control with your whole foot on the floor and the dumbbell close to your chest.",
       "joints": {
-        "shin": 30,
-        "knee": 98,
-        "torso": 25,
+        "shin": 32,
+        "knee": 118,
+        "torso": 30,
         "shoulder": 8,
         "elbow": 146
       },
@@ -58,9 +58,9 @@
       "label": "Stand",
       "description": "Push through both feet to rise, keeping the dumbbell close to your chest.",
       "joints": {
-        "shin": 20,
+        "shin": 18,
         "knee": 58,
-        "torso": 17,
+        "torso": 16,
         "shoulder": 8,
         "elbow": 146
       },
@@ -68,19 +68,21 @@
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "reviewed",
     "checked": "2026-11-19",
-    "checked_by": "Codex",
+    "checked_by": "Codex (poses); Claude (pose review and in-app checks)",
     "checks": [
       "Compared the chest-height two-hand hold, hip and knee bend, planted feet and return to standing against NASM. Used a moderate illustrated depth.",
-      "Validated joint ranges, equipment anchors, contact and framing through the complete loop."
+      "Validated joint ranges, equipment anchors, contact and framing through the complete loop.",
+      "Claude review: deepened Bottom from thighs well above parallel to about parallel, as the cue asks for as low as you can control; torso kept at 30 degrees or less so the chest stays up behind the dumbbell.",
+      "In the app: plays, steps and fits at 320px and 402px with no sideways scroll; contacts and fit checked across the whole loop by node tests/guides.test.mjs."
     ],
     "references": [
       "https://www.nasm.org/resource-center/exercise-library/goblet-squat"
     ],
     "limitations": [
       "The side camera emphasizes depth and foot contact. Use the written cue to judge knee tracking and choose a depth you can control.",
-      "Fit-test playback and screen-size review are pending integration."
+      "The Claude review compared poses with the built-in cue and standard technique; the reference pages could not be opened from the review environment."
     ]
   },
   "source": {

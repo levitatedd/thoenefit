@@ -31,8 +31,8 @@
       "label": "Pull",
       "joints": {
         "torso": 76,
-        "shoulder": -24,
-        "elbow": 48.800000000000004
+        "shoulder": -38,
+        "elbow": 40
       },
       "arrow": "up",
       "description": "Drive your working elbow back, keeping your torso steady."
@@ -43,8 +43,8 @@
       "description": "Bring the dumbbell toward your hip without twisting your torso.",
       "joints": {
         "torso": 76,
-        "shoulder": -48,
-        "elbow": 92
+        "shoulder": -72,
+        "elbow": 72
       },
       "arrow": "down"
     },
@@ -53,27 +53,29 @@
       "label": "Return",
       "joints": {
         "torso": 76,
-        "shoulder": -22,
-        "elbow": 45.199999999999996
+        "shoulder": -34,
+        "elbow": 34
       },
       "arrow": "down",
       "description": "Lower until your arm straightens, then repeat on the other side after your set."
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "reviewed",
     "checked": "2026-11-19",
-    "checked_by": "Codex",
+    "checked_by": "Codex (poses); Claude (pose review and in-app checks)",
     "checks": [
       "Compared the supported setup and controlled return with Mayo Clinic. Used the ThoeneFit cue for the hip-directed path and fixed torso.",
-      "Validated joint ranges, equipment anchors, contact and framing through the complete loop."
+      "Validated joint ranges, equipment anchors, contact and framing through the complete loop.",
+      "Claude review: Top corrected so the elbow drives back to torso height with the forearm hanging straight and the dumbbell finishing by the hip, as the cue says (it had finished under the shoulder with the forearm angled forward); torso fixed at 76 degrees throughout.",
+      "In the app: plays, steps and fits at 320px and 402px with no sideways scroll; contacts and fit checked across the whole loop by node tests/guides.test.mjs."
     ],
     "references": [
       "https://www.mayoclinic.org/healthy-lifestyle/fitness/multimedia/bent-over-row/vid-20084680"
     ],
     "limitations": [
       "The loop demonstrates one side. The written cue covers switching sides.",
-      "Fit-test playback and screen-size review are pending integration."
+      "The Claude review compared poses with the built-in cue and standard technique; the reference pages could not be opened from the review environment."
     ]
   },
   "source": {

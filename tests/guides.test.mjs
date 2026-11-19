@@ -30,9 +30,10 @@ for (const [slug, file] of Object.entries(index.guides)) {
   check('passes the format checks', errs.length === 0, errs.join('; '));
   check('is listed under its own exercise slug', g.exercise === slug);
   const rig = rigOf(g);
-  // Every limb keeps its length in every pose and part way between poses.
+  // Every limb keeps its length in every pose and part way between poses
+  // (shared-figure rigs are checked in 3D below).
   let worst = 0;
-  for (let k = 0; k < g.poses.length; k++) {
+  for (let k = 0; k < (RIGS3D[g.rig] ? 0 : g.poses.length); k++) {
     const a = g.poses[k].joints;
     const b = g.poses[(k + 1) % g.poses.length].joints;
     for (let t = 0; t <= 1.0001; t += 0.1) {
@@ -43,7 +44,7 @@ for (const [slug, file] of Object.entries(index.guides)) {
         Math.abs(dist(J.hip, J.knee) - L.thigh), Math.abs(dist(J.knee, J.ankle) - L.shin), Math.abs(dist(J.hip, J.shoulder) - L.torso));
     }
   }
-  check('limbs keep their length through the whole loop', worst < 1e-6, String(worst));
+  if (!RIGS3D[g.rig]) check('limbs keep their length through the whole loop', worst < 1e-6, String(worst));
   const svg = render(g, g.poses[0].joints, { id: 't', arrowDir: g.poses[0].arrow, label: g.poses[0].label });
   check('draws as SVG with no inline style (the site blocks those)', svg.startsWith('<svg') && !/style=/.test(svg) && !/<script/i.test(svg));
   check('each pose has a picture and a description for screen readers', g.poses.every((p) => render(g, p.joints, { label: p.description }).includes('aria-label=')));
@@ -76,8 +77,9 @@ console.log('The curl is unchanged by the shared-figure rigs (#261)');
 const sampleDir = new URL('docs/guides/samples/', root);
 const samples = readdirSync(sampleDir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read(`docs/guides/samples/${f}`)));
 check('there is a rig sample for the squat, bench press and row', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row'].every((x) => samples.some((g) => g.exercise === x)));
-for (const g of samples) {
-  console.log(`Sample ${g.exercise} (${g.rig})`);
+const shipped = Object.values(index.guides).map((f) => JSON.parse(read(`web/guides/${f}`))).filter((g) => RIGS3D[g.rig]);
+for (const g of [...samples, ...shipped]) {
+  console.log(`${samples.includes(g) ? 'Sample' : 'Guide'} ${g.exercise} (${g.rig})`);
   const errs = problems(g, { slugs });
   check('passes the format checks, including contacts and fit', errs.length === 0, errs.join('; '));
   const c = checkLoop(g);
@@ -135,6 +137,28 @@ console.log('What each new setup has to show');
   wrongCam.equipment = ['flat-bench-v1'];
   const errs = problems(wrongCam, { slugs });
   check('the wrong camera or equipment for a rig is reported', errs.some((e) => /camera must be "side"/.test(e)) && errs.some((e) => /not available on the grounded-side-v1 rig/.test(e)), errs.join('; '));
+}
+
+console.log('Squat, bench press and row guides (#261)');
+{
+  const load = (slug) => { const g = JSON.parse(read(`web/guides/${slug}.json`)); return { g, rig: RIGS3D[g.rig], at: (id) => pose3d(RIGS3D[g.rig], g.poses.find((p) => p.id === id).joints, g) }; };
+  const sq = load('goblet-squat');
+  const bottom = sq.at('bottom').P;
+  check('goblet squat: the bottom reaches about parallel (hips no more than 6 units above the knees)', bottom.hip[1] - bottom.nearKnee[1] <= 6, `${bottom.hip[1] - bottom.nearKnee[1]}`);
+  check('goblet squat: the torso stays fairly upright (no more than 35 degrees of lean)', sq.g.poses.every((p) => p.joints.torso <= 35));
+  check('goblet squat: the dumbbell stays at the chest the whole way', sq.g.poses.every((p) => { const { P, held } = sq.at(p.id); return dist3(held[0].hand, P.shoulderC) < 30; }));
+  const bp = load('dumbbell-bench-press');
+  const bpBottom = bp.g.poses.find((p) => p.id === 'bottom').joints;
+  check('bench press: wrists over elbows at the bottom (forearms vertical)', ['near', 'far'].every((s) => bpBottom[`${s}_shoulder`] === bpBottom[`${s}_elbow`]));
+  check('bench press: upper arms angled away from the ribs at the bottom, not flared or pinned', ['near', 'far'].every((s) => bpBottom[`${s}_tuck`] >= 25 && bpBottom[`${s}_tuck`] <= 55));
+  check('bench press: both arms move together', bp.g.poses.every((p) => ['shoulder', 'elbow', 'tuck'].every((k) => p.joints[`near_${k}`] === p.joints[`far_${k}`])));
+  check('bench press: arms close to straight at the top', bp.g.poses[0].joints.near_shoulder <= 10);
+  const row = load('one-arm-dumbbell-row');
+  const top = row.at('top').P;
+  check('row: at the top the dumbbell is by the hip, closer to it than to the shoulder', Math.abs(top.nearHand[0] - top.hip[0]) < Math.abs(top.nearHand[0] - top.nearShoulder[0]));
+  check('row: at the top the forearm hangs straight down (within 10 degrees)', Math.abs(Math.atan2(top.nearHand[0] - top.nearElbow[0], top.nearElbow[1] - top.nearHand[1]) * 180 / Math.PI) <= 10);
+  check('row: the torso stays still (no twisting or heaving)', new Set(row.g.poses.map((p) => p.joints.torso)).size === 1);
+  check('row: the arm straightens at the bottom', row.g.poses[0].joints.elbow <= 10);
 }
 
 console.log('Format checks catch mistakes');

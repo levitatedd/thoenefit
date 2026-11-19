@@ -244,7 +244,7 @@ Generated pictures are never the authority on form; the references are.
 
 | | |
 | --- | --- |
-| Guides | 1 (`dumbbell-curl`, pilot) |
+| Guides | 4 (`dumbbell-curl` pilot; `goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`) |
 | Rig samples (not shown in the app) | 3 (`goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`) |
 | Built-in exercises | see `node tests/guides.test.mjs` (it counts them) |
 

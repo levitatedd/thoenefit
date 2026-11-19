@@ -1614,17 +1614,14 @@ console.log('Movement guide: dumbbell curl pilot (#259)');
   await page.waitForSelector('.plan-row');
 }
 
-console.log('Shared-figure rigs in the real player (#261)');
+console.log('Squat, bench press and row guides in the real player (#261)');
 {
-  // The rig samples aren't in the app's guide list yet: serve them as if they were,
-  // to check the new rigs play and fit in the real player. Nothing here ships.
-  const { readFileSync, readdirSync } = await import('node:fs');
-  const dir = new globalThis.URL('../docs/guides/samples/', import.meta.url);
-  const samples = Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f.replace(/\.json$/, ''), readFileSync(new globalThis.URL(f, dir), 'utf8')]));
-  const live = JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8'));
-  // On the whole context: the service worker fetches these, and only context routes see its requests.
-  await page.context().route('**/guides/index.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...live, guides: { ...live.guides, ...Object.fromEntries(Object.keys(samples).map((k) => [k, `samples/${k}.json`])) } }) }));
-  await page.context().route('**/guides/samples/*.json', (r) => r.fulfill({ contentType: 'application/json', body: samples[r.request().url().split('/').pop().replace(/\.json.*$/, '')] }));
+  // Every guide on the shared-figure rigs, straight from the app's guide list.
+  const { readFileSync } = await import('node:fs');
+  const read = (f) => readFileSync(new globalThis.URL(`../web/guides/${f}`, import.meta.url), 'utf8');
+  const listed = JSON.parse(read('index.json')).guides;
+  const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([, txt]) => JSON.parse(txt).rig !== 'standing-side-v1'));
+  check('the goblet squat, dumbbell bench press and one-arm row have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row'].every((k) => samples[k]));
   const boot = await api('bootstrap');
   for (const slug of Object.keys(samples)) {
     const ex = boot.exercises.find((e) => e.slug === slug);
@@ -1647,11 +1644,9 @@ console.log('Shared-figure rigs in the real player (#261)');
         return { scroll: document.documentElement.scrollWidth - innerWidth, stageW: Math.round(box.width), inside: art.x >= vx - 0.5 && art.y >= vy - 0.5 && art.x + art.width <= vx + vw + 0.5 && art.y + art.height <= vy + vh + 0.5, controls: [...document.querySelectorAll('.guide-play, .guide-step, .guide-thumb')].every((e) => Math.min(e.getBoundingClientRect().width, e.getBoundingClientRect().height) >= 44) };
       });
       check(`${ex.name} fits at ${w}px: drawing inside its frame, controls 44px, no sideways scroll`, fit.scroll <= 0 && fit.inside && fit.controls, JSON.stringify(fit));
-      if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-rig-${slug}.png` });
+      if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-guide-${slug}.png` });
     }
   }
-  await page.context().unroute('**/guides/index.json');
-  await page.context().unroute('**/guides/samples/*.json');
   await page.setViewportSize({ width: 402, height: 874 });
 }
 
