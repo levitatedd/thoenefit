@@ -986,6 +986,7 @@ check('and opening the page directly shows nothing', (await page.locator('input[
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('text=Add to your Home Screen');
   check('a regular user has no movement guide review, and the server refuses it (#277)', reviews === 403 && decide.status === 403 && (await page.locator('a:has-text("Movement guide review")').count()) === 0, `${reviews} ${decide.status}`);
+  check('and no guide review count on their Settings tab (#277)', (await page.locator('[data-badge=guides]').count()) === 0 && theirs.guides_pending === 0);
 }
 await page.goto(`${URL}#/settings`);
 await page.click('button:has-text("Sign out")');
@@ -1671,6 +1672,15 @@ console.log('Movement guide review for the admin (#277)');
   const counts = () => page.$$eval('.review-count', (els) => Object.fromEntries(els.map((e) => [e.dataset.count, Number(e.querySelector('strong').textContent)])));
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('a:has-text("Movement guide review")');
+  const tabBadge = () => page.$eval('a.tab[href="#/settings"]', (t) => t.querySelector('[data-badge=guides]')?.textContent || '');
+  check('the Settings tab and the review link both show how many guides are waiting (#277)', (await tabBadge()) === String(listed) && (await page.textContent('a:has-text("Movement guide review") .link-badge')) === String(listed)
+    && (await page.getAttribute('a.tab[href="#/settings"]', 'aria-label')) === `Settings, ${listed} movement guides to review`);
+  if (SHOTS) {
+    await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.textContent.includes('Movement guide review')).scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: `${SHOTS}/49c-guide-review-badges.png` });
+  }
   await page.click('a:has-text("Movement guide review")');
   await page.waitForSelector('[data-list=review-queue]');
   let c = await counts();
@@ -1697,6 +1707,7 @@ console.log('Movement guide review for the admin (#277)');
   await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, first);
   c = await counts();
   check('saving moves straight on to the next pending guide and takes this one out of the queue', c.revise === 1 && c.pending === listed - 1, JSON.stringify(c));
+  check('the Settings tab count goes down as guides are reviewed', (await tabBadge()) === String(listed - 1));
   const second = await page.textContent('.review-title h2');
   await page.click('.review-actions button:has-text("Mark good")');
   await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);

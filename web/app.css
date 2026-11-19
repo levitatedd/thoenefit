@@ -2899,3 +2899,18 @@ button.setup-note {
   color: var(--red);
   box-shadow: inset 0 0 0 1px currentColor;
 }
+
+/* Count beside a Settings link, matching the tab badge (#277). */
+.link-badge {
+  display: inline-block;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--mint);
+  color: var(--ink);
+  font: 700 13px/22px var(--body);
+  text-align: center;
+  vertical-align: 2px;
+}
