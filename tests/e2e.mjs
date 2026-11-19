@@ -1614,6 +1614,47 @@ console.log('Movement guide: dumbbell curl pilot (#259)');
   await page.waitForSelector('.plan-row');
 }
 
+console.log('Shared-figure rigs in the real player (#261)');
+{
+  // The rig samples aren't in the app's guide list yet: serve them as if they were,
+  // to check the new rigs play and fit in the real player. Nothing here ships.
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dir = new globalThis.URL('../docs/guides/samples/', import.meta.url);
+  const samples = Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f.replace(/\.json$/, ''), readFileSync(new globalThis.URL(f, dir), 'utf8')]));
+  const live = JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8'));
+  // On the whole context: the service worker fetches these, and only context routes see its requests.
+  await page.context().route('**/guides/index.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...live, guides: { ...live.guides, ...Object.fromEntries(Object.keys(samples).map((k) => [k, `samples/${k}.json`])) } }) }));
+  await page.context().route('**/guides/samples/*.json', (r) => r.fulfill({ contentType: 'application/json', body: samples[r.request().url().split('/').pop().replace(/\.json.*$/, '')] }));
+  const boot = await api('bootstrap');
+  for (const slug of Object.keys(samples)) {
+    const ex = boot.exercises.find((e) => e.slug === slug);
+    await page.goto(`${URL}#/exercises/${ex.id}`);
+    await page.reload();
+    await page.waitForSelector('.guide .guide-figure');
+    await page.evaluate(() => document.querySelector('.guide').scrollIntoView({ block: 'center' }));
+    const before = await page.textContent('.guide-status');
+    const n = (await page.locator('.guide-thumb').count());
+    await page.waitForFunction((b) => document.querySelector('.guide-status').textContent !== b, before, { timeout: 8000 });
+    check(`${ex.name} plays in the player (${n} poses)`, n === JSON.parse(samples[slug]).poses.length);
+    for (const [w, h] of [[320, 640], [402, 874]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(250);
+      const fit = await page.evaluate(() => {
+        const svg = document.querySelector('.guide-stage svg');
+        const box = svg.getBoundingClientRect();
+        const art = svg.getBBox();
+        const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(' ').map(Number);
+        return { scroll: document.documentElement.scrollWidth - innerWidth, stageW: Math.round(box.width), inside: art.x >= vx - 0.5 && art.y >= vy - 0.5 && art.x + art.width <= vx + vw + 0.5 && art.y + art.height <= vy + vh + 0.5, controls: [...document.querySelectorAll('.guide-play, .guide-step, .guide-thumb')].every((e) => Math.min(e.getBoundingClientRect().width, e.getBoundingClientRect().height) >= 44) };
+      });
+      check(`${ex.name} fits at ${w}px: drawing inside its frame, controls 44px, no sideways scroll`, fit.scroll <= 0 && fit.inside && fit.controls, JSON.stringify(fit));
+      if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-rig-${slug}.png` });
+    }
+  }
+  await page.context().unroute('**/guides/index.json');
+  await page.context().unroute('**/guides/samples/*.json');
+  await page.setViewportSize({ width: 402, height: 874 });
+}
+
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
 // which moves where taps land for the checks after this (#217).
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {

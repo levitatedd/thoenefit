@@ -1,26 +1,202 @@
 {
   "format": "thoenefit-movement-guide",
   "version": 1,
+  "_help": {
+    "note": "Delete this _help block before saving. Pick one rig; camera and equipment must be from that rig. Joints are degrees, [min, max]. Full meanings in docs/movement-guides.md. Start from the rig's sample file.",
+    "rigs": {
+      "standing-side-v1": {
+        "use": "Standing, arms only (the curl pilot). Camera is free text.",
+        "camera": "Side view, figure facing right",
+        "equipment": [
+          "dumbbell-v1"
+        ],
+        "joints": {
+          "torso": [
+            -15,
+            45
+          ],
+          "shoulder": [
+            -40,
+            100
+          ],
+          "elbow": [
+            0,
+            150
+          ],
+          "wrist": [
+            -30,
+            30
+          ],
+          "hip": [
+            -30,
+            100
+          ],
+          "knee": [
+            0,
+            140
+          ],
+          "supination": [
+            0,
+            1
+          ]
+        },
+        "sample": "web/guides/dumbbell-curl.json"
+      },
+      "grounded-side-v1": {
+        "use": "Standing with both feet planted: squats, standing presses and holds.",
+        "sample": "docs/guides/samples/goblet-squat.json",
+        "camera": "side",
+        "equipment": [
+          "dumbbell-goblet-v1",
+          "dumbbell-v1"
+        ],
+        "joints": {
+          "shin": [
+            -10,
+            45
+          ],
+          "knee": [
+            0,
+            150
+          ],
+          "torso": [
+            -10,
+            70
+          ],
+          "shoulder": [
+            -40,
+            160
+          ],
+          "elbow": [
+            0,
+            160
+          ],
+          "supination": [
+            0,
+            1
+          ]
+        },
+        "defaults": {
+          "shin": 0,
+          "knee": 0,
+          "torso": 0,
+          "shoulder": 0,
+          "elbow": 0,
+          "supination": 0
+        }
+      },
+      "supine-bench-v1": {
+        "use": "Lying face up on a flat bench, feet on the floor; each arm posed on its own.",
+        "sample": "docs/guides/samples/dumbbell-bench-press.json",
+        "camera": "front-three-quarter",
+        "equipment": [
+          "flat-bench-v1",
+          "dumbbell-pair-v1"
+        ],
+        "joints": {
+          "near_shoulder": [
+            0,
+            95
+          ],
+          "near_elbow": [
+            0,
+            130
+          ],
+          "near_tuck": [
+            0,
+            70
+          ],
+          "far_shoulder": [
+            0,
+            95
+          ],
+          "far_elbow": [
+            0,
+            130
+          ],
+          "far_tuck": [
+            0,
+            70
+          ]
+        },
+        "defaults": {
+          "near_shoulder": 0,
+          "near_elbow": 0,
+          "near_tuck": 0,
+          "far_shoulder": 0,
+          "far_elbow": 0,
+          "far_tuck": 0
+        }
+      },
+      "hinge-bench-side-v1": {
+        "use": "Hinged over a flat bench, far hand and knee on it, near foot on the floor; near arm works.",
+        "sample": "docs/guides/samples/one-arm-dumbbell-row.json",
+        "camera": "side-three-quarter",
+        "equipment": [
+          "flat-bench-v1",
+          "dumbbell-v1"
+        ],
+        "joints": {
+          "torso": [
+            60,
+            88
+          ],
+          "shoulder": [
+            -90,
+            60
+          ],
+          "elbow": [
+            0,
+            150
+          ]
+        },
+        "defaults": {
+          "torso": 75,
+          "shoulder": 0,
+          "elbow": 0
+        }
+      }
+    },
+    "check": [
+      "node tests/guides.test.mjs",
+      "node docs/guides/render-previews.mjs path/to/guide.json"
+    ]
+  },
   "exercise": "built-in-exercise-slug",
   "title": "Exercise name, sentence case",
   "rig": "standing-side-v1",
   "camera": "Side view, figure facing right",
-  "equipment": ["dumbbell-v1"],
-  "timing": { "move_ms": 1100, "hold_ms": 650 },
+  "equipment": [
+    "dumbbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1100,
+    "hold_ms": 650
+  },
   "poses": [
     {
       "id": "setup",
       "label": "Setup",
       "description": "One sentence on what to do in this position, matching the written cue.",
       "hold_ms": 900,
-      "joints": { "torso": 0, "shoulder": 0, "elbow": 0, "supination": 0 },
+      "joints": {
+        "torso": 0,
+        "shoulder": 0,
+        "elbow": 0,
+        "supination": 0
+      },
       "arrow": null
     },
     {
       "id": "top",
       "label": "Top",
       "description": "One sentence for this position.",
-      "joints": { "torso": 0, "shoulder": 0, "elbow": 120, "supination": 1 },
+      "joints": {
+        "torso": 0,
+        "shoulder": 0,
+        "elbow": 120,
+        "supination": 1
+      },
       "arrow": "up"
     }
   ],
@@ -28,9 +204,15 @@
     "status": "draft",
     "checked": "YYYY-MM-DD",
     "checked_by": "Who checked the poses",
-    "checks": ["What was compared against the references: setup, grip, joint paths, range."],
-    "references": ["https://a reputable source for this exercise"],
-    "limitations": ["Anything the simplified figure does not show."]
+    "checks": [
+      "What was compared against the references: setup, grip, joint paths, range."
+    ],
+    "references": [
+      "https://a reputable source for this exercise"
+    ],
+    "limitations": [
+      "Anything the simplified figure does not show."
+    ]
   },
   "source": {
     "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
