@@ -111,17 +111,26 @@ export function fmtSets(sets, unit) {
 }
 
 let toastTimer = null;
+/**
+ * Short message above the tab bar (#279): dark and translucent with a mint
+ * edge, an icon for the kind (a tick for done, ! for 'bad', an arrow when it
+ * can be tapped), and a thin line that runs down while it shows. It never
+ * takes taps unless it can be tapped, so it can't block what is under it.
+ */
 export function toast(message, kind = '', onTap = null) {
   let el = document.getElementById('toast');
   if (!el) {
     el = h('div', { id: 'toast', role: 'status' });
     document.body.append(el);
   }
-  el.textContent = message;
+  const ms = onTap ? 6000 : 3200;
+  const timer = h('span', { class: 'toast-timer', 'aria-hidden': 'true' });
+  timer.style.setProperty('animation-duration', `${ms}ms`);
+  el.replaceChildren(icon(kind === 'bad' ? 'info' : onTap ? 'up' : 'check', 18), h('span', { class: 'toast-text' }, message), timer);
   el.className = `toast show ${kind}${onTap ? ' tappable' : ''}`;
   el.onclick = onTap ? () => { el.className = 'toast'; onTap(); } : null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.className = 'toast'), onTap ? 6000 : 3200);
+  toastTimer = setTimeout(() => (el.className = 'toast'), ms);
 }
 
 /** Bottom sheet. Returns a close function. `actions` sit in the header, left of Close. */
