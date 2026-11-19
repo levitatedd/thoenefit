@@ -366,7 +366,7 @@ function render() {
   else if (tab === 'trends') view = viewTrends();
   else if (tab === 'exercises') view = arg === 'new' ? viewExerciseForm(null) : arg === 'edit' ? viewExerciseForm(Number(arg2)) : arg ? viewExercise(Number(arg)) : viewExercises();
   else if (tab === 'settings') {
-    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword, feedback: viewFeedback }[arg];
+    const sub = { import: viewImport, users: viewUsers, 'whats-new': viewWhatsNew, routines: viewRoutines, strava: viewStrava, install: viewInstallHelp, password: viewPassword, feedback: viewFeedback, guides: viewGuideReview }[arg];
     view = arg === 'gym' ? viewGymForm(arg2 === 'new' ? null : Number(arg2)) : sub ? sub() : viewSettings();
   }
   else view = viewToday();
@@ -3832,6 +3832,140 @@ function feedbackList(items, withNames = false) {
       f.issue_url && [' · ', h('a', { href: f.issue_url, target: '_blank', rel: 'noopener' }, `#${f.issue_number}`)]))));
 }
 
+const REVIEW_STATUS = { pending: 'Pending review', good: 'Good', revise: 'Needs revision' };
+
+/**
+ * Movement guide review (#277), admin only: a queue of guides waiting for a
+ * look, each opened in place in the same player people see, marked good or
+ * needing revision (with a note), then on to the next one. Decided guides move
+ * to the history, where a decision can be changed or the guide reopened.
+ * Decisions are feedback only: they never show or hide a guide.
+ */
+function viewGuideReview() {
+  const back = backLink('settings', 'Settings');
+  if (S.user.role !== 'admin') return h('main', { class: 'page' }, back, h('h1', {}, 'Movement guide review'), h('p', { class: 'muted' }, 'Only the admin can review movement guides.'));
+  let data = null;
+  let tab = 'queue';
+  let open = null; // slug being reviewed
+  const body = h('div', { class: 'stack' }, h('p', { class: 'muted pad' }, 'Loading'));
+  const counts = h('div', { class: 'review-counts' });
+  const search = h('input', { type: 'search', placeholder: 'Search guides', 'aria-label': 'Search guides', autocomplete: 'off', spellcheck: 'false', oninput: () => paint() });
+  const batch = h('select', { 'aria-label': 'Batch', onchange: () => paint() });
+  const status = h('select', { 'aria-label': 'Decision', onchange: () => paint() },
+    h('option', { value: '' }, 'All decisions'), h('option', { value: 'good' }, 'Good'), h('option', { value: 'revise' }, 'Needs revision'));
+  const tabs = h('div', { class: 'review-tabs', role: 'group', 'aria-label': 'Show' });
+  const when = (at) => fmtDate(at, { month: 'short', day: 'numeric', year: 'numeric' });
+  const decisionLine = (d, g) => {
+    const pose = d.pose && (g.poses.find((p) => p.id === d.pose)?.label || d.pose);
+    const label = d.decision === 'reopened' ? 'Reopened' : REVIEW_STATUS[d.decision];
+    return h('li', { class: 'review-note' },
+      h('span', { class: `status-pill ${d.decision}` }, label),
+      h('span', { class: 'log-meta' }, [pose && `Pose: ${pose}`, d.reviewer, when(d.at), d.revision !== g.revision && 'earlier version'].filter(Boolean).join(' · ')),
+      d.note && h('p', { class: 'review-note-text' }, d.note));
+  };
+  const pending = () => data.guides.filter((g) => g.status === 'pending');
+  const shown = () => {
+    const q = search.value.trim().toLowerCase();
+    return data.guides.filter((g) => (tab === 'queue' ? g.status === 'pending' : g.status !== 'pending')
+      && (!batch.value || g.batch === batch.value)
+      && (tab === 'queue' || !status.value || g.status === status.value)
+      && (!q || g.name.toLowerCase().includes(q) || g.slug.includes(q)));
+  };
+  const row = (g) => h('li', {},
+    h('button', { type: 'button', class: 'log-row link-row review-row', onclick: () => { open = g.slug; paint(); window.scrollTo(0, 0); } },
+      h('span', { class: 'log-title' }, g.name),
+      h('span', { class: 'log-meta' }, [data.batches[g.batch], g.status === 'pending' && g.history.length ? 'Updated since last review' : '', g.status !== 'pending' && g.decision && `${g.decision.reviewer}, ${when(g.decision.at)}`].filter(Boolean).join(' · ')),
+      g.status !== 'pending' && h('span', { class: `status-pill ${g.status}` }, REVIEW_STATUS[g.status]),
+      h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('back', 20))));
+  const reviewOf = (g) => {
+    const note = h('textarea', { name: 'review_note', rows: 4, maxlength: 2000, placeholder: 'What should change? Required for Needs revision.' });
+    const pose = h('select', { name: 'review_pose', 'aria-label': 'Which pose' }, h('option', { value: '' }, 'Whole guide'), g.poses.map((p) => h('option', { value: p.id }, p.label)));
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const playerSlot = h('div', { class: 'guide-slot' }, h('p', { class: 'muted pad' }, 'Loading the guide'));
+    fetch(`guides/${g.file}?r=${g.revision}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error('missing'))))
+      .then((guide) => playerSlot.replaceChildren(guidePlayer(guide)), () => playerSlot.replaceChildren(h('p', { class: 'muted' }, 'This guide could not be loaded.')));
+    const save = async (decision, button) => {
+      error.textContent = '';
+      if (decision === 'revise' && !note.value.trim()) {
+        error.textContent = 'Say what should change before marking it Needs revision.';
+        note.focus();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const wasPending = g.status === 'pending';
+        const order = pending().map((x) => x.slug);
+        data = await api.post('review_guide', { slug: g.slug, revision: g.revision, decision, note: note.value, pose: pose.value });
+        // Straight on to the next guide waiting, in queue order.
+        const left = pending().map((x) => x.slug);
+        const next = wasPending ? order.slice(order.indexOf(g.slug) + 1).concat(order).find((s) => left.includes(s)) : null;
+        toast(`${g.name}: ${REVIEW_STATUS[decision]}.${next ? ' Next guide.' : left.length ? '' : ' The queue is empty.'}`);
+        open = next || null;
+        paint();
+        window.scrollTo(0, 0);
+      } catch (e) {
+        error.textContent = e.offline ? 'No connection to the server.' : e.message;
+        button.disabled = false;
+      }
+    };
+    const good = h('button', { type: 'button', class: 'btn mint', onclick: (e) => save('good', e.currentTarget) }, 'Mark good');
+    const revise = h('button', { type: 'button', class: 'btn', onclick: (e) => save('revise', e.currentTarget) }, 'Needs revision');
+    return [
+      h('button', { type: 'button', class: 'back review-back', onclick: () => { open = null; paint(); } }, icon('back', 20), tab === 'queue' ? 'Queue' : 'History'),
+      h('div', { class: 'review-title' }, h('h2', {}, g.name), h('span', { class: `status-pill ${g.status}` }, REVIEW_STATUS[g.status])),
+      h('p', { class: 'muted small' }, `${data.batches[g.batch]} · version ${g.revision}`),
+      g.cues && section('Form cues', h('p', { class: 'cues' }, g.cues)),
+      playerSlot,
+      g.history.length > 0 && section('Earlier feedback', h('ul', { class: 'log review-history' }, g.history.map((d) => decisionLine(d, g)))),
+      section(g.status === 'pending' ? 'Your decision' : 'Change the decision',
+        h('div', { class: 'stack' }, field('Pose', pose, 'Optional: the pose the note is about.'), field('Note', note), error,
+          h('div', { class: 'review-actions' }, good, revise),
+          g.status !== 'pending' && h('button', { type: 'button', class: 'btn ghost block', onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              data = await api.post('reopen_guide', { slug: g.slug });
+              toast(`${g.name} is back in the queue.`);
+              open = null;
+              tab = 'queue';
+              paint();
+            } catch (err) {
+              error.textContent = err.offline ? 'No connection to the server.' : err.message;
+              e.currentTarget.disabled = false;
+            }
+          } }, 'Reopen for review'))),
+    ];
+  };
+  function paint() {
+    if (!data) return;
+    const c = data.counts;
+    fill(counts, [['pending', 'Pending review'], ['good', 'Good'], ['revise', 'Needs revision']].map(([k, label]) =>
+      h('div', { class: `review-count ${k}`, 'data-count': k }, h('strong', {}, String(c[k])), h('span', {}, label))));
+    const g = open && data.guides.find((x) => x.slug === open);
+    if (g) {
+      fill(body, reviewOf(g));
+      return;
+    }
+    fill(tabs, [['queue', `Queue (${c.pending})`], ['history', `History (${c.good + c.revise})`]].map(([k, label]) =>
+      h('button', { type: 'button', class: 'choice', 'aria-pressed': String(tab === k), onclick: () => { tab = k; paint(); } }, label)));
+    const list = shown();
+    fill(body,
+      tabs,
+      h('div', { class: 'filters review-filters' }, search, tab === 'queue' ? batch : status),
+      tab === 'history' && h('div', { class: 'filters review-batch' }, batch),
+      list.length
+        ? h('ul', { class: 'log link-list', 'data-list': `review-${tab}` }, list.map(row))
+        : h('p', { class: 'muted pad' }, tab === 'queue' ? (c.pending ? 'Nothing waiting matches.' : 'Nothing waiting for review.') : 'No decisions match.'));
+  }
+  api.get('guide_reviews').then((d) => {
+    data = d;
+    fill(batch, h('option', { value: '' }, 'All batches'), Object.entries(d.batches).filter(([k]) => d.guides.some((g) => g.batch === k)).map(([k, v]) => h('option', { value: k }, v)));
+    paint();
+  }, (e) => fill(body, h('p', { class: 'muted pad' }, e.offline ? 'This needs a connection.' : e.message)));
+  return h('main', { class: 'page' }, back, h('h1', {}, 'Movement guide review'),
+    h('p', { class: 'muted' }, 'Guides waiting for a look. A decision is feedback for the next revision; it never shows or hides a guide.'),
+    counts, body);
+}
+
 /** Send feedback (#20): it becomes a public GitHub issue, without the sender's name. */
 function viewFeedback() {
   const head = [backLink('settings', 'Settings'), h('h1', {}, 'Send feedback')];
@@ -3922,8 +4056,9 @@ function viewSettings() {
       ['#/settings/install', 'Add to your Home Screen', install.isInstalled() ? 'You are using the installed app' : 'Open full screen and keep working with no signal'],
       S.feedbackEnabled && ['#/settings/feedback', 'Send feedback', 'Ideas, problems or anything else'],
       ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
-    S.user.role === 'admin' && section('Users', linkList(
-      ['#/settings/users', 'Manage users', 'Add people, set the invite code, reset passwords'])),
+    S.user.role === 'admin' && section('Admin', linkList(
+      ['#/settings/users', 'Manage users', 'Add people, set the invite code, reset passwords'],
+      ['#/settings/guides', 'Movement guide review', 'Check each guide and mark it good or needing revision'])),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       linkList(['#/settings/password', 'Change password', 'Signs you out on your other devices']),

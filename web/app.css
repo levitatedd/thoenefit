@@ -2747,3 +2747,115 @@ button.setup-note {
   font-weight: 600;
 }
 
+
+/* Movement guide review (#277) */
+.review-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.review-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+}
+
+.review-count strong {
+  font: 700 24px/1.1 var(--display);
+  color: var(--chalk);
+}
+
+.review-count span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.review-count.pending strong {
+  color: var(--mint);
+}
+
+.review-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.review-tabs .choice {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.review-batch {
+  grid-template-columns: 1fr;
+}
+
+.review-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.review-row .status-pill {
+  margin-top: 4px;
+  justify-self: start;
+  align-self: flex-start;
+  width: fit-content;
+}
+
+.review-filters {
+  grid-template-columns: 1fr 1fr;
+}
+
+.review-back {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.review-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.review-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.review-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 2px;
+}
+
+.review-note-text {
+  flex-basis: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.status-pill.good {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.status-pill.revise {
+  background: transparent;
+  color: var(--yellow);
+  box-shadow: inset 0 0 0 1px currentColor;
+}
