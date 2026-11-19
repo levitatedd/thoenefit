@@ -538,6 +538,8 @@ final class Api
             'routines' => $this->routines->all($uid),
             'strava' => $this->strava->connection($uid),
             'feedback_enabled' => $this->feedback->enabled(),
+            // Guides waiting for the admin's review (#277): a badge on Settings.
+            'guides_pending' => Auth::isAdmin($user) ? $this->guideReviews->queue()['counts']['pending'] : 0,
             'vocab' => [
                 'equipment' => Catalog::equipment(),
                 'equipment_alternatives' => Catalog::EQUIPMENT_ALTERNATIVES,
