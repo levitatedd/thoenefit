@@ -16,12 +16,10 @@
 /** Standing figure seen from its right side, facing right. Lengths in viewBox units. */
 export const RIGS = {
   'standing-side-v1': {
-    viewBox: [48, 42, 160, 190],
+    viewBox: [44, 30, 168, 202],
     ground: 224,
     hip: [118, 132],
     len: { torso: 54, neck: 9, upperArm: 34, forearm: 30, thigh: 44, shin: 44, foot: 20 },
-    head: { rx: 12, ry: 15 },
-    width: { torso: 24, upperArm: 10, forearm: 9, thigh: 13, shin: 11 },
     limits: {
       torso: [-15, 45], shoulder: [-40, 100], elbow: [0, 150], wrist: [-30, 30],
       hip: [-30, 100], knee: [0, 140], supination: [0, 1],
@@ -79,10 +77,65 @@ export function between(rig, a, b, t) {
 export const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 // Colours live on the shapes, so a guide's SVG looks the same in the app and on its own.
-const C = { edge: '#0c4631', joint: '#1c9a63', metal: '#a7b0ba', metalEdge: '#5d6670', handle: '#7c8590', ground: '#2b333d', arrow: '#3af29c' };
-const seg = (a, b, w, cls, stroke) => `<line class="${cls}" x1="${r1(a[0])}" y1="${r1(a[1])}" x2="${r1(b[0])}" y2="${r1(b[1])}" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round"/>`;
-const limb = (a, b, w, fill) => seg(a, b, w + 3, 'g-edge', C.edge) + seg(a, b, w, 'g-limb', fill);
-const joint = (p, r) => `<circle class="g-joint" cx="${r1(p[0])}" cy="${r1(p[1])}" r="${r}" fill="${C.joint}" stroke="${C.edge}" stroke-width="1"/>`;
+const C = {
+  edge: '#14724a', metal: '#b9c1ca', metalDark: '#6c757f', metalEdge: '#4d555e',
+  handle: '#8a939d', ground: '#2b333d', arrow: '#3af29c', shine: '#d6fff0',
+};
+
+/** Unit normal (to the left of travel) and length from a to b. */
+const normal = (a, b) => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const L = Math.hypot(dx, dy) || 1;
+  return [[-dy / L, dx / L], L];
+};
+const off = (p, n, r) => [p[0] + n[0] * r, p[1] + n[1] * r];
+const along = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+/**
+ * A limb: rounded at both ends, `ra` wide at a and `rb` at b, with each side
+ * bowing out by `bulgeL` / `bulgeR` at `at` (0..1) along it, like a muscle.
+ * Left and right are relative to the direction from a to b.
+ */
+function limbPath(a, b, ra, rb, { bulgeL = 0, bulgeR = 0, at = 0.4 } = {}) {
+  const [n] = normal(a, b);
+  const m = along(a, b, at);
+  const rm = ra + (rb - ra) * at;
+  const pa1 = off(a, n, ra);
+  const pb1 = off(b, n, rb);
+  const pb2 = off(b, n, -rb);
+  const pa2 = off(a, n, -ra);
+  const c1 = off(m, n, (rm + bulgeL) * 2 - (ra + rb) / 2);
+  const c2 = off(m, n, -((rm + bulgeR) * 2 - (ra + rb) / 2));
+  return `M${pt(pa1)} Q${pt(c1)} ${pt(pb1)} A${r1(rb)} ${r1(rb)} 0 0 0 ${pt(pb2)} Q${pt(c2)} ${pt(pa2)} A${r1(ra)} ${r1(ra)} 0 0 0 ${pt(pa1)} Z`;
+}
+
+/** A smooth closed outline through points (Catmull-Rom turned into curves). */
+function smooth(points) {
+  const P = points;
+  const n = P.length;
+  let d = `M${pt(P[0])}`;
+  for (let k = 0; k < n; k++) {
+    const p0 = P[(k - 1 + n) % n];
+    const p1 = P[k];
+    const p2 = P[(k + 1) % n];
+    const p3 = P[(k + 2) % n];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${pt(c1)} ${pt(c2)} ${pt(p2)}`;
+  }
+  return `${d} Z`;
+}
+
+/** Points given across (u, forward) and up (v) from an origin, turned by `lean` degrees. */
+const frame = (origin, lean) => {
+  const f = [Math.cos(rad(lean)), Math.sin(rad(lean))];
+  const u = up(lean, 1);
+  return ([x, y]) => [origin[0] + f[0] * x + u[0] * y, origin[1] + f[1] * x + u[1] * y];
+};
+
+const shape = (d, fill, cls = 'g-body', edge = C.edge) => `<path class="${cls}" d="${d}" fill="${fill}" stroke="${edge}" stroke-width="1.3" stroke-linejoin="round"/>`;
+const ball = (p, r, fill) => `<circle class="g-joint" cx="${r1(p[0])}" cy="${r1(p[1])}" r="${r}" fill="${fill}" stroke="${C.edge}" stroke-width="1.1"/>`;
 
 /**
  * A dumbbell in the hand. The handle runs across the palm, square to the
@@ -101,9 +154,9 @@ function dumbbell(at, forearm, s) {
   const b = [at[0] - ax * half, at[1] - ay * half];
   const rx = r1(thick + (plate - thick) * s);
   const rot = r1(-forearm);
-  const disc = (c) => `<ellipse class="g-metal" cx="${r1(c[0])}" cy="${r1(c[1])}" rx="${rx}" ry="${plate}" fill="${C.metal}" stroke="${C.metalEdge}" stroke-width="1.2" transform="rotate(${rot} ${r1(c[0])} ${r1(c[1])})"/>`;
+  const disc = (c) => `<ellipse class="g-metal" cx="${r1(c[0])}" cy="${r1(c[1])}" rx="${rx}" ry="${plate}" fill="${C.metal}" stroke="${C.metalEdge}" stroke-width="1.2" transform="rotate(${rot} ${r1(c[0])} ${r1(c[1])})"/><ellipse cx="${r1(c[0])}" cy="${r1(c[1])}" rx="${r1(Math.max(1, rx - 2.4))}" ry="${plate - 2.4}" fill="none" stroke="${C.metalDark}" stroke-width="0.8" transform="rotate(${rot} ${r1(c[0])} ${r1(c[1])})"/>`;
   const bar = half > 0.5 ? `<line class="g-handle" x1="${r1(a[0])}" y1="${r1(a[1])}" x2="${r1(b[0])}" y2="${r1(b[1])}" stroke="${C.handle}" stroke-width="3.5" stroke-linecap="round"/>` : '';
-  const hub = s > 0.6 ? `<circle class="g-hub" cx="${r1(at[0])}" cy="${r1(at[1])}" r="${r1(2.4 * s)}" fill="${C.metalEdge}"/>` : '';
+  const hub = s > 0.6 ? `<circle class="g-hub" cx="${r1(at[0])}" cy="${r1(at[1])}" r="${r1(2.2 * s)}" fill="${C.metalDark}"/>` : '';
   return `<g class="g-dumbbell">${bar}${disc(b)}${disc(a)}${hub}</g>`;
 }
 
@@ -130,40 +183,57 @@ function arrow(J, dir, rig) {
 export function render(guide, pose, { id = 'g', arrowDir = null, label = '' } = {}) {
   const rig = rigOf(guide);
   const J = joints(rig, pose);
-  const W = rig.width;
   const [vx, vy, vw, vh] = rig.viewBox;
-  const back = [J.hip[0] - 5, J.hip[1]];
-  const backKnee = [J.knee[0] - 5, J.knee[1]];
-  const backAnkle = [J.ankle[0] - 5, J.ankle[1]];
-  // Head sits on the neck, tilted with the torso.
-  const headC = add(J.neck, up(J.j.torso, rig.head.ry - 1));
+  const mint = `url(#${id}-mint)`;
+  const far = `url(#${id}-far)`;
+  const lean = J.j.torso;
+  // Torso, pelvis and head are drawn in the body's own frame (x forward, y up from
+  // the hip), then turned with the torso, so they lean as one piece.
+  const T = frame(J.hip, lean);
+  const torso = smooth([[-10, 50], [-12.5, 40], [-10.5, 28], [-8, 17], [7, 17], [13, 26], [16.5, 38], [13.5, 50], [5, 58], [-6, 57]].map(T));
+  const belly = smooth([[-8, 20], [-9.5, 9], [-8, 3], [8, 3], [10, 10], [8, 20]].map(T));
+  const pelvis = smooth([[-12, 4], [-12.5, -3], [-8, -9], [4, -10], [11, -4], [11.5, 3], [5, 6], [-6, 6]].map(T));
+  // Head: an egg tilted a little forward, chin towards the front, on a short neck.
+  const H = frame(J.neck, lean);
+  const head = smooth([[-8, 5], [-10, 13], [-6, 21], [2, 23.5], [9, 19], [11, 11], [9.5, 4], [4, 0], [-3, 0]].map(H));
+  const neck = limbPath(H([0, -6]), H([1.5, 3]), 4.6, 4);
+  // Far leg, set a little behind and darker.
+  const shift = (p) => [p[0] - 5, p[1]];
+  const fHip = shift(J.hip);
+  const fKnee = shift(J.knee);
+  const fAnkle = shift(J.ankle);
+  const foot = (ankle, fill) => shape(smooth([[ankle[0] - 5, ankle[1] - 3], [ankle[0] + 3, ankle[1] - 4], [ankle[0] + rig.len.foot - 2, ankle[1] - 1.5], [ankle[0] + rig.len.foot, ankle[1] + 2.5], [ankle[0] + 2, ankle[1] + 3], [ankle[0] - 6, ankle[1] + 2.5]]), fill);
+  // Hand: a closed fist round the handle.
+  const [nF] = normal(J.elbow, J.hand);
+  const fist = smooth([off(J.hand, nF, 4.6), off(along(J.elbow, J.hand, 1.12), nF, 2.6), off(along(J.elbow, J.hand, 1.12), nF, -2.6), off(J.hand, nF, -4.6), off(along(J.elbow, J.hand, 0.9), nF, -3.4), off(along(J.elbow, J.hand, 0.9), nF, 3.4)]);
   const parts = [
-    // Gradients span the whole picture (userSpaceOnUse): a gradient sized to a straight
-    // vertical limb would have no width and paint nothing.
-    `<defs><linearGradient id="${id}-mint" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw}" y2="${vy + vh}"><stop offset="0" stop-color="#9dfdd0"/><stop offset="1" stop-color="#2fdd8c"/></linearGradient><linearGradient id="${id}-far" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw}" y2="${vy + vh}"><stop offset="0" stop-color="#4fc48f"/><stop offset="1" stop-color="#1f8a59"/></linearGradient></defs>`,
-    `<line class="g-ground" x1="${r1(J.hip[0] - 55)}" y1="${rig.ground}" x2="${r1(J.hip[0] + 60)}" y2="${rig.ground}" stroke="${C.ground}" stroke-width="1.5"/>`,
-    // Far leg, a touch behind and darker.
-    limb(back, backKnee, W.thigh, `url(#${id}-far)`),
-    limb(backKnee, backAnkle, W.shin, `url(#${id}-far)`),
-    limb(backAnkle, [backAnkle[0] + rig.len.foot - 4, backAnkle[1]], 7, `url(#${id}-far)`),
-    // Near leg.
-    limb(J.hip, J.knee, W.thigh, `url(#${id}-mint)`),
-    limb(J.knee, J.ankle, W.shin, `url(#${id}-mint)`),
-    limb(J.ankle, J.toe, 8, `url(#${id}-mint)`),
-    joint(J.knee, 3.4),
-    // Torso and pelvis.
-    limb(J.hip, J.shoulder, W.torso, `url(#${id}-mint)`),
-    `<ellipse class="g-body" cx="${r1(J.hip[0])}" cy="${r1(J.hip[1] + 2)}" rx="13" ry="9" fill="url(#${id}-mint)" stroke="${C.edge}" stroke-width="1.5"/>`,
-    // Chest, so the torso reads as a body rather than a bar.
-    (() => { const c = add(J.hip, up(J.j.torso, rig.len.torso * 0.62)); return `<ellipse class="g-body" cx="${r1(c[0] + 2)}" cy="${r1(c[1])}" rx="15" ry="22" fill="url(#${id}-mint)" stroke="${C.edge}" stroke-width="1.5" transform="rotate(${r1(J.j.torso)} ${r1(c[0])} ${r1(c[1])})"/>`; })(),
-    limb(J.shoulder, J.neck, 7, `url(#${id}-mint)`),
-    `<ellipse class="g-body" cx="${r1(headC[0])}" cy="${r1(headC[1])}" rx="${rig.head.rx}" ry="${rig.head.ry}" fill="url(#${id}-mint)" stroke="${C.edge}" stroke-width="1.5" transform="rotate(${r1(J.j.torso)} ${r1(headC[0])} ${r1(headC[1])})"/>`,
-    // Near arm, in front of the body, with the dumbbell.
-    limb(J.shoulder, J.elbow, W.upperArm, `url(#${id}-mint)`),
-    limb(J.elbow, J.hand, W.forearm, `url(#${id}-mint)`),
-    joint(J.shoulder, 4),
-    joint(J.elbow, 3.4),
+    // Gradients span the whole picture (userSpaceOnUse): one sized to a straight
+    // vertical shape would have no width and paint nothing.
+    `<defs><linearGradient id="${id}-mint" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#b4ffdc"/><stop offset="0.45" stop-color="#6ef3b4"/><stop offset="1" stop-color="#2fd98a"/></linearGradient><linearGradient id="${id}-far" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#5fd6a0"/><stop offset="1" stop-color="#1e9a62"/></linearGradient></defs>`,
+    `<ellipse class="g-ground" cx="${r1(J.hip[0] + 4)}" cy="${rig.ground + 1}" rx="40" ry="3" fill="${C.ground}"/>`,
+    // Far leg.
+    shape(limbPath(fHip, fKnee, 7, 5.2, { bulgeL: 0.8, bulgeR: 1.1 }), far),
+    shape(limbPath(fKnee, fAnkle, 5, 3.2, { bulgeR: 1.3, at: 0.3 }), far),
+    foot(fAnkle, far),
+    // Near leg: thigh, calf, foot, with ball joints at the knee and ankle.
+    shape(limbPath(J.hip, J.knee, 7.5, 5.4, { bulgeL: 0.9, bulgeR: 1.2 }), mint),
+    shape(limbPath(J.knee, J.ankle, 5.3, 3.4, { bulgeL: 0.5, bulgeR: 1.6, at: 0.3 }), mint),
+    foot(J.ankle, mint),
+    ball(J.ankle, 3, mint),
+    ball(J.knee, 4.6, mint),
+    // Body: pelvis, abdomen and chest, with mannequin seams between them.
+    shape(pelvis, mint),
+    shape(belly, mint),
+    shape(torso, mint),
+    shape(neck, mint),
+    shape(head, mint),
+    // Near arm, in front of the body: upper arm, forearm, fist, ball joints.
+    shape(limbPath(J.shoulder, J.elbow, 5.6, 4.4, { bulgeL: 0.4, bulgeR: 1.3, at: 0.45 }), mint),
+    ball(J.shoulder, 5.4, mint),
+    shape(limbPath(J.elbow, J.hand, 4.6, 3.1, { bulgeL: 0.9, bulgeR: 0.4, at: 0.3 }), mint),
+    ball(J.elbow, 3.8, mint),
     dumbbell(J.hand, J.forearm, J.j.supination),
+    shape(fist, mint),
     arrowDir ? arrow(J, arrowDir, rig) : '',
   ];
   const title = label ? `<title>${label.replace(/[<&]/g, '')}</title>` : '';
