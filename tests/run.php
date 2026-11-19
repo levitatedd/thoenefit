@@ -1559,6 +1559,14 @@ $wk->save($ru, $rd2);
 $rb2 = $gen->block($ruser, $rg, $exById[$bench]);
 check('an unrated latest session uses the usual rules, not an older rating', $rb2['previous']['reps_left'] === null && $rb2['suggested_weight'] === 140.0, json_encode([$rb2['suggested_weight'], $rb2['previous']['reps_left'] ?? 'x']));
 
+echo "Bulgarian split squat needs a pair (#254)\n";
+$bss = $db->one("SELECT id, equipment FROM exercises WHERE slug='bulgarian-split-squat' AND user_id IS NULL");
+check('the Bulgarian Split Squat asks for a dumbbell pair and a bench, not a single dumbbell', json_decode($bss['equipment'], true) === ['dumbbells', 'bench']);
+$oneDb = $mkGym($uid, 'One dumbbell', ['single_dumbbell', 'bench']);
+$pairGym = $mkGym($uid, 'A pair', ['dumbbells', 'bench']);
+$avail = fn(array $g) => array_column(array_filter(Catalog::forUser($db, $uid), static fn($e) => Catalog::supports($e, $g['equipment'])), 'id');
+check('a gym with one dumbbell no longer gets it; a gym with a pair does', !in_array((int) $bss['id'], $avail($oneDb), true) && in_array((int) $bss['id'], $avail($pairGym), true));
+
 echo "Stalled lifts (#124)\n";
 $su = $auth->createUser('staller', 'staller long password');
 $sg = $mkGym($su, 'Stall gym', Catalog::equipmentKeys());

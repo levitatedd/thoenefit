@@ -2617,3 +2617,31 @@ button.setup-note {
 .setup-more[hidden] {
   display: none;
 }
+
+/* ---- Shared workout waiting: a count on the Workout tab (#257) ------------ */
+.tab .tab-icon {
+  position: relative;
+}
+
+.tab-badge {
+  position: absolute;
+  top: -6px;
+  left: calc(50% + 9px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--mint);
+  color: var(--ink);
+  font: 700 11px/18px var(--body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* ---- Video demos next to the form cues (#256) ------------------------------ */
+.demo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
