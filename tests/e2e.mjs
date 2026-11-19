@@ -290,6 +290,11 @@ check('the exercise picker tolerates typos but only offers what the gym has (no 
 await page.fill('.sheet input[type=search]', 'pushup');
 check('no stray text in the picker', !/\b(false|undefined|null)\b/.test(await page.textContent('.sheet-body')));
 check('picker: "pushup" puts Push-Up first', (await page.textContent('.sheet .pick .pick-name')) === 'Push-Up');
+{
+  const head = await page.waitForSelector('.sheet .list-head', { timeout: 3000 }).catch(() => null);
+  const mint = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--mint').trim());
+  check('picker: the Similar exercises heading is mint (#269)', head && (await head.evaluate((e) => getComputedStyle(e).color)) === 'rgb(58, 242, 156)' && mint === '#3af29c');
+}
 await shot('05a-picker');
 await page.click('.sheet button:has-text("Close")');
 await page.click('.lift:nth-of-type(2) button:has-text("Add set")');
@@ -718,6 +723,8 @@ const found = await page.$$eval('[data-list=matches] .log-title', (els) => els.m
 const alike = await page.$$eval('[data-list=similar] .log-title', (els) => els.map((e) => e.textContent));
 check(`a misspelled search still finds the exercise ("psuh up" -> ${found[0]})`, found[0] === 'Push-Up' && found.slice(1).every((n) => /Push-Up/.test(n)), found.join(', '));
 check('related movements appear under Similar exercises without repeating a match', alike.length > 0 && !alike.some((n) => found.includes(n)) && (await page.textContent('.list-head')) === 'Similar exercises', alike.join(', '));
+check('exercise library: the Similar exercises heading is mint (#269)', (await page.$eval('.list-head', (e) => getComputedStyle(e).color)) === 'rgb(58, 242, 156)');
+await shot('22a-similar-mint');
 check('no stray text in the results', !/\b(false|undefined|null)\b/.test(await page.textContent('.page')));
 await page.fill('input[type=search]', 'RDL');
 check('"RDL" finds Romanian deadlifts', (await page.$$eval('[data-list=matches] .log-title', (els) => els.every((e) => /Romanian Deadlift/.test(e.textContent)))) === true);
