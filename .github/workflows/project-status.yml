@@ -1,0 +1,28 @@
+name: Project board status
+on:
+  issues:
+    types: [opened, labeled, reopened, closed]
+  pull_request:
+    branches: [staging, main]
+    types: [closed, converted_to_draft]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+concurrency:
+  group: project-status-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_OWNER: levitatedd
+          PROJECT_NUMBER: '5'
+        with:
+          script: |
+            await require('./.github/scripts/project-status/main.js')({ github, context, core, getOctokit });
