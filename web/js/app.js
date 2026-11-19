@@ -384,8 +384,9 @@ function render() {
     ].map(([key, label, ic]) => (key === 'today' && sync?.active
       // During a workout: Pause / Resume on the workout itself, and a plain way back to it from anywhere else.
       ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: `tab workout-tab ${sync.active.paused_at ? 'paused' : ''}`, 'aria-label': sync.active.paused_at ? 'Workout, paused' : 'Workout in progress' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
-      : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24)), h('span', {}, label)))),
+      : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24), key === 'today' && shareBadge()), h('span', {}, label)))),
   );
+  if (!sync?.active) labelWorkoutTab(nav);
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
   // On a screen with a fixed header (#175) it rides along under the title.
   if (sync?.active && tab !== 'workout') {
@@ -1042,6 +1043,34 @@ function pushSharedPlan() {
   api.post('share_workout', { share_key: S.shareKey, to: [], plan: planOf(S.draft.day_type, S.draft.exercises, (b) => b.target_sets) }).catch(() => {});
 }
 
+/** Shared workouts waiting for an answer (#257). */
+const waitingShares = () => (S.shares || []).filter((x) => x.status === 'pending').length;
+
+/** A count on the Workout tab while shared workouts wait, so people know where to find them (#257). */
+function shareBadge() {
+  const n = waitingShares();
+  return n > 0 && h('span', { class: 'tab-badge', 'aria-hidden': 'true' }, String(n));
+}
+
+function labelWorkoutTab(nav) {
+  const tab = nav.querySelector('a.tab[href="#/today"]');
+  if (!tab) return;
+  const n = waitingShares();
+  if (n > 0) tab.setAttribute('aria-label', `Workout, ${n} shared workout${n === 1 ? '' : 's'} waiting`);
+  else tab.removeAttribute('aria-label');
+}
+
+/** Updates the badge in place, for screens that should not be redrawn (a form being filled in). */
+function paintShareBadge() {
+  const nav = document.querySelector('nav.tabs');
+  const icon_ = nav && nav.querySelector('a.tab[href="#/today"] .tab-icon');
+  if (!icon_) return;
+  icon_.querySelector('.tab-badge')?.remove();
+  const b = shareBadge();
+  if (b) icon_.append(b);
+  labelWorkoutTab(nav);
+}
+
 let sharesCheckedAt = 0;
 async function refreshShares(force = false) {
   if (!S.user || (!force && Date.now() - sharesCheckedAt < 15000) || navigator.onLine === false) return;
@@ -1049,7 +1078,10 @@ async function refreshShares(force = false) {
   try {
     const before = JSON.stringify(S.shares || []);
     S.shares = (await api.get('shares')).incoming;
-    if (JSON.stringify(S.shares) !== before && route()[0] === 'today') render();
+    if (JSON.stringify(S.shares) !== before) {
+      if (route()[0] === 'today') render();
+      else paintShareBadge();
+    }
   } catch (e) {
     // Offline or signed out: the cards simply stay as they were.
   }
@@ -1351,6 +1383,15 @@ function viewToday() {
       h('button', { class: 'btn primary grow', type: 'button', disabled: !S.draft || S.draftLoading || !S.draft.exercises.length, onclick: startWorkout }, 'Start workout'),
     ),
   );
+}
+
+/**
+ * Video demos for when the written cues aren't enough (#256): a YouTube search
+ * for the exercise, opened outside the app. Nothing is sent until it's tapped.
+ */
+function demoLink(name) {
+  const q = encodeURIComponent(`how to do ${name} exercise form`);
+  return h('a', { class: 'demo-link', href: `https://www.youtube.com/results?search_query=${q}`, target: '_blank', rel: 'noopener noreferrer' }, icon('play', 16), "Watch how it's done");
 }
 
 function dayLabel(d) {
@@ -1786,7 +1827,8 @@ function startTicker() {
     if (el && sync.active) el.textContent = fmtClock(workoutSeconds(sync.active));
     const bar = document.getElementById('back-elapsed');
     if (bar && sync.active) bar.textContent = fmtClock(workoutSeconds(sync.active));
-    if (route()[0] === 'today' && document.visibilityState === 'visible') refreshShares(); // throttled inside
+    // Throttled inside. Every screen checks, so the Workout tab badge (#257) appears wherever you are.
+    if (document.visibilityState === 'visible') refreshShares();
   }, 500);
 }
 
@@ -2092,6 +2134,7 @@ function exerciseCard(doc, e, idx, nextSet, edit) {
       'div',
       { class: 'stack' },
       ex && ex.cues && h('p', { class: 'cues' }, ex.cues),
+      demoLink(e.name),
       h('button', { type: 'button', class: 'btn block', onclick: () => { close(); noteSheet(e, edit, doc.gym_id && doc.gym_name); } }, icon('pencil', 18), e.note ? 'Edit setup note' : 'Add setup note'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === 0, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx - 1)); } }, icon('up', 18), 'Move earlier'),
       h('button', { type: 'button', class: 'btn block', disabled: idx === doc.exercises.length - 1, onclick: () => { close(); edit((d) => move(d.exercises, idx, idx + 1)); } }, icon('down', 18), 'Move later'),
@@ -2680,7 +2723,9 @@ async function shareWorkoutSheet(workout, recap) {
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   fill(actions,
     canShare && h('button', { class: 'btn primary block', type: 'button', onclick: async () => {
-      try { await navigator.share({ files: [file], title: 'My ThoeneFit workout' }); } catch (e) { /* cancelled */ }
+      // Named after the workout itself (#255), e.g. "Push workout, Nov 18".
+      const title = `${dayLabel(workout.day_type)} workout, ${fmtDate(workout.started_at, { month: 'short', day: 'numeric' })}`;
+      try { await navigator.share({ files: [file], title }); } catch (e) { /* cancelled */ }
     } }, icon('share', 18), 'Share'),
     h('a', { class: `btn block${canShare ? '' : ' primary'}`, href: canvas.toDataURL('image/png'), download: name }, 'Save image'),
     h('p', { class: 'muted small center' }, 'Only your lifts and the date are on the image.'));
@@ -3449,7 +3494,7 @@ function viewExercise(id) {
       art,
       h('dl', { class: 'facts' }, tags.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]), p1rm),
       pinButton(ex)),
-    ex.cues && section('Form cues', h('p', { class: 'cues' }, ex.cues)),
+    section('Form cues', ex.cues && h('p', { class: 'cues' }, ex.cues), demoLink(ex.name)),
     section('Setup notes', exerciseNotesSection(ex)),
     section('History', trend),
     ex.shared && h('p', { class: 'muted small' }, S.user.role === 'admin' ? 'This is in the default library for everyone. As the admin you can still edit or archive it; archiving hides it from suggestions for all accounts.' : 'Added to the default library by the admin.'),

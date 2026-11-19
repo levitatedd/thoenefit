@@ -184,6 +184,12 @@ await page.click('.plan-row:nth-child(3) h3 a');
 await page.waitForSelector('.facts');
 check(`tapping an exercise name on Today opens its history (${first[2]})`, (await page.textContent('h1')) === first[2] && (await page.locator('.section h2:has-text("History")').count()) === 1);
 check('the way back is labelled Today', (await page.textContent('.back')).trim() === 'Today');
+{
+  // #256: a video search for when the written cues aren't enough, opening outside the app.
+  const demo = await page.$eval('.exercise-page .demo-link', (a) => [a.textContent, a.href, a.target, a.rel]);
+  const q = new globalThis.URL(demo[1]).searchParams.get('search_query');
+  check("the exercise page offers Watch how it's done, a YouTube search for that exercise", demo[0] === "Watch how it's done" && demo[1].startsWith('https://www.youtube.com/results?') && q === `how to do ${first[2]} exercise form` && demo[2] === '_blank' && /noopener/.test(demo[3]), JSON.stringify(demo));
+}
 await shot('03a-history-from-today');
 await page.click('.back');
 await page.waitForSelector('.plan-row');
@@ -1003,8 +1009,17 @@ await pp.click('button[type=submit]');
 await pp.waitForSelector('.share-card');
 check('the other person sees it on Today, with who sent it', (await pp.textContent('.share-card')).includes(`${myName} shared a workout with you`));
 if (SHOTS) await pp.screenshot({ path: `${SHOTS}/14-share-incoming.png` });
+// #257: the Workout tab shows how many shared workouts are waiting, from any screen.
+check('the Workout tab shows a count while a shared workout waits', (await pp.textContent('.tabs a.tab[href="#/today"] .tab-badge')) === '1' && (await pp.getAttribute('.tabs a.tab[href="#/today"]', 'aria-label')) === 'Workout, 1 shared workout waiting');
+await pp.click('.tab:has-text("History")');
+await pp.waitForSelector('.tab-home h1:has-text("History")');
+check('the count stays on the Workout tab on other screens', (await pp.textContent('.tabs a.tab[href="#/today"] .tab-badge')) === '1');
+if (SHOTS) await pp.screenshot({ path: `${SHOTS}/14b-share-badge.png` });
+await pp.click('.tab:has-text("Workout")');
+await pp.waitForSelector('.share-card');
 await pp.click('.share-card button:has-text("Accept")');
 await pp.waitForSelector('.shared-note');
+check('accepting clears the count', (await pp.locator('.tabs .tab-badge').count()) === 0);
 await pp.waitForFunction(() => document.querySelectorAll('.plan-row').length > 0 && !document.querySelector('.stack.loading'));
 const theirPlan = await planOn(pp);
 check('accepting gives the same exercises, order and planned sets', shape(theirPlan) === shape(myPlan), `${shape(theirPlan)} <> ${shape(myPlan)}`);
@@ -1862,8 +1877,16 @@ console.log('Workout recap and records (#123)');
   check('no sideways scrolling on the recap', (await overflow()) <= 0);
   await shot('37-history-recap');
   // Share as an image (#160): drawn on the phone when asked, released on close.
+  // #255: the phone's share sheet gets the workout's own name, not "My ThoeneFit workout".
+  await page.evaluate(() => {
+    navigator.canShare = () => true;
+    navigator.share = (d) => { window.__shared = d; return Promise.resolve(); };
+  });
   await page.click('.recap ~ button:has-text("Share workout"), button:has-text("Share workout")');
   await page.waitForSelector('.sheet canvas.share-card');
+  await page.click('.sheet button:has-text("Share")');
+  const sharedTitle = await page.evaluate(() => window.__shared && window.__shared.title);
+  check('sharing the image names it after the workout and its date', /^[A-Z][a-z]+( [a-z]+)? workout, [A-Z][a-z]{2} \d{1,2}$/.test(sharedTitle || '') && !/ThoeneFit/.test(sharedTitle), sharedTitle);
   const shareCard = await page.$eval('.sheet canvas.share-card', (cv) => ({ w: cv.width, h: cv.height, data: cv.toDataURL('image/png') }));
   const save = await page.$eval('.sheet a:has-text("Save image")', (a) => [a.getAttribute('download'), a.getAttribute('href').slice(0, 22)]);
   check('Share workout draws a phone-width PNG of the workout', shareCard.w === 1080 && shareCard.h > 900 && shareCard.data.startsWith('data:image/png'), `${shareCard.w}x${shareCard.h}`);
