@@ -120,6 +120,8 @@ check('stability ball and medicine ball exercises no longer count as bodyweight-
 check('the Commercial gym preset includes the new gear', !array_diff(['medicine_ball', 'stability_ball', 'decline_bench', 'preacher_bench', 'biceps_machine', 'triceps_machine', 'ab_crunch', 'rotary_torso', 'hip_abduction', 'glute_kickback', 'back_extension_machine'], Catalog::presets()[0]['equipment']));
 check('machines with a checkbox can be suggested where they fit; ones with no slot still cannot', $shapes['machine-biceps-curl']['pattern'] === 'biceps' && $shapes['machine-triceps-dip']['pattern'] === 'triceps' && $shapes['ab-crunch-machine']['pattern'] === 'core' && $shapes['hip-adductor-machine']['pattern'] === 'other' && $shapes['partner-medicine-ball-twist']['pattern'] === 'other');
 
+require __DIR__ . "/form-cues-upgrade.php";
+
 echo "Accounts\n";
 $auth = new Auth($db, []);
 $uid = $auth->createUser('Mike', 'correct horse battery', 'Mike');
