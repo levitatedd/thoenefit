@@ -708,6 +708,19 @@ console.log('Pinned exercises (#126)');
   await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
   const pins = (await page.evaluate(async () => (await (await fetch('api.php?a=pins')).json()).pins)).map((p) => p.exercise_id);
   check('unpinning one makes room, and the new one is pinned', pins.length === 5 && pins.includes(ids[4]), JSON.stringify(pins));
+  await waitForToast(page, /Unpinned .* and pinned /);
+  await page.waitForTimeout(250);
+  const look = await page.evaluate(() => {
+    const t = document.getElementById('toast');
+    const cs = getComputedStyle(t);
+    const r = t.getBoundingClientRect();
+    const tabs = document.querySelector('nav.tabs').getBoundingClientRect();
+    const alpha = Number((cs.backgroundColor.match(/rgba?\(([^)]+)\)/)[1].split(',')[3] ?? 1));
+    return { border: cs.borderTopColor, color: cs.color, alpha, gap: tabs.top - r.bottom, icon: !!t.querySelector('.icon svg'), timer: getComputedStyle(t.querySelector('.toast-timer')).animationName, takesTaps: cs.pointerEvents !== 'none' };
+  });
+  check('the pin toast is dark and see-through with a mint edge, a tick and a running line, just above the tab bar (#279)',
+    look.border === 'rgb(58, 242, 156)' && look.color === 'rgb(244, 242, 236)' && look.alpha > 0.7 && look.alpha < 1 && look.icon && look.timer === 'toast-time' && look.gap >= 4 && look.gap <= 24 && !look.takesTaps, JSON.stringify(look));
+  await shot('19c-toast');
   // Leave nothing pinned for the rest of the walk-through.
   await page.evaluate(async (list) => {
     const b = await (await fetch('api.php?a=bootstrap')).json();
