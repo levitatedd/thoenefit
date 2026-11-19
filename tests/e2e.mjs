@@ -1620,8 +1620,8 @@ console.log('Squat, bench press and row guides in the real player (#261)');
   const { readFileSync } = await import('node:fs');
   const read = (f) => readFileSync(new globalThis.URL(`../web/guides/${f}`, import.meta.url), 'utf8');
   const listed = JSON.parse(read('index.json')).guides;
-  const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([, txt]) => JSON.parse(txt).rig !== 'standing-side-v1'));
-  check('the goblet squat, dumbbell bench press and one-arm row have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row'].every((k) => samples[k]));
+  const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([k]) => k !== 'dumbbell-curl'));
+  check('the goblet squat, dumbbell bench press, one-arm row and hammer curl have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row', 'hammer-curl'].every((k) => samples[k]));
   const boot = await api('bootstrap');
   for (const slug of Object.keys(samples)) {
     const ex = boot.exercises.find((e) => e.slug === slug);

@@ -68,22 +68,22 @@
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "reviewed",
     "checked": "2026-11-19",
-    "checked_by": "Codex",
+    "checked_by": "Codex (poses); Claude (pose review and in-app checks)",
     "checks": [
       "Neutral grip stays fixed through all poses and transitions, matching the ThoeneFit cue and ACE guidance.",
       "Upper arm stays alongside the torso as the elbow bends.",
       "Wrist stays in line with the forearm as the torso stays upright.",
-      "The weight lowers along the same path on return."
+      "The weight lowers along the same path on return.",
+      "Claude review: checked against the ACE hammer curl page (neutral grip, dumbbell rising to near the front of the shoulder, full return); poses unchanged. In the app it plays, steps and fits at 320px and 402px."
     ],
     "references": [
       "https://www.acefitness.org/resources/everyone/exercise-library/10/hammer-curl/",
       "https://www.strengthlog.com/hammer-curl/"
     ],
     "limitations": [
-      "Side view shows one working arm. Repeat on the other side as described in the written cue.",
-      "Fit-test playback and visual review are pending integration."
+      "Side view shows one working arm. Repeat on the other side as described in the written cue."
     ]
   },
   "source": {

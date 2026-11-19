@@ -139,6 +139,16 @@ console.log('What each new setup has to show');
   check('the wrong camera or equipment for a rig is reported', errs.some((e) => /camera must be "side"/.test(e)) && errs.some((e) => /not available on the grounded-side-v1 rig/.test(e)), errs.join('; '));
 }
 
+console.log('Hammer curl (#261)');
+{
+  const g = JSON.parse(read('web/guides/hammer-curl.json'));
+  const rig = rigOf(g);
+  const by = Object.fromEntries(g.poses.map((p) => [p.id, { ...rig.defaults, ...p.joints }]));
+  check('hammer curl: the palm faces in the whole way (no turn, unlike the curl)', Object.values(by).every((j) => j.supination === 0));
+  check('hammer curl: upper arm still, torso upright, wrist straight', Object.values(by).every((j) => j.shoulder === 0 && j.torso === 0 && j.wrist === 0));
+  check('hammer curl: a long arm at the bottom and the dumbbell near the front of the shoulder at the top', by.setup.elbow <= 10 && by.top.elbow >= 120 && by.top.elbow <= 145 && joints(rig, by.top).hand[0] > joints(rig, by.top).shoulder[0]);
+}
+
 console.log('Squat, bench press and row guides (#261)');
 {
   const load = (slug) => { const g = JSON.parse(read(`web/guides/${slug}.json`)); return { g, rig: RIGS3D[g.rig], at: (id) => pose3d(RIGS3D[g.rig], g.poses.find((p) => p.id === id).joints, g) }; };
