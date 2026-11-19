@@ -25,6 +25,8 @@ jobs:
         run: |
           sudo systemctl start mysql.service
           TF_TEST_DB=mysql TF_MYSQL_HOST=127.0.0.1 TF_MYSQL_USER=root TF_MYSQL_PASSWORD=root php tests/run.php
+      - name: Project board automation checks
+        run: node --test .github/scripts/project-status/*.test.js
       - name: Offline queue checks
         run: node tests/sync.test.mjs
       - name: Exercise search checks
@@ -64,6 +66,31 @@ jobs:
           { echo '### Browser walk-through failures'; grep -E 'FAIL|Error' "$RUNNER_TEMP/e2e.log" || echo 'No walk-through output: it failed before or while starting.'; } >> "$GITHUB_STEP_SUMMARY"
           grep -E 'FAIL|Error' "$RUNNER_TEMP/e2e.log" || true
           echo '--- PHP server log'; tail -40 "$RUNNER_TEMP/php.log" || true
+
+  project-status:
+    name: Update project after checks
+    needs: test
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: project-status-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_OWNER: levitatedd
+          PROJECT_NUMBER: '5'
+          CHECKS_RESULT: ${{ needs.test.result }}
+        with:
+          script: |
+            await require('./.github/scripts/project-status/main.js')({ github, context, core, getOctokit, checksResult: process.env.CHECKS_RESULT });
 
   deploy:
     name: Upload to DreamHost
