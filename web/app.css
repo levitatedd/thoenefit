@@ -1168,7 +1168,7 @@ input[type="file"] {
   padding-top: 16px;
   border-top: 1px solid var(--line);
   font: 700 19px/1.2 var(--display);
-  color: var(--muted);
+  color: var(--mint);
 }
 
 /* The sign-up form is taller than sign-in, so it starts nearer the top. */
