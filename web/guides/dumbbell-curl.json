@@ -1,0 +1,94 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "dumbbell-curl",
+  "title": "Dumbbell curl",
+  "rig": "standing-side-v1",
+  "camera": "Side view of the working arm, figure facing right",
+  "equipment": [
+    "dumbbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1100,
+    "hold_ms": 650
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Stand tall with the dumbbell at your side, arm long and palm facing your thigh.",
+      "hold_ms": 900,
+      "joints": {
+        "torso": 0,
+        "shoulder": 0,
+        "elbow": 4,
+        "supination": 0
+      },
+      "arrow": null
+    },
+    {
+      "id": "lift",
+      "label": "Lift",
+      "description": "Curl it up with your elbow pinned to your side, turning your palm up as you lift.",
+      "joints": {
+        "torso": 0,
+        "shoulder": 0,
+        "elbow": 80,
+        "supination": 0.85
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Squeeze at the top with your palm up and wrist straight. Your elbow stays at your side.",
+      "joints": {
+        "torso": 0,
+        "shoulder": 6,
+        "elbow": 136,
+        "supination": 1
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower it slowly, turning your palm back towards your thigh, all the way to a long arm.",
+      "joints": {
+        "torso": 0,
+        "shoulder": 0,
+        "elbow": 70,
+        "supination": 0.7
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "pilot-checked",
+    "checked": "2026-11-19",
+    "checked_by": "Claude, for the pilot (#259)",
+    "checks": [
+      "Upper arm stays vertical, pinned to the side, through the lift; it drifts at most 6 degrees forward at the top.",
+      "Wrist stays straight, in line with the forearm, in every pose.",
+      "Torso stays upright (0 degrees) in every pose: no swinging.",
+      "Elbow bends from about 4 degrees (a long arm, not locked) to about 136 at the top, short of the shoulder.",
+      "Palm faces the thigh at the bottom and turns up as the weight rises, matching the app's written cue.",
+      "Lowering returns to the long-arm setup under control (the loop eases in and out)."
+    ],
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/44/seated-biceps-curl/",
+      "https://www.liftosaur.com/exercises/dumbbell-bicep-curl",
+      "https://www.muscleandstrength.com/exercises/standing-dumbbell-curl.html",
+      "https://guide.planfit.ai/en/training-model/7006"
+    ],
+    "limitations": [
+      "Visual guidance from a simplified figure, not an anatomical reference.",
+      "Shows one arm from the side; the written cue covers doing both sides.",
+      "The reference pages were checked through search summaries; their full text could not be opened from the build environment."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js; no third-party images or generated frames.",
+    "license": "Part of ThoeneFit"
+  }
+}

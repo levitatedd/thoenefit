@@ -16,6 +16,7 @@ const SHELL = [
   'js/search.js',
   'js/strength.js',
   'js/plates.js',
+  'js/guides.js',
   'js/ui.js',
   'js/install.js',
   'js/version.js',
