@@ -148,9 +148,9 @@ async function boot() {
     // Offer the notes only when this release has some.
     loadChangelog().then(
       ({ releases }) => (releases[0]?.version === APP_VERSION
-        ? toast("ThoeneFit was updated. Tap to see what's new.", '', () => { location.hash = '#/settings/whats-new'; })
-        : toast('ThoeneFit was updated.')),
-      () => toast('ThoeneFit was updated.'),
+        ? toast("ThoeneFit has received an update!\nTap here to see what's new.", 'update', () => { location.hash = '#/settings/whats-new'; })
+        : toast('ThoeneFit has received an update!', 'update')),
+      () => toast('ThoeneFit has received an update!', 'update'),
     );
   }
 }

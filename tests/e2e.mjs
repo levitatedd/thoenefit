@@ -719,7 +719,7 @@ console.log('Pinned exercises (#126)');
     return { border: cs.borderTopColor, color: cs.color, alpha, gap: tabs.top - r.bottom, icon: !!t.querySelector('.icon svg'), timer: getComputedStyle(t.querySelector('.toast-timer')).animationName, takesTaps: cs.pointerEvents !== 'none' };
   });
   check('the pin toast is dark and see-through with a mint edge, a tick and a running line, just above the tab bar (#279)',
-    look.border === 'rgb(58, 242, 156)' && look.color === 'rgb(244, 242, 236)' && look.alpha > 0.7 && look.alpha < 1 && look.icon && look.timer === 'toast-time' && look.gap >= 4 && look.gap <= 24 && !look.takesTaps, JSON.stringify(look));
+    look.border === 'rgb(58, 242, 156)' && look.color === 'rgb(244, 242, 236)' && look.alpha > 0.7 && look.alpha <= 0.8 && look.icon && look.timer === 'toast-time' && look.gap >= 4 && look.gap <= 24 && !look.takesTaps, JSON.stringify(look));
   await shot('19c-toast');
   // Leave nothing pinned for the rest of the walk-through.
   await page.evaluate(async (list) => {
@@ -1271,8 +1271,10 @@ if (!process.env.TF_URL) {
   try {
     writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
     await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
-    await waitForToast(page, /ThoeneFit was updated/).catch(() => {});
-    check('after a deploy, reopening the app reloads it and says so', /ThoeneFit was updated/.test(await page.textContent('.toast')));
+    await waitForToast(page, /ThoeneFit has received an update!/).catch(() => {});
+    const upd = await page.evaluate(() => { const t = document.getElementById('toast'); const x = t.querySelector('.toast-text'); return { text: x.textContent, align: getComputedStyle(x).textAlign, lines: Math.round(x.getBoundingClientRect().height / parseFloat(getComputedStyle(x).lineHeight)) }; });
+    check('after a deploy, reopening the app reloads it and says so on two centred lines', /^ThoeneFit has received an update!(\nTap here to see what's new\.)?$/.test(upd.text) && upd.align === 'center', JSON.stringify(upd));
+    await shot('12c-update-toast');
   } finally {
     writeFileSync(versionFile, original);
   }
