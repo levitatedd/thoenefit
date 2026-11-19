@@ -1614,6 +1614,42 @@ console.log('Movement guide: dumbbell curl pilot (#259)');
   await page.waitForSelector('.plan-row');
 }
 
+console.log('Squat, bench press and row guides in the real player (#261)');
+{
+  // Every guide on the shared-figure rigs, straight from the app's guide list.
+  const { readFileSync } = await import('node:fs');
+  const read = (f) => readFileSync(new globalThis.URL(`../web/guides/${f}`, import.meta.url), 'utf8');
+  const listed = JSON.parse(read('index.json')).guides;
+  const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([, txt]) => JSON.parse(txt).rig !== 'standing-side-v1'));
+  check('the goblet squat, dumbbell bench press and one-arm row have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row'].every((k) => samples[k]));
+  const boot = await api('bootstrap');
+  for (const slug of Object.keys(samples)) {
+    const ex = boot.exercises.find((e) => e.slug === slug);
+    await page.goto(`${URL}#/exercises/${ex.id}`);
+    await page.reload();
+    await page.waitForSelector('.guide .guide-figure');
+    await page.evaluate(() => document.querySelector('.guide').scrollIntoView({ block: 'center' }));
+    const before = await page.textContent('.guide-status');
+    const n = (await page.locator('.guide-thumb').count());
+    await page.waitForFunction((b) => document.querySelector('.guide-status').textContent !== b, before, { timeout: 8000 });
+    check(`${ex.name} plays in the player (${n} poses)`, n === JSON.parse(samples[slug]).poses.length);
+    for (const [w, h] of [[320, 640], [402, 874]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(250);
+      const fit = await page.evaluate(() => {
+        const svg = document.querySelector('.guide-stage svg');
+        const box = svg.getBoundingClientRect();
+        const art = svg.getBBox();
+        const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(' ').map(Number);
+        return { scroll: document.documentElement.scrollWidth - innerWidth, stageW: Math.round(box.width), inside: art.x >= vx - 0.5 && art.y >= vy - 0.5 && art.x + art.width <= vx + vw + 0.5 && art.y + art.height <= vy + vh + 0.5, controls: [...document.querySelectorAll('.guide-play, .guide-step, .guide-thumb')].every((e) => Math.min(e.getBoundingClientRect().width, e.getBoundingClientRect().height) >= 44) };
+      });
+      check(`${ex.name} fits at ${w}px: drawing inside its frame, controls 44px, no sideways scroll`, fit.scroll <= 0 && fit.inside && fit.controls, JSON.stringify(fit));
+      if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-guide-${slug}.png` });
+    }
+  }
+  await page.setViewportSize({ width: 402, height: 874 });
+}
+
 // Each width gets a fresh page: resizing a phone-emulated page back up can leave it zoomed in,
 // which moves where taps land for the checks after this (#217).
 for (const [w, hgt, label] of [[375, 667, 'iPhone SE'], [393, 852, 'iPhone 16'], [440, 956, 'iPhone Pro Max'], [412, 915, 'Pixel']]) {

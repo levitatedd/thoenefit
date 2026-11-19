@@ -2,6 +2,9 @@
   "format": "thoenefit-movement-guides-index",
   "version": 1,
   "guides": {
-    "dumbbell-curl": "dumbbell-curl.json"
+    "dumbbell-curl": "dumbbell-curl.json",
+    "goblet-squat": "goblet-squat.json",
+    "dumbbell-bench-press": "dumbbell-bench-press.json",
+    "one-arm-dumbbell-row": "one-arm-dumbbell-row.json"
   }
 }
