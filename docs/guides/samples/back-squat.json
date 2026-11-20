@@ -1,0 +1,57 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "back-squat",
+  "title": "Barbell back squat",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-back-v1"
+  ],
+  "timing": {
+    "move_ms": 1100,
+    "hold_ms": 600
+  },
+  "poses": [
+    {
+      "id": "upright",
+      "label": "Upright",
+      "description": "Rig sample: upright position.",
+      "joints": {
+        "shin": 2,
+        "knee": 4,
+        "torso": 4
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "bottom",
+      "label": "Bottom",
+      "description": "Rig sample: bottom position.",
+      "joints": {
+        "shin": 30,
+        "knee": 116,
+        "torso": 42
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "sample",
+    "checked": "2026-11-20",
+    "checked_by": "Claude, rig sample for #261 (not final poses)",
+    "checks": [
+      "Proves the rig: contacts, grips and fit through the loop."
+    ],
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/"
+    ],
+    "limitations": [
+      "Rig sample only. Final poses are authored and reviewed separately."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

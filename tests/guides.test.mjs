@@ -2,7 +2,7 @@
 // Checks every guide listed in web/guides/index.json against the format in
 // docs/movement-guides.md, and that the figure keeps its proportions as it moves.
 import { readFileSync, readdirSync } from 'node:fs';
-import { RIGS, RIGS3D, joints, between, ease, render, problems, rigOf, pose3d, checkLoop } from '../web/js/guides.js';
+import { RIGS, RIGS3D, joints, between, ease, render, problems, rigOf, pose3d, checkLoop, viewBoxOf } from '../web/js/guides.js';
 
 let pass = 0;
 let fail = 0;
@@ -15,6 +15,7 @@ const root = new URL('../', import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), 'utf8');
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const v3mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 
 // Built-in exercise slugs, straight from the catalog.
 const slugs = [...read('web/private/src/Catalog.php').matchAll(/^\s*\['([a-z0-9-]+)', '[^']+', '(?:barbell|dumbbell|kettlebell|cable|machine|band|bodyweight|cardio|stretch)'/gm)].map((m) => m[1]);
@@ -76,7 +77,7 @@ console.log('The curl is unchanged by the shared-figure rigs (#261)');
 // Rig samples (#261): a few poses per new setup, proving the rig before final poses.
 const sampleDir = new URL('docs/guides/samples/', root);
 const samples = readdirSync(sampleDir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read(`docs/guides/samples/${f}`)));
-check('there is a rig sample for the squat, bench press and row', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row'].every((x) => samples.some((g) => g.exercise === x)));
+check('there is a rig sample for every setup, barbells and machines included', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row', 'barbell-curl', 'deadlift', 'back-squat', 'overhead-press', 'dumbbell-rdl', 'barbell-bench-press', 'lat-pulldown', 'seated-cable-row'].every((x) => samples.some((g) => g.exercise === x)));
 const shipped = Object.values(index.guides).map((f) => JSON.parse(read(`web/guides/${f}`))).filter((g) => RIGS3D[g.rig]);
 for (const g of [...samples, ...shipped]) {
   console.log(`${samples.includes(g) ? 'Sample' : 'Guide'} ${g.exercise} (${g.rig})`);
@@ -158,7 +159,7 @@ console.log('Squat, bench press and row guides (#261)');
   check('goblet squat: the torso stays fairly upright (no more than 35 degrees of lean)', sq.g.poses.every((p) => p.joints.torso <= 35));
   check('goblet squat: the dumbbell stays at the chest the whole way', sq.g.poses.every((p) => { const { P, held } = sq.at(p.id); return dist3(held[0].hand, P.shoulderC) < 30; }));
   const bp = load('dumbbell-bench-press');
-  check('bench press: both fists wrap over the handle and behind the front plate in every pose', bp.g.poses.every((p) => {
+  check('bench press: each fist wraps over its handle and behind its front plate', bp.g.poses.every((p) => {
     const svg = render(bp.g, p.joints);
     const grips = [...svg.matchAll(/<g class="g-dumbbell">([^]*?)<\/g>(?=<path class="g-metal")/g)];
     return grips.length === 2 && grips.every(([, grip]) => /class="g-metal"[^]*class="g-handle"[^]*class="g-grip"/.test(grip));
@@ -174,6 +175,49 @@ console.log('Squat, bench press and row guides (#261)');
   check('row: at the top the forearm hangs straight down (within 10 degrees)', Math.abs(Math.atan2(top.nearHand[0] - top.nearElbow[0], top.nearElbow[1] - top.nearHand[1]) * 180 / Math.PI) <= 10);
   check('row: the torso stays still (no twisting or heaving)', new Set(row.g.poses.map((p) => p.joints.torso)).size === 1);
   check('row: the arm straightens at the bottom', row.g.poses[0].joints.elbow <= 10);
+}
+
+console.log('Barbells, a dumbbell in each hand, and seated machines (#261)');
+{
+  const bySlug = Object.fromEntries(samples.map((g) => [g.exercise, g]));
+  const at = (g, id) => pose3d(RIGS3D[g.rig], g.poses.find((p) => p.id === id).joints, g);
+  const loop = (g, fn) => {
+    const rig = RIGS3D[g.rig];
+    let ok = true;
+    for (let k = 0; k < g.poses.length; k++) for (let t = 0; t <= 1.0001; t += 0.1) ok = ok && fn(pose3d(rig, between(rig, g.poses[k].joints, g.poses[(k + 1) % g.poses.length].joints, ease(t)), g));
+    return ok;
+  };
+  const curl = bySlug['barbell-curl'];
+  check('barbell: one level bar through both hands, shoulder width apart, the whole loop', loop(curl, ({ P, held }) => held.length === 1 && held[0].id === 'barbell-v1' && held[0].axis.join() === '0,0,1'
+    && dist3(held[0].center, v3mid(P.nearHand, P.farHand)) < 1e-9 && Math.abs(dist3(P.nearHand, P.farHand) - 26) < 1e-9));
+  const dl = bySlug['deadlift'];
+  const setup = at(dl, 'setup');
+  check('deadlift: the setup has the plates on the floor and the bar over the feet, in front of the shins', Math.abs(setup.held[0].center[1] - 20) < 1.5 && setup.held[0].center[0] > setup.P.nearAnkle[0] && setup.held[0].center[0] < setup.P.nearAnkle[0] + 14);
+  const sunk = structuredClone(dl);
+  Object.assign(sunk.poses[0].joints, { knee: 100, shin: 14 });
+  check('deadlift: plates pushed into the floor are reported', problems(sunk, { slugs }).some((e) => /sink .* into the floor/.test(e)), problems(sunk, { slugs }).join('; '));
+  const sq = bySlug['back-squat'];
+  check('back squat: the bar stays on the upper back and both hands stay on it', loop(sq, ({ P, held, contacts }) => dist3(held[0].center, P.shoulderC) < 9 && held[0].center[0] < P.shoulderC[0] + 1
+    && ['near hand on the bar', 'far hand on the bar'].every((n) => contacts.some((c) => c.name === n && dist3(c.at, c.target) < 0.05))));
+  const ohp = bySlug['overhead-press'];
+  const vb = viewBoxOf(RIGS3D[ohp.rig], ohp);
+  check('overhead press: the picture grows to fit the bar overhead, and stays the same while it plays', vb[1] < 0 && viewBoxOf(RIGS3D[ohp.rig], ohp) === vb && checkLoop(ohp).outside === 0);
+  check('overhead press: the bar finishes over the shoulders with straight arms', (() => { const { P, held } = at(ohp, 'overhead'); return Math.abs(held[0].center[0] - P.shoulderC[0]) < 8 && held[0].center[1] > P.shoulderC[1] + 55; })());
+  const rdl = bySlug['dumbbell-rdl'];
+  check('dumbbell RDL: a dumbbell in each hand, handles across the body', loop(rdl, ({ P, held }) => held.length === 2 && held.every((h) => h.id === 'dumbbell-pair-v1' && h.axis.join() === '0,0,1') && held[0].hand === P.nearHand && held[1].hand === P.farHand));
+  const bb = bySlug['barbell-bench-press'];
+  check('barbell bench: the grip stays the same width and both hands stay on the bar', loop(bb, ({ P, held, contacts }) => Math.abs(dist3(P.nearHand, P.farHand) - 52) < 0.1
+    && dist3(held[0].center, v3mid(P.nearHand, P.farHand)) < 0.1 && contacts.filter((c) => /hand on the bar|on the bench|on the floor/.test(c.name)).length === 6));
+  check('barbell bench: the bar comes down to the chest and goes up to straight arms', (() => { const top = at(bb, 'top'); const chest = at(bb, 'chest'); return chest.held[0].center[1] < 70 && top.held[0].center[1] - top.P.shoulderC[1] > 55; })());
+  for (const [slug, feet] of [['lat-pulldown', 'floor'], ['seated-cable-row', 'footplate']]) {
+    const g = bySlug[slug];
+    check(`${slug}: hips on the seat, feet on the ${feet} and both hands on the handle the whole way`, loop(g, ({ contacts }) => [`hips on the seat`, `near foot on the ${feet}`, `far foot on the ${feet}`, 'near hand on the handle', 'far hand on the handle'].every((n) => contacts.some((c) => c.name === n && dist3(c.at, c.target) < 0.05))));
+  }
+  check('lat pulldown: the bar comes from overhead down to the upper chest', (() => { const a = at(bySlug['lat-pulldown'], 'reach'); const b = at(bySlug['lat-pulldown'], 'pull'); return a.held[0].center[1] > a.P.neck[1] + 30 && b.held[0].center[1] < b.P.neck[1] && b.held[0].center[1] > b.P.hip[1] + 30; })());
+  check('seated cable row: the handle comes from arms long to the stomach', (() => { const a = at(bySlug['seated-cable-row'], 'reach'); const b = at(bySlug['seated-cable-row'], 'pull'); return a.held[0].center[0] > a.P.shoulderC[0] + 40 && b.held[0].center[0] < b.P.shoulderC[0] + 30 && b.held[0].center[1] < b.P.shoulderC[1] - 20; })());
+  const far = structuredClone(bySlug['lat-pulldown']);
+  far.poses[0].joints.torso = -25;
+  check('a handle out of reach is reported', problems(far, { slugs }).some((e) => /hand on the handle drifts/.test(e)), problems(far, { slugs }).join('; '));
 }
 
 console.log('Format checks catch mistakes');

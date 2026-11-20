@@ -1,0 +1,87 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "deadlift",
+  "title": "Barbell deadlift",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Set the bar over midfoot, grip just outside your legs, and brace.",
+      "hold_ms": 750,
+      "joints": {
+        "shin": 5,
+        "knee": 82,
+        "torso": 60,
+        "shoulder": -60
+      },
+      "arrow": null
+    },
+    {
+      "id": "lift",
+      "label": "Lift",
+      "description": "Push through your feet and keep the bar close as it passes your knees.",
+      "joints": {
+        "shin": 4,
+        "knee": 52,
+        "torso": 37,
+        "shoulder": -32
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "lockout",
+      "label": "Stand",
+      "description": "Stand tall with long arms and the bar close to your thighs.",
+      "joints": {
+        "shin": 0,
+        "knee": 2,
+        "torso": 0,
+        "shoulder": 3
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Send your hips back, then bend your knees to return the bar to the floor.",
+      "joints": {
+        "shin": 3,
+        "knee": 40,
+        "torso": 28,
+        "shoulder": -24
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-19",
+    "checked_by": "Codex",
+    "checks": [
+      "Floor setup over midfoot, long arms, steady back, coordinated hip and knee extension and controlled floor return.",
+      "Compared pose captions with the exact built-in exercise cue.",
+      "Checked camera bounds, equipment anchoring, and contact throughout the interpolated loop."
+    ],
+    "references": [
+      "https://www.nasm.org/resource-center/exercise-library/barbell-deadlift"
+    ],
+    "limitations": [
+      "The simplified figure and fixed camera show the main movement path. In-app phone playback and admin review are pending.",
+      "The fixed camera and full-size plates can partially obscure the hands or bar."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

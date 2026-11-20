@@ -1652,6 +1652,16 @@ console.log('Squat, bench press and row guides in the real player (#261)');
   const listed = JSON.parse(read('index.json')).guides;
   const samples = Object.fromEntries(Object.entries(listed).map(([k, f]) => [k, read(f)]).filter(([k]) => k !== 'dumbbell-curl'));
   check('the goblet squat, dumbbell bench press, one-arm row and hammer curl have guides', ['goblet-squat', 'dumbbell-bench-press', 'one-arm-dumbbell-row', 'hammer-curl'].every((k) => samples[k]));
+  // Rig samples for setups with no guide yet (barbells, machines): served as if they
+  // were in the app's list, to check those rigs play and fit in the real player too.
+  const { readdirSync } = await import('node:fs');
+  const sdir = new globalThis.URL('../docs/guides/samples/', import.meta.url);
+  const extra = Object.fromEntries(readdirSync(sdir).filter((f) => f.endsWith('.json')).map((f) => [f.replace(/\.json$/, ''), readFileSync(new globalThis.URL(f, sdir), 'utf8')]).filter(([k]) => !listed[k]));
+  Object.assign(samples, extra);
+  // On the whole context: the service worker fetches these, and only context routes see its requests.
+  await page.context().route('**/guides/index.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ format: 'thoenefit-movement-guides-index', version: 1, guides: { ...listed, ...Object.fromEntries(Object.keys(extra).map((k) => [k, `samples/${k}.json`])) } }) }));
+  await page.context().route('**/guides/samples/*.json', (r) => r.fulfill({ contentType: 'application/json', body: extra[r.request().url().split('/').pop().replace(/\.json.*$/, '')] }));
+  check('every barbell and machine setup plays, as a guide or a rig sample', ['barbell-curl', 'deadlift', 'back-squat', 'overhead-press', 'dumbbell-rdl', 'barbell-bench-press', 'lat-pulldown', 'seated-cable-row'].every((k) => samples[k]));
   const boot = await api('bootstrap');
   for (const slug of Object.keys(samples)) {
     const ex = boot.exercises.find((e) => e.slug === slug);
@@ -1677,6 +1687,8 @@ console.log('Squat, bench press and row guides in the real player (#261)');
       if (SHOTS && w === 402) await page.screenshot({ path: `${SHOTS}/48-guide-${slug}.png` });
     }
   }
+  await page.context().unroute('**/guides/index.json');
+  await page.context().unroute('**/guides/samples/*.json');
   await page.setViewportSize({ width: 402, height: 874 });
 }
 
