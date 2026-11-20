@@ -431,7 +431,7 @@ const SEATED = {
   hip: [0, 52, 0],
   seat: { x: [-20, 22], z: [-16, 16], top: 46, pad: 7 },
   'lat-pulldown-v1': { feet: { near: [42, 4, 10], far: [42, 4, -10] }, from: [8, 160], to: [16, 98], grip: 32, pole: [0, -1, 1.2], pulley: [10, 200] },
-  'seated-row-v1': { feet: { near: [64, 22, 10], far: [64, 22, -10] }, from: [64, 82], to: [18, 72], grip: 4, pole: [-1, -0.3, 0.6], pulley: [104, 24] },
+  'seated-row-v1': { feet: { near: [64, 22, 10], far: [64, 22, -10] }, from: [64, 82], to: [18, 72], grip: 4, pole: [-1, -0.3, 0.6], pulley: [104, 66] }, // cable close to level (#302)
 };
 
 // Fixed contact points and bench boxes, in world units.
@@ -713,9 +713,10 @@ function machineParts(rig, id, P, layer) {
   const st = SEATED.seat;
   if (layer === 'back') {
     const post = id === 'lat-pulldown-v1'
-      ? box(-46, -38, 0, 206, -4, 4, steel) + box(-46, M.pulley[0] + 6, 198, 206, -4, 4, steel) + box(-58, -46, 0, 120, -10, 10, steel)
+      // Pulldown: the frame and weight stack stand in front, facing the lifter (#301).
+      ? box(70, 78, 0, 206, -4, 4, steel) + box(M.pulley[0] - 6, 78, 198, 206, -4, 4, steel) + box(78, 92, 0, 120, -10, 10, steel)
         + box(P.nearKnee[0] - 8, P.nearKnee[0] - 5, 0, P.nearKnee[1] + 6, -2, 2, steel)
-      : box(M.pulley[0] - 4, M.pulley[0] + 6, 0, 70, -6, 6, steel) + box(st.x[0], M.pulley[0], 0, 6, -6, 6, steel) + box(M.feet.near[0] + 2, M.feet.near[0] + 8, 0, 40, -16, 16, steel);
+      : box(M.pulley[0] - 4, M.pulley[0] + 6, 0, 80, -6, 6, steel) + box(st.x[0], M.pulley[0], 0, 6, -6, 6, steel) + box(M.feet.near[0] + 2, M.feet.near[0] + 8, 0, 40, -16, 16, steel);
     return `<g class="g-machine">${post}${box(-6, 6, 0, st.top - st.pad, -4, 4, steel)}${box(st.x[0], st.x[1], st.top - st.pad, st.top, st.z[0], st.z[1], pad)}</g>`;
   }
   if (layer === 'pad') {
@@ -869,7 +870,7 @@ export function checkLoop(guide, steps = 10, measuring = false) {
       const machine = held.find((h) => SEATED[h.id]);
       if (machine) {
         const M = SEATED[machine.id];
-        pts.push([S([M.pulley[0], M.pulley[1], 0]), 8], [S([-58, 0, 10]), 1], [S([-46, 206, 4]), 1], [S([M.pulley[0] + 6, 206, 4]), 1], [S([M.pulley[0] + 6, 70, 6]), 1]);
+        pts.push([S([M.pulley[0], M.pulley[1], 0]), 8], [S([92, 0, 10]), 1], [S([78, 206, 4]), 1], [S([M.pulley[0] + 6, 80, 6]), 1]);
       }
       if ((guide.equipment || []).includes('flat-bench-v1')) for (const c of benchCorners(rig, guide.rig === 'hinge-bench-side-v1' ? HINGE.bench : SUPINE.bench)) pts.push([c, 1]);
       const sx = shadowX(Object.fromEntries(Object.entries(P).map(([k, v]) => [k, S(v)])));
