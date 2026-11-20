@@ -1,0 +1,32 @@
+{
+  "legacy": {
+    "dumbbell-curl": "ff0d4f1faf50a2c4c2ecff34aa349422e48c95d98c9534e59aa22795d289954c",
+    "goblet-squat": "7296cdcbade157fcc8a1bb6e804ae1ea922564a15240a26430f8932ec3c2e4b7",
+    "dumbbell-bench-press": "c39d787fd160fac14417ad1642bc088047977647b682b2eadc8c05b9a7f8f063",
+    "one-arm-dumbbell-row": "6a48514a82274a20dc1c6d7cd973f1afa357a543b03fdde84d9913f4409038f1",
+    "hammer-curl": "3467495453514f701dcc90689fe90340b2572dcd50f67b2cab06d7147dffd3d4",
+    "barbell-curl": "fa818aa522d3e75346da6ffbc4996681b74e3a5686d3550bb56e6d68347a1c5c",
+    "deadlift": "61bb932ba11a0a0f597fc6f9ba66d566107d60ed7069f9576e5f9c914a79330e",
+    "back-squat": "022d2a2c30fb1f02a04869b1afb7bdd14759c42fac4ec7859489340e77a55058",
+    "overhead-press": "d064b95073ee32422e50331c6ab8a327bb5f29a7cfc56b39779cf54f1688643a",
+    "dumbbell-rdl": "8e8c21b72c49aa0c39d36945276e1b6baac2acefa9dcc1d54bef5d27c15f08d1",
+    "barbell-bench-press": "58ece198ae674e2dff9cae0bfe924c156398ace92e0bb88872fa2605910c8c94",
+    "lat-pulldown": "3479add0d2b277b08db57ab2082e97c28f820cb8dcc16d043c2aed3bcaa1adcd",
+    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a"
+  },
+  "renders": {
+    "dumbbell-curl": "ff0d4f1faf50a2c4c2ecff34aa349422e48c95d98c9534e59aa22795d289954c",
+    "goblet-squat": "7296cdcbade157fcc8a1bb6e804ae1ea922564a15240a26430f8932ec3c2e4b7",
+    "dumbbell-bench-press": "c39d787fd160fac14417ad1642bc088047977647b682b2eadc8c05b9a7f8f063",
+    "one-arm-dumbbell-row": "6a48514a82274a20dc1c6d7cd973f1afa357a543b03fdde84d9913f4409038f1",
+    "hammer-curl": "3467495453514f701dcc90689fe90340b2572dcd50f67b2cab06d7147dffd3d4",
+    "barbell-curl": "fa818aa522d3e75346da6ffbc4996681b74e3a5686d3550bb56e6d68347a1c5c",
+    "deadlift": "61bb932ba11a0a0f597fc6f9ba66d566107d60ed7069f9576e5f9c914a79330e",
+    "back-squat": "022d2a2c30fb1f02a04869b1afb7bdd14759c42fac4ec7859489340e77a55058",
+    "overhead-press": "d064b95073ee32422e50331c6ab8a327bb5f29a7cfc56b39779cf54f1688643a",
+    "dumbbell-rdl": "8e8c21b72c49aa0c39d36945276e1b6baac2acefa9dcc1d54bef5d27c15f08d1",
+    "barbell-bench-press": "58ece198ae674e2dff9cae0bfe924c156398ace92e0bb88872fa2605910c8c94",
+    "lat-pulldown": "3479add0d2b277b08db57ab2082e97c28f820cb8dcc16d043c2aed3bcaa1adcd",
+    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a"
+  }
+}

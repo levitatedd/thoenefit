@@ -775,6 +775,18 @@ $gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_sq['revision'], 'good', 'D
 $gr_q = $gr_gr->reopen($adminRow, 'goblet-squat');
 $gr_sq = $gr_bySlug($gr_q)['goblet-squat'];
 check('reopening puts a reviewed guide back in the queue and keeps every decision', $gr_sq['status'] === 'pending' && count($gr_sq['history']) === 3 && $gr_sq['history'][0]['decision'] === 'reopened');
+echo "Artwork revisions (#304)\n";
+$gr_legacy = ['goblet-squat' => str_repeat('a', 64), 'dumbbell-curl' => str_repeat('c', 64)];
+$gr_writeRenders = fn(array $renders) => file_put_contents("$gr_gdir/renders.json", json_encode(['legacy' => $gr_legacy, 'renders' => $renders]));
+$gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_sq['revision'], 'good', 'Keep this decision.', '');
+$gr_writeRenders($gr_legacy);
+$gr_art = $gr_bySlug($gr_gr->queue());
+check('first render manifest keeps existing decisions on unchanged artwork', $gr_art['goblet-squat']['status'] === 'good' && $gr_art['goblet-squat']['revision'] === $gr_sq['revision'] && $gr_art['dumbbell-curl']['status'] === 'revise');
+$gr_writeRenders(array_replace($gr_legacy, ['goblet-squat' => str_repeat('b', 64)]));
+$gr_art = $gr_bySlug($gr_gr->queue());
+check('a drawing-only change re-queues only that guide and keeps its earlier feedback', $gr_art['goblet-squat']['status'] === 'pending' && $gr_art['goblet-squat']['revision'] !== $gr_sq['revision'] && $gr_art['goblet-squat']['history'][0]['note'] === 'Keep this decision.' && $gr_art['dumbbell-curl']['status'] === 'revise');
+check('a stale decision cannot approve new artwork', throws(fn() => $gr_gr->decide($adminRow, 'goblet-squat', $gr_sq['revision'], 'good', '', ''), 409));
+
 echo "People flagging a guide (#282)\n";
 $gr_flagged = fn() => $gr_bySlug($gr_gr->queue())['goblet-squat'];
 $gr_q = $gr_gr->decide($adminRow, 'goblet-squat', $gr_flagged()['revision'], 'good', '', '');

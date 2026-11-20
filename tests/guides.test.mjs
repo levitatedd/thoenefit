@@ -4,6 +4,8 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { RIGS, RIGS3D, joints, between, ease, render, problems, rigOf, pose3d, checkLoop, viewBoxOf } from '../web/js/guides.js';
 
+import { renderHashes } from '../docs/guides/render-hashes.mjs';
+
 let pass = 0;
 let fail = 0;
 const check = (name, ok, detail = '') => {
@@ -23,6 +25,10 @@ check(`the catalog has built-in exercises to map guides to (${slugs.length})`, s
 
 const index = JSON.parse(read('web/guides/index.json'));
 check('the index has the expected format', index.format === 'thoenefit-movement-guides-index' && index.version === 1 && typeof index.guides === 'object');
+
+const manifest = JSON.parse(read('web/guides/renders.json'));
+check('render fingerprints match every indexed guide', JSON.stringify(manifest.renders) === JSON.stringify(renderHashes(root, index.guides)), 'Run node docs/guides/render-previews.mjs');
+check('legacy render fingerprints are valid', manifest.legacy && Object.values(manifest.legacy).every((hash) => /^[0-9a-f]{64}$/.test(hash)));
 
 for (const [slug, file] of Object.entries(index.guides)) {
   console.log(`Guide ${slug}`);

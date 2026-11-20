@@ -7,8 +7,8 @@ namespace TF;
  * The admin's review queue for movement guides (#277).
  *
  * The guides are the files listed in web/guides/index.json. A guide's revision
- * is a short hash of its file, so any change to the poses makes a new revision
- * and puts the guide back in the queue. Decisions are kept for good: a guide is
+ * identifies its pose file and rendered artwork, so either can put the guide
+ * back in the queue. Decisions are kept for good: a guide is
  * pending until its current revision is marked good or needs revision, and goes
  * back to pending when it changes or an admin reopens it. A decision is only
  * feedback: it never hides, shows or deploys a guide.
@@ -45,6 +45,7 @@ final class GuideReviews
     public function guides(): array
     {
         $index = json_decode((string) @file_get_contents($this->dir . '/index.json'), true);
+        $art = json_decode((string) @file_get_contents($this->dir . '/renders.json'), true);
         $out = [];
         foreach ((array) ($index['guides'] ?? []) as $slug => $file) {
             $path = $this->dir . '/' . basename((string) $file);
@@ -53,9 +54,14 @@ final class GuideReviews
             if (!is_array($g)) {
                 continue;
             }
+            $render = $art['renders'][$slug] ?? null;
+            // The launch artwork keeps its original file-only revision so saved reviews and flags still match.
+            $revision = is_string($render) && $render !== ($art['legacy'][$slug] ?? null)
+                ? hash('sha256', $render . "\0" . $raw)
+                : hash('sha256', $raw);
             $out[(string) $slug] = [
                 'file' => basename((string) $file),
-                'revision' => substr(hash('sha256', $raw), 0, 12),
+                'revision' => substr($revision, 0, 12),
                 'title' => (string) ($g['title'] ?? $slug),
                 'poses' => array_values(array_map(fn($p) => ['id' => (string) ($p['id'] ?? ''), 'label' => (string) ($p['label'] ?? '')], (array) ($g['poses'] ?? []))),
             ];

@@ -300,3 +300,7 @@ Generated pictures are never the authority on form; the references are.
 
 The full inventory and batches come next (#260). Don't call the library complete
 while exercises remain without a guide or a documented exclusion.
+
+## Render fingerprints and admin review
+
+Regenerate `web/guides/renders.json` with `node docs/guides/render-previews.mjs` after changing poses or renderer code. A targeted preview run also refreshes fingerprints for the full index. The fingerprint covers pose SVGs and sampled in-between frames. The fixed `legacy` entries preserve existing file-only review revisions for unchanged launch artwork. Changes to guide data or its rendered fingerprint return that guide to admin review.
