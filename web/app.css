@@ -1814,36 +1814,125 @@ select.trends-range {
   color: var(--muted);
 }
 
+/* Toasts (#279): dark, translucent, mint edge, just above the tab bar. */
 .toast {
   position: fixed;
   left: 16px;
   right: 16px;
-  bottom: calc(var(--tabs-h) + var(--safe-b) + 100px);
+  bottom: calc(var(--tabs-h) + var(--safe-b) + 10px);
   z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   max-width: 528px;
   margin: 0 auto;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--chalk);
-  color: var(--ink);
+  padding: 12px 14px 14px;
+  overflow: hidden;
+  border: 1px solid var(--mint);
+  border-radius: 14px;
+  background: rgba(22, 27, 34, 0.78);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--chalk);
   font-weight: 600;
-  text-align: center;
+  line-height: 1.35;
+  text-align: left;
   opacity: 0;
+  transform: translateY(6px);
   pointer-events: none;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+/* During a workout the rest timer sits on the tab bar: stay above it. */
+body:has(.rest:not([hidden])) .toast {
+  bottom: calc(var(--tabs-h) + var(--safe-b) + 100px);
 }
 
 .toast.show {
   opacity: 1;
+  transform: none;
+}
+
+.toast > .icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--selected-bg);
+  color: var(--mint);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The line along the bottom that runs down while the toast shows. */
+.toast-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--mint);
+  transform-origin: left;
+}
+
+.toast.show .toast-timer {
+  animation: toast-time linear forwards;
+}
+
+@keyframes toast-time {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 .toast.bad {
+  border-color: var(--red);
+}
+
+/* "ThoeneFit has received an update!" (#279): two centred lines, no icon. */
+.toast.update {
+  justify-content: center;
+  text-align: center;
+}
+
+.toast.update > .icon {
+  display: none;
+}
+
+.toast.update .toast-text {
+  flex: none;
+  white-space: pre-line;
+}
+
+.toast.bad > .icon {
+  background: rgba(255, 107, 94, 0.16);
+  color: var(--red);
+}
+
+.toast.bad .toast-timer {
   background: var(--red);
 }
 
 .toast.show.tappable {
   pointer-events: auto;
   cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    transform: none;
+    transition: none;
+  }
+
+  .toast.show .toast-timer {
+    animation: none;
+  }
 }
 
 /* Settings: the version opens the release notes. */
@@ -2898,4 +2987,19 @@ button.setup-note {
   background: transparent;
   color: var(--red);
   box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* Count beside a Settings link, matching the tab badge (#277). */
+.link-badge {
+  display: inline-block;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--mint);
+  color: var(--ink);
+  font: 700 13px/22px var(--body);
+  text-align: center;
+  vertical-align: 2px;
 }

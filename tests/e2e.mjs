@@ -708,6 +708,19 @@ console.log('Pinned exercises (#126)');
   await page.waitForFunction(() => document.querySelector('.pin-btn')?.getAttribute('aria-pressed') === 'true');
   const pins = (await page.evaluate(async () => (await (await fetch('api.php?a=pins')).json()).pins)).map((p) => p.exercise_id);
   check('unpinning one makes room, and the new one is pinned', pins.length === 5 && pins.includes(ids[4]), JSON.stringify(pins));
+  await waitForToast(page, /Unpinned .* and pinned /);
+  await page.waitForTimeout(250);
+  const look = await page.evaluate(() => {
+    const t = document.getElementById('toast');
+    const cs = getComputedStyle(t);
+    const r = t.getBoundingClientRect();
+    const tabs = document.querySelector('nav.tabs').getBoundingClientRect();
+    const alpha = Number((cs.backgroundColor.match(/rgba?\(([^)]+)\)/)[1].split(',')[3] ?? 1));
+    return { border: cs.borderTopColor, color: cs.color, alpha, gap: tabs.top - r.bottom, icon: !!t.querySelector('.icon svg'), timer: getComputedStyle(t.querySelector('.toast-timer')).animationName, takesTaps: cs.pointerEvents !== 'none' };
+  });
+  check('the pin toast is dark and see-through with a mint edge, a tick and a running line, just above the tab bar (#279)',
+    look.border === 'rgb(58, 242, 156)' && look.color === 'rgb(244, 242, 236)' && look.alpha > 0.7 && look.alpha <= 0.8 && look.icon && look.timer === 'toast-time' && look.gap >= 4 && look.gap <= 24 && !look.takesTaps, JSON.stringify(look));
+  await shot('19c-toast');
   // Leave nothing pinned for the rest of the walk-through.
   await page.evaluate(async (list) => {
     const b = await (await fetch('api.php?a=bootstrap')).json();
@@ -986,6 +999,7 @@ check('and opening the page directly shows nothing', (await page.locator('input[
   await page.goto(`${URL}#/settings`);
   await page.waitForSelector('text=Add to your Home Screen');
   check('a regular user has no movement guide review, and the server refuses it (#277)', reviews === 403 && decide.status === 403 && (await page.locator('a:has-text("Movement guide review")').count()) === 0, `${reviews} ${decide.status}`);
+  check('and no guide review count on their Settings tab (#277)', (await page.locator('[data-badge=guides]').count()) === 0 && theirs.guides_pending === 0);
 }
 await page.goto(`${URL}#/settings`);
 await page.click('button:has-text("Sign out")');
@@ -1257,8 +1271,10 @@ if (!process.env.TF_URL) {
   try {
     writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
     await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
-    await waitForToast(page, /ThoeneFit was updated/).catch(() => {});
-    check('after a deploy, reopening the app reloads it and says so', /ThoeneFit was updated/.test(await page.textContent('.toast')));
+    await waitForToast(page, /ThoeneFit has received an update!/).catch(() => {});
+    const upd = await page.evaluate(() => { const t = document.getElementById('toast'); const x = t.querySelector('.toast-text'); return { text: x.textContent, align: getComputedStyle(x).textAlign, lines: Math.round(x.getBoundingClientRect().height / parseFloat(getComputedStyle(x).lineHeight)) }; });
+    check('after a deploy, reopening the app reloads it and says so on two centred lines', /^ThoeneFit has received an update!(\nTap here to see what's new\.)?$/.test(upd.text) && upd.align === 'center', JSON.stringify(upd));
+    await shot('12c-update-toast');
   } finally {
     writeFileSync(versionFile, original);
   }
@@ -1671,6 +1687,15 @@ console.log('Movement guide review for the admin (#277)');
   const counts = () => page.$$eval('.review-count', (els) => Object.fromEntries(els.map((e) => [e.dataset.count, Number(e.querySelector('strong').textContent)])));
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto(`${URL}#/settings`);
+  await page.waitForSelector('a:has-text("Movement guide review")');
+  const tabBadge = () => page.$eval('a.tab[href="#/settings"]', (t) => t.querySelector('[data-badge=guides]')?.textContent || '');
+  check('the Settings tab and the review link both show how many guides are waiting (#277)', (await tabBadge()) === String(listed) && (await page.textContent('a:has-text("Movement guide review") .link-badge')) === String(listed)
+    && (await page.getAttribute('a.tab[href="#/settings"]', 'aria-label')) === `Settings, ${listed} movement guides to review`);
+  if (SHOTS) {
+    await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.textContent.includes('Movement guide review')).scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: `${SHOTS}/49c-guide-review-badges.png` });
+  }
   await page.click('a:has-text("Movement guide review")');
   await page.waitForSelector('[data-list=review-queue]');
   let c = await counts();
@@ -1697,6 +1722,7 @@ console.log('Movement guide review for the admin (#277)');
   await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, first);
   c = await counts();
   check('saving moves straight on to the next pending guide and takes this one out of the queue', c.revise === 1 && c.pending === listed - 1, JSON.stringify(c));
+  check('the Settings tab count goes down as guides are reviewed', (await tabBadge()) === String(listed - 1));
   const second = await page.textContent('.review-title h2');
   await page.click('.review-actions button:has-text("Mark good")');
   await page.waitForFunction((f) => document.querySelector('.review-title h2')?.textContent !== f, second);

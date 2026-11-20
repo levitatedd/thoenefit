@@ -148,9 +148,9 @@ async function boot() {
     // Offer the notes only when this release has some.
     loadChangelog().then(
       ({ releases }) => (releases[0]?.version === APP_VERSION
-        ? toast("ThoeneFit was updated. Tap to see what's new.", '', () => { location.hash = '#/settings/whats-new'; })
-        : toast('ThoeneFit was updated.')),
-      () => toast('ThoeneFit was updated.'),
+        ? toast("ThoeneFit has received an update!\nTap here to see what's new.", 'update', () => { location.hash = '#/settings/whats-new'; })
+        : toast('ThoeneFit has received an update!', 'update')),
+      () => toast('ThoeneFit has received an update!', 'update'),
     );
   }
 }
@@ -159,6 +159,7 @@ function applyBoot(data) {
   S.user = data.user;
   S.strava = data.strava;
   S.feedbackEnabled = !!data.feedback_enabled;
+  S.guidesPending = data.guides_pending || 0;
   S.gyms = data.gyms;
   S.shares = data.shares || [];
   S.routines = data.routines || [];
@@ -385,9 +386,10 @@ function render() {
     ].map(([key, label, ic]) => (key === 'today' && sync?.active
       // During a workout: Pause / Resume on the workout itself, and a plain way back to it from anywhere else.
       ? (tab === 'workout' ? pauseTab() : h('a', { href: '#/workout', class: `tab workout-tab ${sync.active.paused_at ? 'paused' : ''}`, 'aria-label': sync.active.paused_at ? 'Workout, paused' : 'Workout in progress' }, h('span', { class: 'tab-icon' }, icon('today', 24)), h('span', {}, 'Workout')))
-      : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24), key === 'today' && shareBadge()), h('span', {}, label)))),
+      : h('a', { href: `#/${key}`, class: 'tab', 'aria-current': current === key ? 'page' : null }, h('span', { class: 'tab-icon' }, icon(ic, 24), key === 'today' && shareBadge(), key === 'settings' && guideBadge()), h('span', {}, label)))),
   );
   if (!sync?.active) labelWorkoutTab(nav);
+  labelSettingsTab(nav);
   // During a workout the Today spot pauses it (#111), so other tabs get a way back to it.
   // On a screen with a fixed header (#175) it rides along under the title.
   if (sync?.active && tab !== 'workout') {
@@ -1051,6 +1053,31 @@ const waitingShares = () => (S.shares || []).filter((x) => x.status === 'pending
 function shareBadge() {
   const n = waitingShares();
   return n > 0 && h('span', { class: 'tab-badge', 'aria-hidden': 'true' }, String(n));
+}
+
+/** Movement guides waiting for the admin's review (#277): a count on the Settings tab. */
+function guideBadge() {
+  const n = S.user?.role === 'admin' ? S.guidesPending || 0 : 0;
+  return n > 0 && h('span', { class: 'tab-badge', 'aria-hidden': 'true', 'data-badge': 'guides' }, String(n));
+}
+
+function labelSettingsTab(nav) {
+  const tab = nav.querySelector('a.tab[href="#/settings"]');
+  if (!tab) return;
+  const n = S.user?.role === 'admin' ? S.guidesPending || 0 : 0;
+  if (n > 0) tab.setAttribute('aria-label', `Settings, ${n} movement guide${n === 1 ? '' : 's'} to review`);
+  else tab.removeAttribute('aria-label');
+}
+
+/** Update the Settings tab's count in place after reviewing. */
+function paintGuideBadge() {
+  const nav = document.querySelector('nav.tabs');
+  const icon_ = nav?.querySelector('a.tab[href="#/settings"] .tab-icon');
+  if (!icon_) return;
+  icon_.querySelector('[data-badge=guides]')?.remove();
+  const b = guideBadge();
+  if (b) icon_.append(b);
+  labelSettingsTab(nav);
 }
 
 function labelWorkoutTab(nav) {
@@ -3996,6 +4023,10 @@ function viewGuideReview() {
   function paint() {
     if (!data) return;
     const c = data.counts;
+    if (S.guidesPending !== c.pending) {
+      S.guidesPending = c.pending;
+      paintGuideBadge();
+    }
     fill(counts, [['pending', 'Pending review'], ['good', 'Good'], ['revise', 'Needs revision']].map(([k, label]) =>
       h('div', { class: `review-count ${k}`, 'data-count': k }, h('strong', {}, String(c[k])), h('span', {}, label))));
     const g = open && data.guides.find((x) => x.slug === open);
@@ -4116,7 +4147,8 @@ function viewSettings() {
       ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
     S.user.role === 'admin' && section('Admin', linkList(
       ['#/settings/users', 'Manage users', 'Add people, set the invite code, reset passwords'],
-      ['#/settings/guides', 'Movement guide review', 'Check each guide and mark it good or needing revision'])),
+      ['#/settings/guides', ['Movement guide review', S.guidesPending > 0 && h('span', { class: 'link-badge', 'aria-label': `${S.guidesPending} to review` }, String(S.guidesPending))],
+        S.guidesPending > 0 ? `${S.guidesPending} waiting for review` : 'Check each guide and mark it good or needing revision'])),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       linkList(['#/settings/password', 'Change password', 'Signs you out on your other devices']),
