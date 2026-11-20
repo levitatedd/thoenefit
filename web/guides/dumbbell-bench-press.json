@@ -80,7 +80,8 @@
       "Compared the flat bench setup, foot support, paired loads and controlled descent and press against ACE and the built-in cue.",
       "Validated joint ranges, equipment anchors, contact and framing through the complete loop.",
       "Claude review: Bottom has forearms vertical (wrists over elbows) and upper arms about 40 degrees from square, angled away from the ribs as the cue says; both arms move together; midpoints rounded to whole degrees.",
-      "In the app: plays, steps and fits at 320px and 402px with no sideways scroll; contacts and fit checked across the whole loop by node tests/guides.test.mjs."
+      "In the app: plays, steps and fits at 320px and 402px with no sideways scroll; contacts and fit checked across the whole loop by node tests/guides.test.mjs.",
+      "Revised the dumbbell rendering after admin feedback (#288): both fists wrap over the handle with the front plate drawn in front of the grip."
     ],
     "references": [
       "https://www.acefitness.org/resources/everyone/exercise-library/19/chest-press/"

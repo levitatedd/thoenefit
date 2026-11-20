@@ -165,6 +165,11 @@ console.log('Squat, bench press and row guides (#261)');
   check('goblet squat: the torso stays fairly upright (no more than 35 degrees of lean)', sq.g.poses.every((p) => p.joints.torso <= 35));
   check('goblet squat: the dumbbell stays at the chest the whole way', sq.g.poses.every((p) => { const { P, held } = sq.at(p.id); return dist3(held[0].hand, P.shoulderC) < 30; }));
   const bp = load('dumbbell-bench-press');
+  check('bench press: each fist wraps over its handle and behind its front plate', bp.g.poses.every((p) => {
+    const svg = render(bp.g, p.joints);
+    const grips = [...svg.matchAll(/<g class="g-dumbbell">([^]*?)<\/g>(?=<path class="g-metal")/g)];
+    return grips.length === 2 && grips.every(([, grip]) => /class="g-metal"[^]*class="g-handle"[^]*class="g-grip"/.test(grip));
+  }));
   const bpBottom = bp.g.poses.find((p) => p.id === 'bottom').joints;
   check('bench press: wrists over elbows at the bottom (forearms vertical)', ['near', 'far'].every((s) => bpBottom[`${s}_shoulder`] === bpBottom[`${s}_elbow`]));
   check('bench press: upper arms angled away from the ribs at the bottom, not flared or pinned', ['near', 'far'].every((s) => bpBottom[`${s}_tuck`] >= 25 && bpBottom[`${s}_tuck`] <= 55));
