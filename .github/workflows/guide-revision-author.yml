@@ -14,6 +14,7 @@ concurrency:
 jobs:
   author:
     if: >-
+      vars.GUIDE_REVISION_CODEX_ENABLED == 'true' &&
       vars.GUIDE_REVISION_ISSUE_AUTHOR != '' &&
       github.event.issue.user.login == vars.GUIDE_REVISION_ISSUE_AUTHOR &&
       contains(github.event.issue.labels.*.name, 'bug') &&
