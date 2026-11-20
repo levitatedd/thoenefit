@@ -1661,7 +1661,7 @@ console.log('Squat, bench press and row guides in the real player (#261)');
   // On the whole context: the service worker fetches these, and only context routes see its requests.
   await page.context().route('**/guides/index.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ format: 'thoenefit-movement-guides-index', version: 1, guides: { ...listed, ...Object.fromEntries(Object.keys(extra).map((k) => [k, `samples/${k}.json`])) } }) }));
   await page.context().route('**/guides/samples/*.json', (r) => r.fulfill({ contentType: 'application/json', body: extra[r.request().url().split('/').pop().replace(/\.json.*$/, '')] }));
-  check(`rig samples for the barbell and machine setups play too (${Object.keys(extra).length})`, ['barbell-curl', 'deadlift', 'back-squat', 'overhead-press', 'dumbbell-rdl', 'barbell-bench-press', 'lat-pulldown', 'seated-cable-row'].every((k) => extra[k]));
+  check('every barbell and machine setup plays, as a guide or a rig sample', ['barbell-curl', 'deadlift', 'back-squat', 'overhead-press', 'dumbbell-rdl', 'barbell-bench-press', 'lat-pulldown', 'seated-cable-row'].every((k) => samples[k]));
   const boot = await api('bootstrap');
   for (const slug of Object.keys(samples)) {
     const ex = boot.exercises.find((e) => e.slug === slug);
