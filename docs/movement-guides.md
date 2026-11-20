@@ -32,6 +32,10 @@ first, then becomes available to guides.
 | `grounded-side-v1` | standing, both feet planted (squats, standing holds) | `side` | `dumbbell-goblet-v1` or `dumbbell-v1` | `docs/guides/samples/goblet-squat.json` |
 | `supine-bench-v1` | lying face up on a flat bench, feet on the floor | `front-three-quarter` | `flat-bench-v1`, `dumbbell-pair-v1` | `docs/guides/samples/dumbbell-bench-press.json` |
 | `hinge-bench-side-v1` | hinged over a bench, braced on one hand and knee | `side-three-quarter` | `flat-bench-v1`, `dumbbell-v1` | `docs/guides/samples/one-arm-dumbbell-row.json` |
+| `grounded-side-v1` with a barbell | curls, deadlifts, presses (`barbell-v1`), back squats (`barbell-back-v1`) | `side` | `barbell-v1` or `barbell-back-v1` | `barbell-curl`, `deadlift`, `overhead-press`, `back-squat` in `docs/guides/samples/` |
+| `grounded-side-v1` with two dumbbells | RDLs, carries, any standing lift with a dumbbell in each hand | `side` | `dumbbell-pair-v1` | `docs/guides/samples/dumbbell-rdl.json` |
+| `supine-barbell-v1` | lying face up on a flat bench with a barbell | `front-three-quarter` | `flat-bench-v1`, `barbell-v1` | `docs/guides/samples/barbell-bench-press.json` |
+| `seated-side-v1` | seated at a cable machine | `side` | `lat-pulldown-v1` or `seated-row-v1` | `lat-pulldown`, `seated-cable-row` in `docs/guides/samples/` |
 
 All four draw the same mint mannequin with the same limb lengths. The sample
 files are **rig samples, not final poses**: they prove contacts, grips and fit.
@@ -109,13 +113,55 @@ viewBox `44 40 168 196`, origin (118, 224). Arrows sit 24 units behind the hips.
 | --- | --- | --- | --- |
 | `shin` | shin lean from straight up; positive brings the knees forward | -10 to 45 | 0 |
 | `knee` | bend; 0 is a straight leg. The thigh's angle is `shin − knee`, so bending sends the hips back and down | 0 to 150 | 0 |
-| `torso` | lean from straight up; positive leans forward | -10 to 70 | 0 |
-| `shoulder` | upper arm from the line of the torso; positive forward | -40 to 160 | 0 |
+| `torso` | lean from straight up; positive leans forward | -10 to 75 | 0 |
+| `shoulder` | upper arm from the line of the torso; positive forward, 180 straight overhead. For arms hanging straight down while hinged, use minus the torso angle | -90 to 180 | 0 |
 | `elbow` | bend; 0 is a straight arm | 0 to 160 | 0 |
 | `supination` | `dumbbell-v1` grip turn: 0 palm facing the thigh, 1 palm up | 0 to 1 | 0 |
 
 Arm angles follow the torso, so a hold at the chest stays at the chest as the
 torso leans. Contacts: near and far foot on the floor.
+
+With `barbell-v1` the bar runs through both hands (shoulder width apart). With
+`barbell-back-v1` the bar sits across the upper back below the neck and the arms
+are solved to hold it with a wide grip, so `shoulder` and `elbow` are not used;
+contacts add each hand on the bar. Barbell plates are bumper size (radius 20): the
+checks report plates that sink into the floor, and a deadlift setup has the bar
+centre about 20 units up. Barbell and dumbbell-pair guides are framed to fit their
+own whole loop (see `viewBoxOf`), so an overhead press gets a taller picture than a
+curl; the frame never changes while the guide plays.
+
+### `supine-barbell-v1`
+
+The bench, back, hips and feet of `supine-bench-v1`, with both hands on one bar
+26 units either side of the middle (a grip just outside the shoulders). The bar
+moves on a fixed path from the lower chest to over the shoulders; the arms follow it.
+
+| joint | meaning | allowed | default |
+| --- | --- | --- | --- |
+| `press` | where the bar is on its path: 0 touching the chest, 1 straight arms over the shoulders | 0 to 1 | 1 |
+| `tuck` | how far the elbows point out from the body: 20 close to the ribs, 80 flared wide | 20 to 80 | 50 |
+
+Contacts: back and hips on the bench, both feet on the floor, both hands on the bar.
+
+### `seated-side-v1`
+
+Seated on a machine seat facing right, hips at (0, 52, 0) on the seat; the legs
+are solved to the machine's foot position and the arms to its handle. The handle
+moves along the machine's own path, so the cable and pulley line up at every frame.
+
+| joint | meaning | allowed | default |
+| --- | --- | --- | --- |
+| `torso` | lean from straight up; positive forward, negative back | -25 to 30 | 0 |
+| `pull` | where the handle is on its path: 0 arms long, 1 the end of the pull | 0 to 1 | 0 |
+
+| equipment | feet | handle path | grip |
+| --- | --- | --- | --- |
+| `lat-pulldown-v1` | floor at (42, 4), thighs under the pad | from overhead (8, 160) to the upper chest (16, 98) | wide bar, hands 32 either side |
+| `seated-row-v1` | footplate at (64, 22) | from arms long (64, 82) to the stomach (18, 72) | close V handle, hands 4 either side |
+
+Contacts: hips on the seat, both feet on the floor or footplate, both hands on the
+handle. Leaning back too far at full reach puts the handle out of reach, and the
+checks say so.
 
 ### `supine-bench-v1`
 
@@ -155,7 +201,11 @@ so. Contacts: far knee and far hand on the bench, near foot on the floor.
 | `dumbbell-v1` | `standing-side-v1`, `grounded-side-v1`, `hinge-bench-side-v1` | Centred on the near hand. Standing: handle square to the forearm and turned by `supination`. Hinge rig: neutral grip, handle along x (front to back). |
 | `dumbbell-goblet-v1` | `grounded-side-v1` | One dumbbell held upright at the chest by both hands: the forearms angle in so the hands meet, and the dumbbell's centre is the middle of the hands + (3, −10, 0). |
 | `dumbbell-pair-v1` | `supine-bench-v1` | One dumbbell in each hand, handle along z (across the body), each moving only with its own arm. |
-| `flat-bench-v1` | `supine-bench-v1`, `hinge-bench-side-v1` | Fixed. Supine: x −118 to 16, z −13 to 13, pad top 39. Hinge: x −62 to 64, z −27 to 3, pad top 44. 7-unit pad on two legs. |
+| `dumbbell-pair-v1` on `grounded-side-v1` | `grounded-side-v1` | One dumbbell in each hand, handle across the body (palms facing the thighs). |
+| `barbell-v1` | `grounded-side-v1`, `supine-barbell-v1` | Bar along z through the middle of the hands; bumper plates at 34 to 44 either side. |
+| `barbell-back-v1` | `grounded-side-v1` | Bar on the upper back, 7 behind and 3 below the shoulder line; hands solved to it. |
+| `lat-pulldown-v1`, `seated-row-v1` | `seated-side-v1` | The machine: frame, seat, pad or footplate, pulley, cable and handle, all fixed. |
+| `flat-bench-v1` | `supine-bench-v1`, `hinge-bench-side-v1`, `supine-barbell-v1` | Fixed. Supine: x −118 to 16, z −13 to 13, pad top 39. Hinge: x −62 to 64, z −27 to 3, pad top 44. 7-unit pad on two legs. |
 
 The weights are always placed from the hand in the same frame, so they can't lag
 or float; the checks confirm the gap is 0.
@@ -245,8 +295,12 @@ Generated pictures are never the authority on form; the references are.
 | | |
 | --- | --- |
 | Guides | 5 (`dumbbell-curl` pilot; `goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`, `hammer-curl`) |
-| Rig samples (not shown in the app) | 3 (`goblet-squat`, `dumbbell-bench-press`, `one-arm-dumbbell-row`) |
+| Rig samples (not shown in the app) | 11, one per setup, in `docs/guides/samples/` |
 | Built-in exercises | see `node tests/guides.test.mjs` (it counts them) |
 
 The full inventory and batches come next (#260). Don't call the library complete
 while exercises remain without a guide or a documented exclusion.
+
+## Render fingerprints and admin review
+
+Regenerate `web/guides/renders.json` with `node docs/guides/render-previews.mjs` after changing poses or renderer code. A targeted preview run also refreshes fingerprints for the full index. The fingerprint covers pose SVGs and sampled in-between frames. The fixed `legacy` entries preserve existing file-only review revisions for unchanged launch artwork. Changes to guide data or its rendered fingerprint return that guide to admin review.

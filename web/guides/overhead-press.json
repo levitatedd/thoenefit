@@ -1,0 +1,101 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "overhead-press",
+  "title": "Barbell overhead press",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "timing": {
+    "move_ms": 800,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "rack",
+      "label": "Rack",
+      "description": "Hold the bar at your upper chest and brace your stomach and glutes.",
+      "hold_ms": 750,
+      "joints": {
+        "shoulder": 35,
+        "elbow": 140
+      },
+      "arrow": null
+    },
+    {
+      "id": "pass",
+      "label": "Face level",
+      "description": "Move your head slightly back and press the bar past your face.",
+      "joints": {
+        "shoulder": 75,
+        "elbow": 125
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "clear",
+      "label": "Clear head",
+      "description": "Once the bar clears your head, press it back into line over your shoulders.",
+      "joints": {
+        "shoulder": 105,
+        "elbow": 100
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "overhead",
+      "label": "Overhead",
+      "description": "Finish with arms long overhead and ribs stacked over your hips.",
+      "joints": {
+        "shoulder": 176,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "descend",
+      "label": "Lower",
+      "description": "Lower the bar under control, keeping it clear of your head.",
+      "joints": {
+        "shoulder": 105,
+        "elbow": 100
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "return",
+      "label": "Return",
+      "description": "Bring the bar past your face and back to your upper chest.",
+      "joints": {
+        "shoulder": 75,
+        "elbow": 125
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-19",
+    "checked_by": "Codex",
+    "checks": [
+      "Braced standing start at the upper chest, clearance in front of the face and finish overhead without back lean.",
+      "Compared pose captions with the exact built-in exercise cue.",
+      "Checked camera bounds, equipment anchoring, and contact throughout the interpolated loop."
+    ],
+    "references": [
+      "https://www.strengthlog.com/overhead-press/"
+    ],
+    "limitations": [
+      "The rig has a fixed head. The bar travels forward to clear the face, and the caption explains the small head movement.",
+      "The loop begins after unracking.",
+      "The simplified figure and fixed camera show the main movement path. In-app phone playback and admin review are pending.",
+      "The fixed camera and full-size plates can partially obscure the hands or bar."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

@@ -1484,7 +1484,8 @@ function guidePlayer(g, { flag = true } = {}) {
     return h('button', { type: 'button', class: 'choice guide-thumb', 'aria-label': `Show ${p.label}`, onclick: () => go(k) }, art, h('span', { class: 'guide-thumb-label' }, p.label));
   });
   const thumbRow = h('div', { class: 'guide-thumbs', role: 'group', 'aria-label': 'Poses' }, thumbs);
-  thumbRow.style.setProperty('grid-template-columns', `repeat(${n}, minmax(0, 1fr))`);
+  // Six poses go in two rows of three, so each thumbnail stays big enough to tap (44px) on a narrow phone.
+  thumbRow.style.setProperty('grid-template-columns', `repeat(${n > 5 ? 3 : n}, minmax(0, 1fr))`);
   const paint = () => {
     status.textContent = `${i + 1} / ${n} · ${poses[i].label}`;
     // Announced when someone steps through the poses, not on every turn of the loop.

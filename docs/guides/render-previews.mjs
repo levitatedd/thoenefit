@@ -7,8 +7,10 @@
 // (all poses side by side, with arrows), and the same for each rig sample under
 // docs/guides/samples/<exercise>/. The app draws the same pictures from
 // the same code (web/js/guides.js), so these always match what people see.
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { render, rigOf } from '../../web/js/guides.js';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { render, rigOf, RIGS3D, viewBoxOf } from '../../web/js/guides.js';
+
+import { renderHashes } from './render-hashes.mjs';
 
 const root = new URL('../../', import.meta.url);
 const index = JSON.parse(readFileSync(new URL('web/guides/index.json', root), 'utf8'));
@@ -26,7 +28,7 @@ for (const [name, src, dir] of jobs) {
   const g = JSON.parse(readFileSync(src, 'utf8'));
   const slug = g.exercise;
   mkdirSync(dir, { recursive: true });
-  const [, , w, h] = rigOf(g).viewBox;
+  const [, , w, h] = RIGS3D[g.rig] ? viewBoxOf(RIGS3D[g.rig], g) : rigOf(g).viewBox;
   const panels = [];
   g.poses.forEach((p, k) => {
     const svg = render(g, p.joints, { id: `${slug}-${p.id}`, arrowDir: p.arrow, label: `${g.title}, ${p.label}: ${p.description}` });
@@ -37,3 +39,9 @@ for (const [name, src, dir] of jobs) {
   writeFileSync(new URL('sheet.svg', dir), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h + 26}" width="${W * 2}" height="${(h + 26) * 2}"><rect width="100%" height="100%" fill="#12151a"/>${panels.join('')}</svg>\n`);
   console.log(`${name}: ${g.poses.length} poses`);
 }
+
+const manifest = new URL('web/guides/renders.json', root);
+const previous = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')) : {};
+// Preserve the rollout baseline so pre-existing decisions on unchanged art still match.
+const hashes = { legacy: previous.legacy ?? {}, renders: renderHashes(root, index.guides) };
+writeFileSync(manifest, `${JSON.stringify(hashes, null, 2)}\n`);

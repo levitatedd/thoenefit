@@ -43,12 +43,15 @@
         "sample": "web/guides/dumbbell-curl.json"
       },
       "grounded-side-v1": {
-        "use": "Standing with both feet planted: squats, standing presses and holds.",
+        "use": "Standing with both feet planted: squats, hinges, curls and presses with a goblet dumbbell, one or two dumbbells, or a barbell in the hands or on the back.",
         "sample": "docs/guides/samples/goblet-squat.json",
         "camera": "side",
         "equipment": [
           "dumbbell-goblet-v1",
-          "dumbbell-v1"
+          "dumbbell-v1",
+          "dumbbell-pair-v1",
+          "barbell-v1",
+          "barbell-back-v1"
         ],
         "joints": {
           "shin": [
@@ -61,11 +64,11 @@
           ],
           "torso": [
             -10,
-            70
+            75
           ],
           "shoulder": [
-            -40,
-            160
+            -90,
+            180
           ],
           "elbow": [
             0,
@@ -83,7 +86,15 @@
           "shoulder": 0,
           "elbow": 0,
           "supination": 0
-        }
+        },
+        "samples": [
+          "docs/guides/samples/goblet-squat.json",
+          "docs/guides/samples/barbell-curl.json",
+          "docs/guides/samples/deadlift.json",
+          "docs/guides/samples/back-squat.json",
+          "docs/guides/samples/overhead-press.json",
+          "docs/guides/samples/dumbbell-rdl.json"
+        ]
       },
       "supine-bench-v1": {
         "use": "Lying face up on a flat bench, feet on the floor; each arm posed on its own.",
@@ -155,6 +166,56 @@
           "shoulder": 0,
           "elbow": 0
         }
+      },
+      "supine-barbell-v1": {
+        "use": "Lying face up on a flat bench with a barbell; the arms follow the bar (press 0 at the chest, 1 at lockout).",
+        "sample": "docs/guides/samples/barbell-bench-press.json",
+        "camera": "front-three-quarter",
+        "equipment": [
+          "flat-bench-v1",
+          "barbell-v1"
+        ],
+        "joints": {
+          "press": [
+            0,
+            1
+          ],
+          "tuck": [
+            20,
+            80
+          ]
+        },
+        "defaults": {
+          "press": 1,
+          "tuck": 50
+        }
+      },
+      "seated-side-v1": {
+        "use": "Seated at a cable machine (lat pulldown or seated row); the arms follow the handle (pull 0 arms long, 1 end of the pull).",
+        "sample": "docs/guides/samples/lat-pulldown.json",
+        "camera": "side",
+        "equipment": [
+          "lat-pulldown-v1",
+          "seated-row-v1"
+        ],
+        "joints": {
+          "torso": [
+            -25,
+            30
+          ],
+          "pull": [
+            0,
+            1
+          ]
+        },
+        "defaults": {
+          "torso": 0,
+          "pull": 0
+        },
+        "samples": [
+          "docs/guides/samples/lat-pulldown.json",
+          "docs/guides/samples/seated-cable-row.json"
+        ]
       }
     },
     "check": [
