@@ -8,7 +8,7 @@
 // docs/guides/samples/<exercise>/. The app draws the same pictures from
 // the same code (web/js/guides.js), so these always match what people see.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { render, rigOf } from '../../web/js/guides.js';
+import { render, rigOf, RIGS3D, viewBoxOf } from '../../web/js/guides.js';
 
 const root = new URL('../../', import.meta.url);
 const index = JSON.parse(readFileSync(new URL('web/guides/index.json', root), 'utf8'));
@@ -26,7 +26,7 @@ for (const [name, src, dir] of jobs) {
   const g = JSON.parse(readFileSync(src, 'utf8'));
   const slug = g.exercise;
   mkdirSync(dir, { recursive: true });
-  const [, , w, h] = rigOf(g).viewBox;
+  const [, , w, h] = RIGS3D[g.rig] ? viewBoxOf(RIGS3D[g.rig], g) : rigOf(g).viewBox;
   const panels = [];
   g.poses.forEach((p, k) => {
     const svg = render(g, p.joints, { id: `${slug}-${p.id}`, arrowDir: p.arrow, label: `${g.title}, ${p.label}: ${p.description}` });

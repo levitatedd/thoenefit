@@ -32,7 +32,7 @@ export const RIGS = {
  * Equipment a guide can list. Each draws itself from the pose: held weights at
  * their hands, benches under the body. Which rigs support each is in RIGS3D.
  */
-export const EQUIPMENT = ['dumbbell-v1', 'dumbbell-goblet-v1', 'dumbbell-pair-v1', 'flat-bench-v1'];
+export const EQUIPMENT = ['dumbbell-v1', 'dumbbell-goblet-v1', 'dumbbell-pair-v1', 'flat-bench-v1', 'barbell-v1', 'barbell-back-v1', 'lat-pulldown-v1', 'seated-row-v1'];
 
 const rad = (d) => (d * Math.PI) / 180;
 const down = (a, l) => [Math.sin(rad(a)) * l, Math.cos(rad(a)) * l];
@@ -292,6 +292,7 @@ export function problems(guide, { slugs = null } = {}) {
     const c = checkLoop(guide);
     if (c.contact > CONTACT_TOLERANCE) out.push(`${c.contactName} drifts ${r1(c.contact)} units from its contact (at ${c.where})`);
     if (c.outside > 0) out.push(`the figure or equipment leaves the picture by ${r1(c.outside)} units (at ${c.where2})`);
+    if (c.floor > 0.5) out.push(`the barbell's plates sink ${r1(c.floor)} units into the floor (at ${c.where3})`);
   }
   return out;
 }
@@ -331,8 +332,11 @@ export const RIGS3D = {
     camera: 'side',
     viewBox: [44, 40, 168, 196],
     origin: [118, 224],
-    equipment: ['dumbbell-goblet-v1', 'dumbbell-v1'],
-    limits: { shin: [-10, 45], knee: [0, 150], torso: [-10, 70], shoulder: [-40, 160], elbow: [0, 160], supination: [0, 1] },
+    equipment: ['dumbbell-goblet-v1', 'dumbbell-v1', 'dumbbell-pair-v1', 'barbell-v1', 'barbell-back-v1'],
+    // Barbells and a dumbbell in each hand reach much further (overhead, the plates):
+    // those guides are framed to fit their own whole loop instead.
+    views: { 'barbell-v1': 'fit', 'barbell-back-v1': 'fit', 'dumbbell-pair-v1': 'fit' },
+    limits: { shin: [-10, 45], knee: [0, 150], torso: [-10, 75], shoulder: [-90, 180], elbow: [0, 160], supination: [0, 1] },
     defaults: { shin: 0, knee: 0, torso: 0, shoulder: 0, elbow: 0, supination: 0 },
     arrowAt: 'hip',
     arrowDx: -24, // behind the hips, clear of the thighs
@@ -367,6 +371,67 @@ export const RIGS3D = {
     arrowAt: 'nearHand',
     shadow: 70,
   },
+  // Barbell bench press: lying face up as in supine-bench-v1, both hands on one bar
+  // a fixed grip apart. `press` moves the bar along its path from the chest (0) to
+  // straight arms over the shoulders (1); the arms bend to follow it, elbows angled
+  // out from the body by `tuck`.
+  'supine-barbell-v1': {
+    camera: 'front-three-quarter',
+    viewBox: [0, 30, 272, 206],
+    origin: [150, 222],
+    equipment: ['flat-bench-v1', 'barbell-v1'],
+    limits: { press: [0, 1], tuck: [20, 80] },
+    defaults: { press: 1, tuck: 50 },
+    arrowAt: 'nearHand',
+    arrowDx: 28,
+    shadow: 70,
+  },
+  // Seated at a cable machine, facing right, seen from the side. Hips stay on the
+  // seat and feet on the floor or footplate; `pull` moves the handle along the
+  // machine's path from arms long (0) to the end of the pull (1), and the arms
+  // follow it. `torso` leans as in the other rigs (negative leans back).
+  'seated-side-v1': {
+    camera: 'side',
+    viewBox: [16, 4, 220, 232],
+    origin: [100, 224],
+    equipment: ['lat-pulldown-v1', 'seated-row-v1'],
+    limits: { torso: [-25, 30], pull: [0, 1] },
+    defaults: { torso: 0, pull: 0 },
+    arrowAt: 'nearHand',
+    shadow: 60,
+  },
+};
+
+const fitted = new WeakMap();
+/**
+ * The picture for a guide. Most rigs have one fixed picture; equipment marked 'fit'
+ * frames the guide's whole loop (every pose and the frames between) with a margin,
+ * so it never moves while playing and nothing is cut off.
+ */
+export function viewBoxOf(rig, guide) {
+  const fit = ((guide && guide.equipment) || []).some((e) => rig.views && rig.views[e] === 'fit');
+  if (!fit || !guide.poses || !guide.poses.length) return rig.viewBox;
+  if (fitted.has(guide)) return fitted.get(guide);
+  const [x0, y0, x1, y1] = checkLoop(guide, 10, true).box;
+  const pad = 6;
+  let w = x1 - x0 + pad * 2;
+  const hgt = y1 - y0 + pad * 2;
+  // Never narrower than three quarters of the height, so the player keeps its shape.
+  const extra = Math.max(0, hgt * 0.75 - w);
+  w += extra;
+  const vb = [Math.round(x0 - pad - extra / 2), Math.round(y0 - pad), Math.ceil(w), Math.ceil(hgt)];
+  fitted.set(guide, vb);
+  return vb;
+}
+
+// Barbells: a 20 kg bar, plates the size of bumper plates. Units are about a centimetre.
+const BAR = { half: 64, plateIn: 34, plateOut: 44, plate: 20, grip: 13, wideGrip: 26 };
+// Seated machines: seat, feet and the handle's path, fixed by the machine.
+const SEATED = {
+  hip: [0, 52, 0],
+  seat: { x: [-20, 22], z: [-16, 16], top: 46, pad: 7 },
+  'lat-pulldown-v1': { feet: { near: [42, 4, 10], far: [42, 4, -10] }, from: [8, 160], to: [16, 98], grip: 32, pole: [0, -1, 1.2], pulley: [10, 200] },
+  'seated-row-v1': { feet: { near: [64, 22, 10], far: [64, 22, -10] }, from: [64, 82], to: [18, 72], grip: 4, pole: [-1, -0.3, 0.6], pulley: [104, 24] },
 };
 
 // Fixed contact points and bench boxes, in world units.
@@ -455,7 +520,62 @@ export function pose3d(rig, pose, guide) {
     } else if (eq.includes('dumbbell-v1')) {
       const fa = j.torso + j.shoulder + j.elbow;
       held.push({ id: 'dumbbell-v1', hand: P.nearHand, center: P.nearHand, axis: v3.unit([Math.cos(rad(fa)) * (1 - j.supination), Math.sin(rad(fa)) * (1 - j.supination), j.supination + 1e-3]) });
+    } else if (eq.includes('dumbbell-pair-v1')) {
+      // A dumbbell in each hand, handles across the body (palms facing the thighs).
+      for (const side of ['near', 'far']) held.push({ id: 'dumbbell-pair-v1', hand: P[`${side}Hand`], center: P[`${side}Hand`], axis: [0, 0, 1] });
+    } else if (eq.includes('barbell-v1')) {
+      // Both hands on one bar, shoulder width apart: the bar runs through them.
+      const mid = v3.mul(v3.add(P.nearHand, P.farHand), 0.5);
+      held.push({ id: 'barbell-v1', hand: mid, center: mid, axis: [0, 0, 1] });
+    } else if (eq.includes('barbell-back-v1')) {
+      // Bar across the upper back, just below the neck; the hands reach back to hold it.
+      // The arm joints are not used: the arms are solved to the bar.
+      const u = up3(j.torso, 1);
+      const back = [-u[1], u[0], 0];
+      const bar = v3.add(P.shoulderC, v3.add(v3.mul(back, 7), v3.mul(u, -3)));
+      held.push({ id: 'barbell-back-v1', hand: bar, center: bar, axis: [0, 0, 1] });
+      for (const [side, s] of [['near', 1], ['far', -1]]) {
+        const sh = P[`${side}Shoulder`];
+        const grip = [bar[0], bar[1], s * BAR.wideGrip];
+        const arm = reach(sh, grip, B.upperArm, B.forearm, v3.add(v3.mul(back, 0.4), [0, -1, 0]));
+        Object.assign(P, { [`${side}Elbow`]: arm.mid, [`${side}Hand`]: arm.end });
+        contacts.push({ name: `${side} hand on the bar`, at: arm.end, target: grip });
+      }
     }
+  } else if (rig === RIGS3D['supine-barbell-v1'] || rig === RIGS3D['seated-side-v1']) {
+    const seated = rig === RIGS3D['seated-side-v1'];
+    const M = seated ? SEATED[eq.find((e) => SEATED[e])] || SEATED['lat-pulldown-v1'] : null;
+    if (seated) {
+      P.hip = SEATED.hip;
+      P.shoulderC = v3.add(P.hip, up3(j.torso, B.torso));
+      contacts.push({ name: 'hips on the seat', at: [P.hip[0], P.hip[1] - 6, 0], target: [0, SEATED.seat.top, 0] });
+    } else {
+      P.hip = SUPINE.hip;
+      P.shoulderC = v3.add(P.hip, [-B.torso, 0, 0]);
+      contacts.push({ name: 'back on the bench', at: [P.shoulderC[0], P.shoulderC[1] - 10, 0], target: [-B.torso, SUPINE.benchTop, 0] });
+      contacts.push({ name: 'hips on the bench', at: [P.hip[0], P.hip[1] - 10, 0], target: [0, SUPINE.benchTop, 0] });
+    }
+    // The handle: on the machine's path, or the bar between the chest and lockout.
+    const t = seated ? j.pull : j.press;
+    const [ax, ay] = seated ? M.from : [-38, 67];
+    const [bx, by] = seated ? M.to : [-48, 112];
+    const bar = [ax + (bx - ax) * t, ay + (by - ay) * t, 0];
+    const grip = seated ? M.grip : BAR.wideGrip;
+    for (const [side, s] of [['near', 1], ['far', -1]]) {
+      const hip = v3.add(P.hip, [0, 0, s * (seated ? B.hipHalf : 9)]);
+      const foot = seated ? M.feet[side] : SUPINE.feet[side];
+      const leg = reach(hip, foot, B.thigh, B.shin, [1, 0.6, 0]);
+      Object.assign(P, { [`${side}Hip`]: hip, [`${side}Knee`]: leg.mid, [`${side}Ankle`]: leg.end });
+      contacts.push({ name: `${side} foot on the ${seated && M.feet.near[1] > 10 ? 'footplate' : 'floor'}`, at: leg.end, target: foot });
+      const sh = seated ? v3.add(P.shoulderC, [0, 0, s * B.shoulderHalf]) : v3.add(P.shoulderC, [4, 2, s * B.shoulderHalf]);
+      const target = [bar[0], bar[1], s * grip];
+      const pole = seated ? [M.pole[0], M.pole[1], s * M.pole[2]] : [Math.cos(rad(j.tuck)), -0.4, s * Math.sin(rad(j.tuck))];
+      const arm = reach(sh, target, B.upperArm, B.forearm, pole);
+      Object.assign(P, { [`${side}Shoulder`]: sh, [`${side}Elbow`]: arm.mid, [`${side}Hand`]: arm.end });
+      contacts.push({ name: `${side} hand on the ${seated ? 'handle' : 'bar'}`, at: arm.end, target });
+    }
+    if (seated) held.push({ id: eq.find((e) => SEATED[e]), hand: bar, center: bar, axis: [0, 0, 1], grip });
+    else held.push({ id: 'barbell-v1', hand: bar, center: bar, axis: [0, 0, 1] });
   } else if (rig === RIGS3D['supine-bench-v1']) {
     P.hip = SUPINE.hip;
     P.shoulderC = v3.add(P.hip, [-B.torso, 0, 0]);
@@ -547,6 +667,72 @@ function dumbbell3d(rig, center, axis, { half = 10, plate = 8.5 } = {}) {
   return `<g class="g-dumbbell">${plateAt(ps[0])}${handle}${plateAt(ps[1])}</g>`;
 }
 
+/** A disc square to `axis` at `c`, projected (plates, pulleys). */
+function disc3d(rig, c, axis, r) {
+  const S = project(rig);
+  const a = v3.unit(axis);
+  const helper = Math.abs(a[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const u = v3.unit(v3.cross(a, helper));
+  const w = v3.cross(a, u);
+  return smooth(Array.from({ length: 16 }, (_, k) => {
+    const t = (k / 16) * Math.PI * 2;
+    return S(v3.add(c, v3.add(v3.mul(u, Math.cos(t) * r), v3.mul(w, Math.sin(t) * r))));
+  }));
+}
+
+/**
+ * One half of a barbell (the far half, -z, or the near half, +z), so the figure can be
+ * drawn between them: bar, collar and a bumper plate.
+ */
+function barbellHalf(rig, center, half) {
+  const S = project(rig);
+  const z = (d) => v3.add(center, [0, 0, half * d]);
+  const line = (a, b, w, col) => `<line x1="${r1(S(a)[0])}" y1="${r1(S(a)[1])}" x2="${r1(S(b)[0])}" y2="${r1(S(b)[1])}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
+  const plate = (d, fill) => `<path class="g-metal" d="${disc3d(rig, z(d), [0, 0, 1], BAR.plate)}" fill="${fill}" stroke="${C.metalEdge}" stroke-width="1.1"/>`;
+  const face = `<path d="${disc3d(rig, z(half > 0 ? BAR.plateOut : BAR.plateIn), [0, 0, 1], BAR.plate - 6)}" fill="none" stroke="${C.metalDark}" stroke-width="0.9"/><path d="${disc3d(rig, z(half > 0 ? BAR.plateOut : BAR.plateIn), [0, 0, 1], 3)}" fill="${C.handle}"/>`;
+  const plates = half > 0
+    ? plate(BAR.plateIn, C.metalDark) + plate(BAR.plateOut, C.metal) + face
+    : plate(BAR.plateOut, C.metalDark) + plate(BAR.plateIn, C.metal) + face;
+  const bar = line(z(0), z(BAR.plateIn), 3.2, C.handle);
+  const sleeve = line(z(BAR.plateIn - 2), z(BAR.half), 4.6, C.metalEdge);
+  return half > 0 ? `<g class="g-barbell">${bar}${plates}${sleeve}</g>` : `<g class="g-barbell">${sleeve}${plates}${bar}</g>`;
+}
+
+/** A cable machine around the seated figure: frame, seat, pads, pulley and cable. */
+function machineParts(rig, id, P, layer) {
+  const S = project(rig);
+  const M = SEATED[id];
+  const box = (x0, x1, y0, y1, z0, z1, fill) => {
+    const c = (x, y, z) => S([x, y, z]);
+    const poly = (ps, f) => `<path d="M${ps.map(pt).join(' L')} Z" fill="${f}" stroke="#202730" stroke-width="1.1" stroke-linejoin="round"/>`;
+    return poly([c(x1, y0, z0), c(x1, y0, z1), c(x1, y1, z1), c(x1, y1, z0)], fill[2]) + poly([c(x0, y0, z1), c(x1, y0, z1), c(x1, y1, z1), c(x0, y1, z1)], fill[1]) + poly([c(x0, y1, z0), c(x1, y1, z0), c(x1, y1, z1), c(x0, y1, z1)], fill[0]);
+  };
+  const pad = ['#4a5563', '#363f4b', '#2f3742'];
+  const steel = ['#6d7782', '#59626c', '#4b535c'];
+  const line = (a, b, w, col) => `<line x1="${r1(S(a)[0])}" y1="${r1(S(a)[1])}" x2="${r1(S(b)[0])}" y2="${r1(S(b)[1])}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
+  const st = SEATED.seat;
+  if (layer === 'back') {
+    const post = id === 'lat-pulldown-v1'
+      ? box(-46, -38, 0, 206, -4, 4, steel) + box(-46, M.pulley[0] + 6, 198, 206, -4, 4, steel) + box(-58, -46, 0, 120, -10, 10, steel)
+        + box(P.nearKnee[0] - 8, P.nearKnee[0] - 5, 0, P.nearKnee[1] + 6, -2, 2, steel)
+      : box(M.pulley[0] - 4, M.pulley[0] + 6, 0, 70, -6, 6, steel) + box(st.x[0], M.pulley[0], 0, 6, -6, 6, steel) + box(M.feet.near[0] + 2, M.feet.near[0] + 8, 0, 40, -16, 16, steel);
+    return `<g class="g-machine">${post}${box(-6, 6, 0, st.top - st.pad, -4, 4, steel)}${box(st.x[0], st.x[1], st.top - st.pad, st.top, st.z[0], st.z[1], pad)}</g>`;
+  }
+  if (layer === 'pad') {
+    if (id !== 'lat-pulldown-v1') return '';
+    const k = P.nearKnee;
+    return `<g class="g-machine">${box(k[0] - 12, k[0] - 2, k[1] + 6, k[1] + 13, -18, 18, pad)}</g>`;
+  }
+  // The cable and the handle, in front of the figure.
+  const h = P.handle;
+  const cable = line(h, [M.pulley[0], M.pulley[1], 0], 1.4, C.metalEdge);
+  const wheel = `<path d="${disc3d(rig, [M.pulley[0], M.pulley[1], 0], [0, 0, 1], 6)}" fill="${C.metal}" stroke="${C.metalEdge}" stroke-width="1"/>`;
+  const handle = id === 'lat-pulldown-v1'
+    ? line(v3.add(h, [-2, -3, -M.grip - 10]), v3.add(h, [0, 0, -M.grip + 4]), 3.2, C.handle) + line(v3.add(h, [0, 0, -M.grip + 4]), v3.add(h, [0, 0, M.grip - 4]), 3.2, C.handle) + line(v3.add(h, [0, 0, M.grip - 4]), v3.add(h, [-2, -3, M.grip + 10]), 3.2, C.handle)
+    : line(v3.add(h, [6, 0, 0]), v3.add(h, [-2, 0, -M.grip - 2]), 3, C.handle) + line(v3.add(h, [6, 0, 0]), v3.add(h, [-2, 0, M.grip + 2]), 3, C.handle);
+  return `<g class="g-cable">${cable}${wheel}${handle}</g>`;
+}
+
 /** Straight arrow beside `at` (dx to the side), pointing up or down. */
 function arrowStraight(p, dir, dx = 20) {
   const x = p[0] + dx;
@@ -567,7 +753,10 @@ function render3d(guide, pose, { id, arrowDir, label }) {
   const { P, held } = pose3d(rig, pose, guide);
   const S = project(rig);
   const s = Object.fromEntries(Object.entries(P).map(([k, v]) => [k, S(v)]));
-  const [vx, vy, vw, vh] = rig.viewBox;
+  const [vx, vy, vw, vh] = viewBoxOf(rig, guide);
+  const bar = held.find((h) => h.id === 'barbell-v1' || h.id === 'barbell-back-v1');
+  const machine = held.find((h) => SEATED[h.id]);
+  const MP = machine ? { ...P, handle: machine.center } : P;
   const mint = `url(#${id}-mint)`;
   const far = `url(#${id}-far)`;
   // The torso leans along the spine as it appears in the picture.
@@ -595,12 +784,15 @@ function render3d(guide, pose, { id, arrowDir, label }) {
   const parts = [
     `<defs><linearGradient id="${id}-mint" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#b4ffdc"/><stop offset="0.45" stop-color="#6ef3b4"/><stop offset="1" stop-color="#2fd98a"/></linearGradient><linearGradient id="${id}-far" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#5fd6a0"/><stop offset="1" stop-color="#1e9a62"/></linearGradient></defs>`,
     `<ellipse class="g-ground" cx="${r1(shadowX(s))}" cy="${r1(rig.origin[1] + 1)}" rx="${rig.shadow}" ry="3" fill="${C.ground}"/>`,
-    eq.includes('flat-bench-v1') ? benchParts(rig, guide.rig === 'supine-bench-v1' ? SUPINE.bench : HINGE.bench) : '',
+    eq.includes('flat-bench-v1') ? benchParts(rig, guide.rig === 'hinge-bench-side-v1' ? HINGE.bench : SUPINE.bench) : '',
+    machine ? machineParts(rig, machine.id, MP, 'back') : '',
+    bar ? barbellHalf(rig, bar.center, -1) : '',
     leg('far', far),
     weights('far'),
     arm('far', far),
     fistAt(s.farElbow, s.farHand, far),
     leg('near', mint),
+    machine ? machineParts(rig, machine.id, MP, 'pad') : '',
     shape(smooth([[-12, 4], [-12.5, -3], [-8, -9], [4, -10], [11, -4], [11.5, 3], [5, 6], [-6, 6]].map(T)), mint),
     shape(smooth([[-8, 20], [-9.5, 9], [-8, 3], [8, 3], [10, 10], [8, 20]].map(T)), mint),
     shape(smooth([[-10, 50], [-12.5, 40], [-10.5, 28], [-8, 17], [7, 17], [13, 26], [16.5, 38], [13.5, 50], [5, 58], [-6, 57]].map(T)), mint),
@@ -610,6 +802,8 @@ function render3d(guide, pose, { id, arrowDir, label }) {
     // A goblet hold sits in front of the arm, cupped by the fists drawn over it.
     goblet ? dumbbell3d(rig, goblet.center, goblet.axis, { half: 9, plate: 8 }) : '',
     weights('near'),
+    bar ? barbellHalf(rig, bar.center, 1) : '',
+    machine ? machineParts(rig, machine.id, MP, 'front') : '',
     fistAt(s.nearElbow, s.nearHand, mint),
     arrowDir ? arrowStraight(s[rig.arrowAt] || s.hip, arrowDir, rig.arrowDx ?? 20) : '',
   ];
@@ -643,11 +837,11 @@ function blend(rig, a, b, t) {
  * and returns the worst contact drift and how far anything leaves the picture.
  * Also used by the checks to prove that weights follow the hands.
  */
-export function checkLoop(guide, steps = 10) {
+export function checkLoop(guide, steps = 10, measuring = false) {
   const rig = RIGS3D[guide.rig];
   const S = project(rig);
-  const [vx, vy, vw, vh] = rig.viewBox;
-  const res = { contact: 0, contactName: '', where: '', outside: 0, where2: '', handGap: 0, frames: 0, box: [Infinity, Infinity, -Infinity, -Infinity] };
+  const [vx, vy, vw, vh] = measuring ? [-1e6, -1e6, 2e6, 2e6] : viewBoxOf(rig, guide);
+  const res = { contact: 0, contactName: '', where: '', outside: 0, where2: '', handGap: 0, floor: 0, where3: '', frames: 0, box: [Infinity, Infinity, -Infinity, -Infinity] };
   const poses = guide.poses;
   for (let k = 0; k < poses.length; k++) {
     for (let i = 0; i < steps; i++) {
@@ -663,8 +857,21 @@ export function checkLoop(guide, steps = 10) {
       for (const h of held) res.handGap = Math.max(res.handGap, h.id === 'dumbbell-goblet-v1' ? Math.abs(dist3(h.center, h.hand) - Math.hypot(3, 10)) : dist3(h.center, h.hand));
       // Everything drawn: joints with their thickness, weights with their plates.
       const pts = Object.values(P).map((p) => [S(p), 9]);
-      for (const h of held) for (const e of [-1, 1]) pts.push([S(v3.add(h.center, v3.mul(v3.unit(h.axis), e * 12))), 10]);
-      if ((guide.equipment || []).includes('flat-bench-v1')) for (const c of benchCorners(rig, guide.rig === 'supine-bench-v1' ? SUPINE.bench : HINGE.bench)) pts.push([c, 1]);
+      // The head reaches about 24 units past the neck.
+      pts.push([S(v3.add(P.neck, v3.mul(v3.unit(v3.sub(P.neck, P.shoulderC)), 13))), 13]);
+      for (const h of held) {
+        const isBar = h.id === 'barbell-v1' || h.id === 'barbell-back-v1';
+        const reachOut = isBar ? BAR.half : SEATED[h.id] ? h.grip + 10 : 12;
+        for (const e of [-1, 1]) pts.push([S(v3.add(h.center, v3.mul(v3.unit(h.axis), e * reachOut))), isBar ? BAR.plate + 1 : 10]);
+        // Plates rest on the floor at most; they never sink into it.
+        if (isBar && BAR.plate - h.center[1] > res.floor) Object.assign(res, { floor: BAR.plate - h.center[1], where3: where });
+      }
+      const machine = held.find((h) => SEATED[h.id]);
+      if (machine) {
+        const M = SEATED[machine.id];
+        pts.push([S([M.pulley[0], M.pulley[1], 0]), 8], [S([-58, 0, 10]), 1], [S([-46, 206, 4]), 1], [S([M.pulley[0] + 6, 206, 4]), 1], [S([M.pulley[0] + 6, 70, 6]), 1]);
+      }
+      if ((guide.equipment || []).includes('flat-bench-v1')) for (const c of benchCorners(rig, guide.rig === 'hinge-bench-side-v1' ? HINGE.bench : SUPINE.bench)) pts.push([c, 1]);
       const sx = shadowX(Object.fromEntries(Object.entries(P).map(([k, v]) => [k, S(v)])));
       pts.push([[sx - rig.shadow, rig.origin[1] + 1], 3], [[sx + rig.shadow, rig.origin[1] + 1], 3]);
       for (const [p, r] of pts) {
