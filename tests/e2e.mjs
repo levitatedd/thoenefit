@@ -348,7 +348,6 @@ await page.waitForSelector('.lift');
 check('a refresh mid-workout comes straight back to it with the sets intact', (await page.locator('.lift').first().locator('.set.done').count()) === setRows);
 await page.goto(`${URL}#/today`);
 await page.waitForSelector('text=Back to workout');
-check('Today offers a way back to the unfinished workout', true);
 await shot('06-resume');
 await page.click('a.btn:has-text("Back to workout")');
 await page.waitForSelector('.lift');
@@ -376,7 +375,6 @@ check('the app reopens offline with the unsynced sets intact', (await page.locat
 await context.setOffline(false);
 await page.evaluate(() => window.dispatchEvent(new Event('online')));
 await page.waitForSelector('#sync.saved', { timeout: 45000 });
-check('back online, the queue drains to Saved', true);
 
 const api = async (q) => page.evaluate(async (u) => (await fetch(u, { credentials: 'same-origin' })).json(), `api.php?a=${q}`);
 const boot = await api('bootstrap');
@@ -440,7 +438,6 @@ await page.waitForSelector('.settings-main');
 check('a connected Strava shows under Integrations', /Connected/.test(await page.textContent('.link-row:has-text("Strava")')));
 await page.click('.link-row:has-text("Strava")');
 await page.waitForSelector('button:has-text("Disconnect Strava")');
-check('the Strava screen offers Disconnect', true);
 await page.goto(`${URL}#/today`);
 check('the choice is remembered for next time', JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem('tf.stravaOnFinish')))) === '{"send":true,"summary":true,"calories":false}');
 await page.waitForSelector('.plan-row');
@@ -892,7 +889,6 @@ const post = (action, body, token) => page.evaluate(async ([a, b, t]) => {
 }, [action, body, token]);
 await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Manage users');
-check('the first account sees Manage users in Settings', true);
 await page.click('a:has-text("Manage users")');
 await page.waitForSelector('.log-row:has-text("Admin")');
 const newUser = `buddy${Date.now() % 100000}`;
@@ -989,7 +985,7 @@ await finishSetup(page);
 await page.waitForSelector('.plan-row');
 await page.goto(`${URL}#/settings`);
 await page.waitForSelector('text=Add to your Home Screen');
-check('a regular user has no Manage users link', (await page.locator('a:has-text("Manage users")').count()) === 0);
+check('regular Settings starts with Training and Gyms and has no Admin section', (await page.locator('.settings-main .section > h2').allTextContents()).slice(0, 2).join() === 'Training,Gyms' && (await page.locator('.settings-main .section > h2').filter({ hasText: /^Admin$/ }).count()) === 0 && (await page.locator('a:has-text("Manage users")').count()) === 0);
 await page.goto(`${URL}#/settings/users`);
 await page.waitForSelector('text=Only the admin');
 check('and opening the page directly shows nothing', (await page.locator('input[name=new_username]').count()) === 0);
@@ -1022,7 +1018,6 @@ await page.waitForSelector('.share-row');
 check('the share sheet lists the other people on the server, by name', (await page.locator('.share-row').count()) >= 1 && (await page.locator('.share-row', { hasText: 'Training Buddy' }).count()) === 1);
 await page.locator('.share-row', { hasText: 'Training Buddy' }).locator('button:has-text("Send")').click();
 await page.waitForSelector('.share-status.pending');
-check('a planned workout can be sent to another person', true);
 await shot('13-share-sheet');
 await page.click('.sheet button:has-text("Close")');
 const partner = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -1107,12 +1102,15 @@ await page.click('.tab:has-text("Settings")');
 await page.waitForSelector('text=Add to your Home Screen');
 await shot('11-settings');
 check('Settings shows the app version under its title, and no longer at the bottom', /^Version (dev|\d+\.\d+\.\d+(-staging)?)$/.test(await page.textContent('.top-head a.app-version')) && !/Version /.test(await page.textContent('.page > :last-child')), await page.textContent('.top-head a.app-version'));
-// #103: one heading colour, Training and Gyms first, the rest behind links.
+// #294: admin tools come first, followed by the regular Settings sections.
 {
   const heads = await page.$$eval('.settings-main .top-head h1, .settings-main .section > h2', (els) => els.map((e) => [e.textContent, getComputedStyle(e).color]));
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
-  check('Training and Gyms come first', order[0] === 'Training' && order[1] === 'Gyms', order.join());
+  check('Admin comes before Training and Gyms for admins', order.slice(0, 3).join() === 'Admin,Training,Gyms', order.join());
+  await page.setViewportSize({ width: 1280, height: 900 });
+  check('Admin also comes first on desktop', (await page.locator('.settings-main .section > h2').first().textContent()) === 'Admin');
+  await page.setViewportSize({ width: 402, height: 874 });
   // #216: one goal dropdown, in the agreed order, with the chosen goal's description under it.
   {
     const goalSel = page.locator('.goal-picker select[aria-label="Goal"]');
@@ -1199,7 +1197,6 @@ console.log('Saved routines');
   await page.fill('input[name=routine_name]', 'Monday Push');
   await page.click('.sheet button[type=submit]');
   await waitForToast(page, /Saved Monday Push/);
-  check('the routine is saved', true);
 
   // Start a fresh session from it on Today.
   await page.goto(`${URL}#/today`);
@@ -2648,7 +2645,6 @@ console.log('Send feedback');
   await fp.waitForSelector('.tabs');
   await fp.goto(`${URL}#/settings`);
   await fp.waitForSelector('.link-row:has-text("Send feedback")');
-  check('with a token, Settings → Help offers Send feedback', true);
   await fp.click('.link-row:has-text("Send feedback")');
   await fp.waitForSelector('.feedback-row');
   check('it warns that feedback is public, under the button', /posted publicly on GitHub\. Don't include personal details\./.test(await fp.textContent('.public-note')));
