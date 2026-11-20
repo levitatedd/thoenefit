@@ -6,6 +6,14 @@
     "goblet-squat": "goblet-squat.json",
     "dumbbell-bench-press": "dumbbell-bench-press.json",
     "one-arm-dumbbell-row": "one-arm-dumbbell-row.json",
-    "hammer-curl": "hammer-curl.json"
+    "hammer-curl": "hammer-curl.json",
+    "barbell-curl": "barbell-curl.json",
+    "deadlift": "deadlift.json",
+    "back-squat": "back-squat.json",
+    "overhead-press": "overhead-press.json",
+    "dumbbell-rdl": "dumbbell-rdl.json",
+    "barbell-bench-press": "barbell-bench-press.json",
+    "lat-pulldown": "lat-pulldown.json",
+    "seated-cable-row": "seated-cable-row.json"
   }
 }
