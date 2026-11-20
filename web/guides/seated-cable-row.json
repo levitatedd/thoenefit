@@ -1,0 +1,78 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "seated-cable-row",
+  "title": "Seated cable row",
+  "rig": "seated-side-v1",
+  "camera": "side",
+  "equipment": [
+    "seated-row-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "reach",
+      "label": "Reach",
+      "description": "Sit with knees slightly bent and reach for the handle without rounding your lower back.",
+      "hold_ms": 750,
+      "joints": {
+        "torso": 8,
+        "pull": 0
+      },
+      "arrow": null
+    },
+    {
+      "id": "row",
+      "label": "Row",
+      "description": "Drive your elbows back with your chest tall.",
+      "joints": {
+        "torso": 3,
+        "pull": 0.5
+      },
+      "arrow": null
+    },
+    {
+      "id": "finish",
+      "label": "Finish",
+      "description": "Pull the handle to your navel and squeeze your shoulder blades together.",
+      "joints": {
+        "torso": 0,
+        "pull": 1
+      },
+      "arrow": null
+    },
+    {
+      "id": "return",
+      "label": "Return",
+      "description": "Reach forward under control while keeping your lower back steady.",
+      "joints": {
+        "torso": 3,
+        "pull": 0.5
+      },
+      "arrow": null
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-19",
+    "checked_by": "Codex",
+    "checks": [
+      "Bent knees, unrounded back, narrow handle toward the midsection and a controlled forward reach.",
+      "Compared pose captions with the exact built-in exercise cue.",
+      "Checked camera bounds, equipment anchoring, and contact throughout the interpolated loop."
+    ],
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/48/seated-row/"
+    ],
+    "limitations": [
+      "The simplified figure and fixed camera show the main movement path. In-app phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
