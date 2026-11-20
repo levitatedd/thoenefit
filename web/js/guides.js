@@ -476,7 +476,7 @@ export function pose3d(rig, pose, guide) {
       const f = rad(j[`${side}_shoulder`] - j[`${side}_elbow`]);
       const hand = v3.add(el, [0, Math.cos(f) * B.forearm, s * Math.sin(f) * B.forearm]);
       Object.assign(P, { [`${side}Shoulder`]: sh, [`${side}Elbow`]: el, [`${side}Hand`]: hand });
-      held.push({ id: 'dumbbell-pair-v1', hand, center: hand, axis: [0, 0, 1] });
+      held.push({ id: 'dumbbell-pair-v1', hand, center: hand, axis: [0.55, 0, 1] });
     }
   } else if (rig === RIGS3D['hinge-bench-side-v1']) {
     const farHip = v3.add(HINGE.knee, v3.mul(v3.unit([4, 43.6, 2]), B.thigh));
@@ -530,7 +530,9 @@ function benchParts(rig, b) {
 }
 
 /** A dumbbell anywhere in 3D: two plates square to the handle, projected. */
-function dumbbell3d(rig, center, axis, { half = 10, plate = 8.5 } = {}) {
+const BENCH_DUMBBELL_HALF = 15;
+
+function dumbbell3d(rig, center, axis, { half = 10, plate = 8.5, grip = '' } = {}) {
   const S = project(rig);
   const a = v3.unit(axis);
   const helper = Math.abs(a[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
@@ -544,7 +546,7 @@ function dumbbell3d(rig, center, axis, { half = 10, plate = 8.5 } = {}) {
   const ps = ends.map((e) => [v3.add(e, v3.mul(a, Math.sign(v3.dot(v3.sub(e, center), a)) * 2.2)), e]);
   const handle = `<line class="g-handle" x1="${r1(S(ends[0])[0])}" y1="${r1(S(ends[0])[1])}" x2="${r1(S(ends[1])[0])}" y2="${r1(S(ends[1])[1])}" stroke="${C.handle}" stroke-width="3.5" stroke-linecap="round"/>`;
   const plateAt = ([outer, inner]) => `<path class="g-metal" d="${disc(outer, plate)}" fill="${C.metalDark}" stroke="${C.metalEdge}" stroke-width="1"/><path class="g-metal" d="${disc(inner, plate)}" fill="${C.metal}" stroke="${C.metalEdge}" stroke-width="1.2"/><path d="${disc(inner, plate - 2.6)}" fill="none" stroke="${C.metalDark}" stroke-width="0.8"/>`;
-  return `<g class="g-dumbbell">${plateAt(ps[0])}${handle}${plateAt(ps[1])}</g>`;
+  return `<g class="g-dumbbell">${plateAt(ps[0])}${handle}${grip}${plateAt(ps[1])}</g>`;
 }
 
 /** Straight arrow beside `at` (dx to the side), pointing up or down. */
@@ -590,16 +592,28 @@ function render3d(guide, pose, { id, arrowDir, label }) {
     shape(limbPath(s[`${side}Elbow`], s[`${side}Hand`], 4.6, 3.1, { bulgeL: 0.9, bulgeR: 0.4, at: 0.3 }), fill),
     ball(s[`${side}Elbow`], 3.8, fill),
   ].join('');
-  const weights = (side) => held.filter((h) => h.id !== 'dumbbell-goblet-v1' && (h.hand === P[`${side}Hand`])).map((h) => dumbbell3d(rig, h.center, h.axis)).join('');
+  const weight = (side) => held.find((h) => h.id !== 'dumbbell-goblet-v1' && h.hand === P[`${side}Hand`]);
+  const fist = (side, fill) => fistAt(s[`${side}Elbow`], s[`${side}Hand`], fill);
+  const hand = (side, fill) => {
+    const h = weight(side);
+    if (h?.id === 'dumbbell-pair-v1') {
+      // Show the fist wrapped over the handle, behind the nearer plate.
+      // The three-quarter camera foreshortens the bar, so give the grip room.
+      return dumbbell3d(rig, h.center, h.axis, {
+        half: BENCH_DUMBBELL_HALF,
+        grip: `<g class="g-grip">${fist(side, fill)}</g>`,
+      });
+    }
+    return (h && side === 'near' ? dumbbell3d(rig, h.center, h.axis) : '') + fist(side, fill);
+  };
   const goblet = held.find((h) => h.id === 'dumbbell-goblet-v1');
   const parts = [
     `<defs><linearGradient id="${id}-mint" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#b4ffdc"/><stop offset="0.45" stop-color="#6ef3b4"/><stop offset="1" stop-color="#2fd98a"/></linearGradient><linearGradient id="${id}-far" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#5fd6a0"/><stop offset="1" stop-color="#1e9a62"/></linearGradient></defs>`,
     `<ellipse class="g-ground" cx="${r1(shadowX(s))}" cy="${r1(rig.origin[1] + 1)}" rx="${rig.shadow}" ry="3" fill="${C.ground}"/>`,
     eq.includes('flat-bench-v1') ? benchParts(rig, guide.rig === 'supine-bench-v1' ? SUPINE.bench : HINGE.bench) : '',
     leg('far', far),
-    weights('far'),
     arm('far', far),
-    fistAt(s.farElbow, s.farHand, far),
+    hand('far', far),
     leg('near', mint),
     shape(smooth([[-12, 4], [-12.5, -3], [-8, -9], [4, -10], [11, -4], [11.5, 3], [5, 6], [-6, 6]].map(T)), mint),
     shape(smooth([[-8, 20], [-9.5, 9], [-8, 3], [8, 3], [10, 10], [8, 20]].map(T)), mint),
@@ -609,8 +623,7 @@ function render3d(guide, pose, { id, arrowDir, label }) {
     arm('near', mint),
     // A goblet hold sits in front of the arm, cupped by the fists drawn over it.
     goblet ? dumbbell3d(rig, goblet.center, goblet.axis, { half: 9, plate: 8 }) : '',
-    weights('near'),
-    fistAt(s.nearElbow, s.nearHand, mint),
+    hand('near', mint),
     arrowDir ? arrowStraight(s[rig.arrowAt] || s.hip, arrowDir, rig.arrowDx ?? 20) : '',
   ];
   const title = label ? `<title>${label.replace(/[<&]/g, '')}</title>` : '';
@@ -663,7 +676,10 @@ export function checkLoop(guide, steps = 10) {
       for (const h of held) res.handGap = Math.max(res.handGap, h.id === 'dumbbell-goblet-v1' ? Math.abs(dist3(h.center, h.hand) - Math.hypot(3, 10)) : dist3(h.center, h.hand));
       // Everything drawn: joints with their thickness, weights with their plates.
       const pts = Object.values(P).map((p) => [S(p), 9]);
-      for (const h of held) for (const e of [-1, 1]) pts.push([S(v3.add(h.center, v3.mul(v3.unit(h.axis), e * 12))), 10]);
+      for (const h of held) {
+        const reach = h.id === 'dumbbell-pair-v1' ? BENCH_DUMBBELL_HALF + 2.2 : 12;
+        for (const e of [-1, 1]) pts.push([S(v3.add(h.center, v3.mul(v3.unit(h.axis), e * reach))), 10]);
+      }
       if ((guide.equipment || []).includes('flat-bench-v1')) for (const c of benchCorners(rig, guide.rig === 'supine-bench-v1' ? SUPINE.bench : HINGE.bench)) pts.push([c, 1]);
       const sx = shadowX(Object.fromEntries(Object.entries(P).map(([k, v]) => [k, S(v)])));
       pts.push([[sx - rig.shadow, rig.origin[1] + 1], 3], [[sx + rig.shadow, rig.origin[1] + 1], 3]);
