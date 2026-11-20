@@ -37,7 +37,7 @@ function fakeEnvironment({ issues = {}, board = {}, failFirstGraphql = 0, ignore
           projectV2: {
             id: 'P1',
             title: 'ThoeneFit: Rivals',
-            field: { id: 'F1', name: 'Status', options: ['Todo', 'In Progress', 'In Review', 'On Staging', 'Done'].map((n) => ({ id: `opt-${n}`, name: n })) },
+            field: { id: 'F1', name: 'Status', options: ['Todo', 'Guide Revisions', 'In Progress', 'In Review', 'On Staging', 'Done'].map((n) => ({ id: `opt-${n}`, name: n })) },
           },
         },
       };
@@ -66,6 +66,9 @@ function fakeEnvironment({ issues = {}, board = {}, failFirstGraphql = 0, ignore
   const github = {
     rest: {
       issues: {
+        getLabel: async () => { throw Object.assign(new Error('Not Found'), { status: 404 }); },
+        createLabel: async () => {},
+        addLabels: async ({ issue_number, labels }) => state.issues[issue_number].labels.push(...labels),
         get: async ({ issue_number }) => {
           const issue = state.issues[issue_number];
           if (!issue) throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -274,4 +277,22 @@ test('backlog issue events are excluded', async () => {
   const env = fakeEnvironment();
   await runWith(env, {eventName:'issues',payload:{action:'closed',issue:{number:1,node_id:'I1',state:'closed'}}});
   assert.equal(env.state.graphqlCalls, 0);
+});
+
+test('an app guide issue is labeled and stays queued through green CI until staging merge', async () => {
+  const issue = {
+    number: 13, node_id: 'I13', state: 'open', labels: ['bug'],
+    user: { login: 'levitatedd' }, title: 'Revise the Dumbbell Curl movement guide',
+    body: "Marked **Needs revision** in the app's movement guide review (#277).",
+  };
+  const env = fakeEnvironment({ issues: { 13: issue }, board: { I13: 'Todo' } });
+  await runWith(env, { eventName: 'issues', payload: { action: 'opened', issue } });
+  assert.deepEqual(env.state.issues[13].labels, ['bug', 'guide revision']);
+  assert.equal(env.state.board.I13, 'Guide Revisions');
+  const pr = prPayload({ body: 'Refs #13' });
+  await runWith(env, { eventName: 'pull_request', payload: { action: 'synchronize', pull_request: pr } }, { checksResult: 'success' });
+  assert.equal(env.state.board.I13, 'Guide Revisions');
+  await runWith(env, { eventName: 'pull_request', payload: { action: 'closed', pull_request: { ...pr, merged: true } } });
+  assert.equal(env.state.board.I13, 'On Staging');
+  assert.equal(env.state.issues[13].state, 'open');
 });
