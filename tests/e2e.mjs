@@ -1108,9 +1108,14 @@ check('Settings shows the app version under its title, and no longer at the bott
   check('every heading on the main Settings page is mint green', heads.length >= 6 && heads.every(([, c]) => c === 'rgb(58, 242, 156)'), JSON.stringify(heads));
   const order = heads.slice(1).map(([t]) => t);
   check('Admin comes before Training and Gyms for admins', order.slice(0, 3).join() === 'Admin,Training,Gyms', order.join());
-  await page.setViewportSize({ width: 1280, height: 900 });
-  check('Admin also comes first on desktop', (await page.locator('.settings-main .section > h2').first().textContent()) === 'Admin');
-  await page.setViewportSize({ width: 402, height: 874 });
+  const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 }, storageState: await context.storageState() });
+  try {
+    const desktopPage = await desktop.newPage();
+    await desktopPage.goto(`${URL}#/settings`);
+    check('Admin also comes first on desktop', (await desktopPage.locator('.settings-main .section > h2').first().textContent({ timeout: 10000 })) === 'Admin');
+  } finally {
+    await desktop.close();
+  }
   // #216: one goal dropdown, in the agreed order, with the chosen goal's description under it.
   {
     const goalSel = page.locator('.goal-picker select[aria-label="Goal"]');
@@ -1267,7 +1272,7 @@ if (!process.env.TF_URL) {
   check('reopening the app with no new deploy does not reload it', (await page.locator('.toast.show').count()) === 0 && (await page.locator('text=Add to your Home Screen').count()) === 1);
   try {
     writeFileSync(versionFile, '{"build":"e2e-new-build"}\n');
-    await Promise.all([page.waitForEvent('load'), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
+    await Promise.all([page.waitForEvent('load', { timeout: 15000 }), page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
     await waitForToast(page, /ThoeneFit has received an update!/).catch(() => {});
     const upd = await page.evaluate(() => { const t = document.getElementById('toast'); const x = t.querySelector('.toast-text'); return { text: x.textContent, align: getComputedStyle(x).textAlign, lines: Math.round(x.getBoundingClientRect().height / parseFloat(getComputedStyle(x).lineHeight)) }; });
     check('after a deploy, reopening the app reloads it and says so on two centred lines', /^ThoeneFit has received an update!(\nTap here to see what's new\.)?$/.test(upd.text) && upd.align === 'center', JSON.stringify(upd));
