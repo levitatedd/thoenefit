@@ -1,0 +1,79 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "barbell-curl",
+  "title": "Barbell curl",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Hold the bar at shoulder width with palms up and arms long.",
+      "hold_ms": 750,
+      "joints": {
+        "shoulder": 0,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "lift",
+      "label": "Curl",
+      "description": "Bend your elbows to lift the bar while keeping your upper arms beside your ribs.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 75
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Finish the curl without leaning or letting your elbows travel.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 132
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower the bar slowly until your arms are long again.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 70
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-19",
+    "checked_by": "Codex",
+    "checks": [
+      "Palms-up grip, upright torso, fixed upper arms, controlled return.",
+      "Compared pose captions with the exact built-in exercise cue.",
+      "Checked camera bounds, equipment anchoring, and contact throughout the interpolated loop."
+    ],
+    "references": [
+      "https://www.strengthlog.com/barbell-curl/"
+    ],
+    "limitations": [
+      "The simplified figure and fixed camera show the main movement path. In-app phone playback and admin review are pending.",
+      "The fixed camera and full-size plates can partially obscure the hands or bar."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
