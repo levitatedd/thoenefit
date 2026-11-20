@@ -4125,8 +4125,12 @@ function viewSettings() {
   });
   const routineCount = (S.routines || []).length;
   // Headings are mint so the sections are easy to pick out (#103). What affects
-  // the next workout comes first; setup and maintenance are one-line links.
+  // the next workout comes first after admin tools; other settings are one-line links.
   return h('main', { class: 'page settings-main' }, topHead('Settings', { sub: h('a', { class: 'app-version', href: '#/settings/whats-new' }, `Version ${APP_VERSION}`) }),
+    S.user.role === 'admin' && section('Admin', linkList(
+      ['#/settings/users', 'Manage users', 'Add people, set the invite code, reset passwords'],
+      ['#/settings/guides', ['Movement guide review', S.guidesPending > 0 && h('span', { class: 'link-badge', 'aria-label': `${S.guidesPending} to review` }, String(S.guidesPending))],
+        S.guidesPending > 0 ? `${S.guidesPending} waiting for review` : 'Check each guide and mark it good or needing revision'])),
     section('Training', trainingFields(S.user, saveProfile), bodyWeightField(), h('p', { class: 'muted small' }, 'Changes save as you make them. Past workouts keep the unit they were logged in; suggestions convert to your current unit.')),
     section('Gyms', linkList(
       ...S.gyms.map((g) => [`#/settings/gym/${g.id}`, [g.name, g.id === S.user.active_gym_id && h('span', { class: 'badge' }, 'Selected')], g.equipment.length ? `${g.equipment.length} kinds of equipment` : 'Bodyweight only']),
@@ -4146,10 +4150,6 @@ function viewSettings() {
       ['#/settings/install', 'Add to your Home Screen', install.isInstalled() ? 'You are using the installed app' : 'Open full screen and keep working with no signal'],
       S.feedbackEnabled && ['#/settings/feedback', 'Send feedback', 'Ideas, problems or anything else'],
       ['#/settings/whats-new', "What's new", `Version ${APP_VERSION}`])),
-    S.user.role === 'admin' && section('Admin', linkList(
-      ['#/settings/users', 'Manage users', 'Add people, set the invite code, reset passwords'],
-      ['#/settings/guides', ['Movement guide review', S.guidesPending > 0 && h('span', { class: 'link-badge', 'aria-label': `${S.guidesPending} to review` }, String(S.guidesPending))],
-        S.guidesPending > 0 ? `${S.guidesPending} waiting for review` : 'Check each guide and mark it good or needing revision'])),
     section('Account',
       h('p', { class: 'muted' }, `Signed in as ${S.user.username}${S.user.role === 'admin' ? ' (admin)' : ''}.`),
       linkList(['#/settings/password', 'Change password', 'Signs you out on your other devices']),

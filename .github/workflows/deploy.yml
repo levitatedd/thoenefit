@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -37,6 +37,8 @@ jobs:
         run: node tests/plates.test.mjs
       - name: Movement guide checks
         run: node tests/guides.test.mjs
+      - name: Movement guide revision scope checks
+        run: node --test .github/scripts/guide-revision-scope.test.mjs
       - name: Install reminder checks
         run: node tests/install.test.mjs
       - name: Version number checks
