@@ -1,7 +1,7 @@
 // Entry point, called from actions/github-script in .github/workflows/*.yml:
 //   await require('./.github/scripts/project-status/main.js')({ github, context, core, getOctokit, checksResult })
 //
-// - `github` (GITHUB_TOKEN) is used for repository reads and for repository reads and label cleanup.
+// - `github` (GITHUB_TOKEN) is used for repository reads and label updates.
 // - process.env.PROJECT_TOKEN is used only for the Project board. Without it the
 //   board is NOT updated and the run says so explicitly.
 
@@ -10,11 +10,42 @@
 const {
   STATUS,
   IN_PROGRESS_LABEL,
+  GUIDE_REVISION_LABEL,
   parseLinkedIssues,
   decideStatus,
   shouldRemoveInProgressLabel,
 } = require('./rules');
 const { withRetry, loadProject, getIssueItem, addIssueToProject, setItemStatus } = require('./project');
+
+function issueLabels(issue) {
+  return (issue.labels || []).map((label) => typeof label === 'string' ? label : label.name);
+}
+
+function isAppGuideRevision(issue, owner) {
+  return issue.user?.login === (process.env.GUIDE_REVISION_ISSUE_AUTHOR || owner)
+    && issueLabels(issue).includes('bug')
+    && issue.title?.startsWith('Revise the ')
+    && issue.title.endsWith(' movement guide')
+    && issue.body?.startsWith("Marked **Needs revision** in the app's movement guide review (#277).");
+}
+
+async function addGuideRevisionLabel(github, repo, issueNumber) {
+  try {
+    await github.rest.issues.getLabel({ ...repo, name: GUIDE_REVISION_LABEL });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    try {
+      await github.rest.issues.createLabel({
+        ...repo, name: GUIDE_REVISION_LABEL, color: '7057ff', description: 'Movement guide review requests from ThoeneFit',
+      });
+    } catch (createError) {
+      if (createError.status !== 422) throw createError;
+      // Another issue event may have created the label at the same time.
+      await github.rest.issues.getLabel({ ...repo, name: GUIDE_REVISION_LABEL });
+    }
+  }
+  await github.rest.issues.addLabels({ ...repo, issue_number: issueNumber, labels: [GUIDE_REVISION_LABEL] });
+}
 
 /** Turns the GitHub event into one normalized event per affected issue. */
 async function collectTargets({ github, context, checksResult }) {
@@ -24,15 +55,20 @@ async function collectTargets({ github, context, checksResult }) {
   if (eventName === 'issues') {
     const issue = payload.issue;
     if (issue.number === 1) return [];
-    const base = { number: issue.number, nodeId: issue.node_id, state: issue.state };
-    const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+    const labels = issueLabels(issue);
+    const appGuideRevision = isAppGuideRevision(issue, context.repo.owner);
+    const guideRevision = appGuideRevision || labels.includes(GUIDE_REVISION_LABEL);
+    const base = {
+      number: issue.number, nodeId: issue.node_id, state: issue.state,
+      needsGuideLabel: ['opened', 'reopened'].includes(payload.action) && appGuideRevision && !labels.includes(GUIDE_REVISION_LABEL),
+    };
     switch (payload.action) {
       case 'opened':
-        return [{ ...base, event: { type: 'issue_opened' } }];
+        return [{ ...base, event: { type: 'issue_opened', guideRevision, issueState: issue.state } }];
       case 'labeled':
-        return [{ ...base, event: { type: 'issue_labeled', label: payload.label?.name, issueState: issue.state } }];
+        return [{ ...base, event: { type: 'issue_labeled', label: payload.label?.name, guideRevision, issueState: issue.state } }];
       case 'reopened':
-        return [{ ...base, event: { type: 'issue_reopened', hasInProgressLabel: labels.includes(IN_PROGRESS_LABEL) } }];
+        return [{ ...base, event: { type: 'issue_reopened', guideRevision, hasInProgressLabel: labels.includes(IN_PROGRESS_LABEL) } }];
       case 'closed':
         return [{ ...base, event: { type: 'issue_closed', stateReason: issue.state_reason } }];
       default:
@@ -68,7 +104,7 @@ async function collectTargets({ github, context, checksResult }) {
       try {
         const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: link.number });
         if (issue.pull_request || issue.state === 'closed') continue; // a PR number, not an issue
-        targets.push({ number: issue.number, nodeId: issue.node_id, state: issue.state, event: makeEvent(link) });
+        targets.push({ number: issue.number, nodeId: issue.node_id, state: issue.state, event: { ...makeEvent(link), guideRevision: issueLabels(issue).includes(GUIDE_REVISION_LABEL) || isAppGuideRevision(issue, context.repo.owner) } });
       } catch (error) {
         targets.push({ number: link.number, error: `could not read issue #${link.number}: ${error.message}` });
       }
@@ -119,6 +155,15 @@ module.exports = async function run({ github, context, core, getOctokit, checksR
       rows.push([`#${target.number}`, '?', '?', `❌ ${target.error}`]);
       failed = true;
       continue;
+    }
+
+    if (target.needsGuideLabel) {
+      try {
+        await withRetry(`label #${target.number}`, () => addGuideRevisionLabel(github, context.repo, target.number), { log });
+      } catch (error) {
+        core.error(`Could not label guide revision #${target.number}: ${error.message}`);
+        failed = true;
+      }
     }
 
     // A closed issue is no longer "in progress"; drop the label so it doesn't go stale.

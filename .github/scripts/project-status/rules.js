@@ -5,6 +5,7 @@
 
 const STATUS = Object.freeze({
   TODO: 'Todo',
+  GUIDE_REVISION: 'Guide Revisions',
   IN_PROGRESS: 'In Progress',
   IN_REVIEW: 'In Review',
   ON_STAGING: 'On Staging',
@@ -12,6 +13,7 @@ const STATUS = Object.freeze({
 });
 
 /** Label that marks "implementation has actually started" on an issue. */
+const GUIDE_REVISION_LABEL = 'guide revision';
 const IN_PROGRESS_LABEL = 'status: in progress';
 
 const CLOSING_KEYWORDS = ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved'];
@@ -68,6 +70,23 @@ function decideStatus(event, currentStatus) {
   const keep = (reason) => ({ status: null, reason });
   const move = (status, reason) =>
     status === currentStatus ? keep(`already ${status}`) : { status, reason };
+
+  if (event.guideRevision) {
+    if (event.type === 'issue_reopened') return move(STATUS.GUIDE_REVISION, 'guide revision reopened');
+    if (event.type === 'issue_labeled' && event.label !== GUIDE_REVISION_LABEL) {
+      return keep('guide revision label did not change');
+    }
+    if (['issue_opened', 'issue_labeled'].includes(event.type)) {
+      if (event.issueState === 'closed' || [STATUS.ON_STAGING, STATUS.DONE].includes(currentStatus)) {
+        return keep('guide revision is already staged or closed');
+      }
+      return move(STATUS.GUIDE_REVISION, 'guide revision awaiting a fix');
+    }
+    if (event.type === 'pr_checks_completed' || event.type === 'pr_converted_to_draft'
+        || (event.type === 'pr_closed' && !event.merged)) {
+      return keep('guide revisions stay queued until the fix merges into staging');
+    }
+  }
 
   switch (event.type) {
     case 'issue_opened':
@@ -134,6 +153,7 @@ function shouldRemoveInProgressLabel(event) {
 module.exports = {
   STATUS,
   IN_PROGRESS_LABEL,
+  GUIDE_REVISION_LABEL,
   parseLinkedIssues,
   decideStatus,
   shouldCloseIssueOnMerge,

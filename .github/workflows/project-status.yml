@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
+          GUIDE_REVISION_ISSUE_AUTHOR: ${{ vars.GUIDE_REVISION_ISSUE_AUTHOR }}
           PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           PROJECT_OWNER: levitatedd
           PROJECT_NUMBER: '5'
