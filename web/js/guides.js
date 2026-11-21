@@ -160,7 +160,11 @@ function dumbbell(at, forearm, s) {
   const disc = (c) => `<ellipse class="g-metal" cx="${r1(c[0])}" cy="${r1(c[1])}" rx="${rx}" ry="${plate}" fill="${C.metal}" stroke="${C.metalEdge}" stroke-width="1.2" transform="rotate(${rot} ${r1(c[0])} ${r1(c[1])})"/><ellipse cx="${r1(c[0])}" cy="${r1(c[1])}" rx="${r1(Math.max(1, rx - 2.4))}" ry="${plate - 2.4}" fill="none" stroke="${C.metalDark}" stroke-width="0.8" transform="rotate(${rot} ${r1(c[0])} ${r1(c[1])})"/>`;
   const bar = half > 0.5 ? `<line class="g-handle" x1="${r1(a[0])}" y1="${r1(a[1])}" x2="${r1(b[0])}" y2="${r1(b[1])}" stroke="${C.handle}" stroke-width="3.5" stroke-linecap="round"/>` : '';
   const hub = s > 0.6 ? `<circle class="g-hub" cx="${r1(at[0])}" cy="${r1(at[1])}" r="${r1(2.2 * s)}" fill="${C.metalDark}"/>` : '';
-  return `<g class="g-dumbbell">${bar}${disc(b)}${disc(a)}${hub}</g>`;
+  // As the palm turns up, the thumb-side plate (a) swings toward the camera, in front
+  // of the hand, so it is drawn after the fist (#355). With the palm facing the thigh
+  // nothing overlaps the fist and the dumbbell is drawn in one piece, as before.
+  if (s <= 0) return { back: `<g class="g-dumbbell">${bar}${disc(b)}${disc(a)}${hub}</g>`, front: '' };
+  return { back: `<g class="g-dumbbell">${bar}${disc(b)}</g>`, front: `<g class="g-dumbbell-near">${disc(a)}${hub}</g>` };
 }
 
 /** Curved arrow around the elbow, showing which way the forearm is about to move. */
@@ -210,6 +214,7 @@ export function render(guide, pose, { id = 'g', arrowDir = null, label = '' } = 
   // Hand: a closed fist round the handle.
   const [nF] = normal(J.elbow, J.hand);
   const fist = smooth([off(J.hand, nF, 4.6), off(along(J.elbow, J.hand, 1.12), nF, 2.6), off(along(J.elbow, J.hand, 1.12), nF, -2.6), off(J.hand, nF, -4.6), off(along(J.elbow, J.hand, 0.9), nF, -3.4), off(along(J.elbow, J.hand, 0.9), nF, 3.4)]);
+  const db = dumbbell(J.hand, J.forearm, J.j.supination);
   const parts = [
     // Gradients span the whole picture (userSpaceOnUse): one sized to a straight
     // vertical shape would have no width and paint nothing.
@@ -236,8 +241,9 @@ export function render(guide, pose, { id = 'g', arrowDir = null, label = '' } = 
     ball(J.shoulder, 5.4, mint),
     shape(limbPath(J.elbow, J.hand, 4.6, 3.1, { bulgeL: 0.9, bulgeR: 0.4, at: 0.3 }), mint),
     ball(J.elbow, 3.8, mint),
-    dumbbell(J.hand, J.forearm, J.j.supination),
+    db.back,
     shape(fist, mint),
+    db.front,
     arrowDir ? arrow(J, arrowDir, rig) : '',
   ];
   const title = label ? `<title>${label.replace(/[<&]/g, '')}</title>` : '';

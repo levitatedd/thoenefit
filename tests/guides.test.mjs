@@ -284,6 +284,17 @@ console.log('Straight-bar grips (#262)');
   check('the grip table covers the standing and bench barbell rigs', Object.keys(GRIPS).join() === 'grounded-side-v1,supine-barbell-v1');
 }
 
+console.log('Dumbbell plate in front of the hand as the palm turns (#355)');
+{
+  const curl = JSON.parse(read('web/guides/dumbbell-curl.json'));
+  const turned = curl.poses.filter((p) => (p.joints.supination ?? 0) > 0);
+  const fistBeforePlate = (svg) => { const plate = svg.indexOf('class="g-dumbbell-near"'); return plate > 0 && svg.lastIndexOf('class="g-body"', plate) > svg.indexOf('class="g-dumbbell"'); };
+  check(`curl: once the palm turns, the near plate is drawn over the fist (${turned.length} poses)`, turned.length >= 2 && turned.every((p) => fistBeforePlate(render(curl, p.joints, { id: 'd' }))));
+  check('curl: with the palm facing the thigh the dumbbell is drawn whole, behind the fist, as before', curl.poses.filter((p) => !(p.joints.supination > 0)).every((p) => !render(curl, p.joints, { id: 'd' }).includes('g-dumbbell-near')));
+  const hammer = JSON.parse(read('web/guides/hammer-curl.json'));
+  check('the hammer curl (palm never turns) renders exactly as its committed previews', hammer.poses.every((p) => `${render(hammer, p.joints, { id: `hammer-curl-${p.id}`, arrowDir: p.arrow, label: `${hammer.title}, ${p.label}: ${p.description}` })}\n` === read(`docs/guides/hammer-curl/${p.id}.svg`)));
+}
+
 console.log('Format checks catch mistakes');
 {
   const tpl = JSON.parse(read('docs/guides/template.json'));
