@@ -1,0 +1,45 @@
+name: Link strength-guide backlog issues
+on:
+  push:
+    branches: [chore/link-strength-guide-backlog-262]
+    paths: [.github/workflows/link-strength-guide-backlog-262.yml]
+permissions:
+  issues: write
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const groups = [[262,[6524706161,6524707714,6524706642,6524707147,6524708197,6524709039,6524708666,6524709428,6524709845,6524710292,6524711227,6524710722,6524711681]]];
+            const repo = context.repo;
+            const listRoute = 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues';
+            const addRoute = 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues';
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+            let total = 0;
+            for (const [parent, children] of groups) {
+              const options = { ...repo, issue_number: parent, per_page: 100 };
+              const current = await github.paginate(listRoute, options);
+              const existing = new Set(current.map(issue => issue.id));
+              for (const id of children) {
+                if (existing.has(id)) continue;
+                for (let attempt = 1; ; attempt++) {
+                  try {
+                    await github.request(addRoute, { ...repo, issue_number: parent, sub_issue_id: id });
+                    break;
+                  } catch (error) {
+                    if (attempt >= 4 || ![403, 429, 500, 502, 503, 504].includes(error.status)) throw error;
+                    const wait = Number(error.response?.headers?.['retry-after']) || 65;
+                    await delay(wait * 1000);
+                  }
+                }
+                await delay(1100);
+              }
+              const verified = new Set((await github.paginate(listRoute, options)).map(issue => issue.id));
+              if (!children.every(id => verified.has(id))) throw Error('Missing child issue under #' + parent);
+              total += children.length;
+              core.info('Verified ' + children.length + ' children under #' + parent);
+            }
+            await core.summary.addHeading('Strength guide backlog').addRaw('Verified ' + total + ' native sub-issue links.').write();
