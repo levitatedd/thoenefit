@@ -2,6 +2,8 @@
 
 Part of #262. This is the renderer and pose worklist for all **178 exercises in 13 strength batches**. The GitHub batch issues remain the tracking checklists. The draft samples in this branch are outside the app index until integration and fit-test review.
 
+See the [renderer test pack](strength-renderer-test-pack.md) for grip and support fixtures, row diagnostics, and the fit-test checklist.
+
 ## Suggested renderer sequence
 
 1. Review the ten sample guides. The curl and hinge sample review notes are in [their handoff](strength-curls-hinges-handoff.md).
