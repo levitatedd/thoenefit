@@ -1697,7 +1697,12 @@ console.log('Squat, bench press and row guides in the real player (#261)');
 console.log('Movement guide review for the admin (#277)');
 {
   const { readFileSync } = await import('node:fs');
-  const listed = Object.keys(JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8')).guides).length;
+  const index = JSON.parse(readFileSync(new globalThis.URL('../web/guides/index.json', import.meta.url), 'utf8'));
+  const listed = Object.keys(index.guides).length;
+  const inventory = readFileSync(new globalThis.URL('../docs/movement-guide-inventory.md', import.meta.url), 'utf8');
+  const commonSection = inventory.split(/^## Common\s*$/m)[1].split(/^## /m)[0];
+  const commonCount = [...commonSection.matchAll(/^\| `([a-z0-9-]+)` \|/gm)]
+    .filter(([, slug]) => Object.hasOwn(index.guides, slug)).length;
   const counts = () => page.$$eval('.review-count', (els) => Object.fromEntries(els.map((e) => [e.dataset.count, Number(e.querySelector('strong').textContent)])));
   await page.setViewportSize({ width: 402, height: 874 });
   await page.goto(`${URL}#/settings`);
@@ -1718,7 +1723,7 @@ console.log('Movement guide review for the admin (#277)');
   check('the queue can be searched', (await page.locator('[data-list=review-queue] li').count()) === 1);
   await page.fill('.page input[type=search]', '');
   await page.selectOption('.filters select', 'common');
-  check('and filtered by batch', (await page.locator('[data-list=review-queue] li').count()) === listed - 1);
+  check('and filtered by batch', (await page.locator('[data-list=review-queue] li').count()) === commonCount);
   await page.selectOption('.filters select', '');
   await page.click('[data-list=review-queue] li:first-child button');
   await page.waitForSelector('.guide .guide-figure');

@@ -1,0 +1,82 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "wide-grip-barbell-curl",
+  "title": "Wide-Grip Barbell Curl",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "grip": {
+    "width": "wide",
+    "palms": "up"
+  },
+  "timing": {
+    "move_ms": 1100,
+    "hold_ms": 400
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Take a palms-up grip wider than your shoulders and let your arms hang long.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 4
+      },
+      "arrow": null,
+      "hold_ms": 750
+    },
+    {
+      "id": "lift",
+      "label": "Curl",
+      "description": "Curl toward your chest with your upper arms steady and the bar level.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 71
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Finish near your chest without leaning back or bringing your elbows forward.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 130
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower under control all the way to the start.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 68
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-21",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.majorfitness.com/blogs/training-tips/barbell-curl"
+    ],
+    "checks": [
+      "Compared grip, setup, range, and return with the catalog cue and reference.",
+      "Validated contacts, framing, and limb lengths across interpolated poses."
+    ],
+    "limitations": [
+      "Palm orientation is conveyed by the cue and grip metadata. The renderer does not draw individual finger or wrist orientation.",
+      "Phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

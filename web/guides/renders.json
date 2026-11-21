@@ -27,6 +27,9 @@
     "dumbbell-rdl": "8e8c21b72c49aa0c39d36945276e1b6baac2acefa9dcc1d54bef5d27c15f08d1",
     "barbell-bench-press": "866cf91a1da2bba8aa53d1bc9e591a991f4071ab4c4358017c0fec2a62b54453",
     "lat-pulldown": "3479add0d2b277b08db57ab2082e97c28f820cb8dcc16d043c2aed3bcaa1adcd",
-    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a"
+    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a",
+    "reverse-grip-barbell-curl": "bcf6503c928fc12c2b5270debbd4e2f8d73074aec63187f8317a7b4096192a31",
+    "wide-grip-barbell-curl": "2283755742388b654e07f89f74d1a8f9ec6ff9f669422202454f181572bb6c78",
+    "close-grip-bench-press": "aa73ce93fb866180d415c82607779a15ce869017098b1884ec74726ad099c810"
   }
 }
