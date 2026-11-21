@@ -130,6 +130,30 @@ centre about 20 units up. Barbell and dumbbell-pair guides are framed to fit the
 own whole loop (see `viewBoxOf`), so an overhead press gets a taller picture than a
 curl; the frame never changes while the guide plays.
 
+### Straight-bar grips
+
+A guide with `barbell-v1` held in the hands can set how the bar is gripped (#262):
+
+```json
+"grip": { "width": "wide", "palms": "up" }
+```
+
+| rig | `width` (half the distance between the hands) | `palms` |
+| --- | --- | --- |
+| `grounded-side-v1` | `shoulder` (13, the usual grip) or `wide` (24: the forearms angle out so the hands sit outside the shoulders) | `up` or `down` |
+| `supine-barbell-v1` | `standard` (26, the usual bench grip) or `shoulder` (15, a close grip) | `down` or `up` |
+
+`width` moves the hands, and each hand has a contact at its own grip point on the
+bar, checked through the whole loop. `palms` records the grip for the review and
+the checks but is not drawn: the written cue says which way the palms face. Leave
+`grip` out to keep the rig's usual grip (the shipped barbell guides do). Fixtures:
+`reverse-grip-barbell-curl`, `wide-grip-barbell-curl` and `close-grip-bench-press` in
+`docs/guides/samples/`. On the bench the close grip is plain to see; on the side-on
+curl a wide grip shows mostly as the far hand appearing beside the torso.
+
+The near plates of any barbell are drawn in front of the near hand, since they are
+closer to the camera, and the bar runs through the hand.
+
 ### `supine-barbell-v1`
 
 The bench, back, hips and feet of `supine-bench-v1`, with both hands on one bar

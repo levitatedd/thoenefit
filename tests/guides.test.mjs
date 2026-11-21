@@ -2,7 +2,7 @@
 // Checks every guide listed in web/guides/index.json against the format in
 // docs/movement-guides.md, and that the figure keeps its proportions as it moves.
 import { readFileSync, readdirSync } from 'node:fs';
-import { RIGS, RIGS3D, joints, between, ease, render, problems, rigOf, pose3d, checkLoop, viewBoxOf } from '../web/js/guides.js';
+import { RIGS, RIGS3D, CAMERAS, GRIPS, joints, between, ease, render, problems, rigOf, pose3d, checkLoop, viewBoxOf } from '../web/js/guides.js';
 
 import { renderHashes } from '../docs/guides/render-hashes.mjs';
 
@@ -224,6 +224,64 @@ console.log('Barbells, a dumbbell in each hand, and seated machines (#261)');
   const far = structuredClone(bySlug['lat-pulldown']);
   far.poses[0].joints.torso = -25;
   check('a handle out of reach is reported', problems(far, { slugs }).some((e) => /hand on the handle drifts/.test(e)), problems(far, { slugs }).join('; '));
+}
+
+console.log('Straight-bar grips (#262)');
+{
+  const load = (f) => JSON.parse(read(f));
+  const base = load('web/guides/barbell-curl.json');
+  const benchBase = load('web/guides/barbell-bench-press.json');
+  const rev = load('docs/guides/samples/reverse-grip-barbell-curl.json');
+  const wide = load('docs/guides/samples/wide-grip-barbell-curl.json');
+  const close = load('docs/guides/samples/close-grip-bench-press.json');
+  // Every pose and nine frames between each pair.
+  const frames = (g) => {
+    const rig = RIGS3D[g.rig];
+    const out = [];
+    for (let k = 0; k < g.poses.length; k++) for (let i = 0; i < 10; i++) out.push(between(rig, g.poses[k].joints, g.poses[(k + 1) % g.poses.length].joints, ease(i / 10)));
+    return out;
+  };
+  const spacing = (g, pose) => { const { P } = pose3d(RIGS3D[g.rig], pose, g); return dist3(P.nearHand, P.farHand); };
+  for (const [g, half] of [[rev, 13], [wide, 24], [close, 15]]) {
+    const rig = RIGS3D[g.rig];
+    let worst = 0;
+    let level = 0;
+    for (const pose of frames(g)) {
+      const { P, held, contacts } = pose3d(rig, pose, g);
+      const bar = held.find((h) => h.id === 'barbell-v1');
+      // Each hand projected onto the bar's axis sits at its own grip point, either side of the middle.
+      for (const [side, s] of [['near', 1], ['far', -1]]) {
+        const hand = P[`${side}Hand`];
+        const along = (hand[2] - bar.center[2]) * s;
+        const off = Math.hypot(hand[0] - bar.center[0], hand[1] - bar.center[1]);
+        worst = Math.max(worst, Math.abs(along - half), off);
+        const c = contacts.find((x) => x.name === `${side} hand on the bar`);
+        worst = Math.max(worst, c ? dist3(c.at, c.target) : Infinity);
+      }
+      level = Math.max(level, Math.abs(P.nearHand[1] - P.farHand[1]), Math.abs(P.nearHand[0] - P.farHand[0]));
+    }
+    check(`${g.exercise}: both hands stay on their grip points, ${half} either side of the middle, level, through ${frames(g).length} frames`, worst < 1e-9 && level < 1e-9, `${worst} ${level}`);
+  }
+  check('reverse grip: the same shoulder-width spacing as the barbell curl', Math.abs(spacing(rev, rev.poses[0].joints) - spacing(base, base.poses[0].joints)) < 1e-9);
+  check('wide grip: the hands sit well outside the barbell curl grip (48 apart against 26)', spacing(wide, wide.poses[0].joints) - spacing(base, base.poses[0].joints) > 20);
+  check('close grip: narrower than the standard bench press grip (30 apart against 52)', Math.abs(spacing(close, close.poses[0].joints) - 30) < 1e-6 && spacing(benchBase, benchBase.poses[0].joints) - spacing(close, close.poses[0].joints) > 20);
+  check('close grip: elbows close to the ribs and the bar down to the lower chest', close.poses.every((p) => p.joints.tuck <= 30) && close.poses.some((p) => p.joints.press === 0));
+  // The usual grip is the same as no grip, and a grip draws no extra hand marks.
+  const curlTop = render(base, base.poses[2].joints, { id: 'p' });
+  check('setting the barbell curl\'s usual grip draws it exactly the same', render({ ...base, grip: { width: 'shoulder', palms: 'up' } }, base.poses[2].joints, { id: 'p' }) === curlTop);
+  check('setting the bench press\'s usual grip draws it exactly the same', render({ ...benchBase, grip: { width: 'standard', palms: 'down' } }, benchBase.poses[2].joints, { id: 'p' }) === render(benchBase, benchBase.poses[2].joints, { id: 'p' }));
+  check('palms are described, not drawn: reverse and palms-up curls look the same', render(rev, rev.poses[2].joints, { id: 'p' }) === curlTop);
+  // Layering: the near plates are closer to the camera than the near hand, so they are
+  // drawn after it; the bar runs through the hand.
+  const layered = (g) => g.poses.every((p) => { const svg = render(g, p.joints, { id: 'l' }); const fist = svg.indexOf('class="g-fist"'); return fist > 0 && svg.indexOf('class="g-barbell"', fist) > fist && svg.lastIndexOf('class="g-metal"') > fist; });
+  check('every barbell guide draws the near plates in front of the near hand', ['barbell-curl', 'deadlift', 'back-squat', 'overhead-press', 'barbell-bench-press'].every((slug) => layered(load(`web/guides/${slug}.json`))) && [rev, wide, close].every(layered));
+  const bad = (grip, g = base) => problems({ ...g, grip }, { slugs });
+  check('a grip width the rig has not got, odd palms, extra keys, or a grip without a barbell are reported',
+    bad({ width: 'close', palms: 'up' }).some((e) => /grip width must be "shoulder" or "wide"/.test(e))
+    && bad({ width: 'shoulder', palms: 'sideways' }).some((e) => /palms must be/.test(e))
+    && bad({ width: 'shoulder', palms: 'up', thumbs: 'out' }).some((e) => /only width and palms/.test(e))
+    && bad({ width: 'shoulder', palms: 'up' }, JSON.parse(read('web/guides/hammer-curl.json'))).some((e) => /only for a barbell/.test(e)));
+  check('the grip table covers the standing and bench barbell rigs', Object.keys(GRIPS).join() === 'grounded-side-v1,supine-barbell-v1');
 }
 
 console.log('Format checks catch mistakes');

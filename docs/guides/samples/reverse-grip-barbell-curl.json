@@ -1,0 +1,80 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "reverse-grip-barbell-curl",
+  "title": "Reverse-grip barbell curl",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "grip": {
+    "width": "shoulder",
+    "palms": "down"
+  },
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Hold the bar at shoulder width with palms facing down.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "lift",
+      "label": "Curl",
+      "description": "Curl it up with your elbows fixed at your sides.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 75
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Finish near your shoulders, palms still facing down.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 132
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower slowly to straight arms.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 70
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "sample",
+    "checked": "2026-11-21",
+    "checked_by": "Claude, renderer fixture for straight-bar grips (#262)",
+    "checks": [
+      "Overhand grip at the baseline shoulder width; knuckles face forward at Setup and up at Top.",
+      "Both hands stay on their grip points on the bar at every pose and between poses."
+    ],
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/"
+    ],
+    "limitations": [
+      "Renderer fixture only. Final poses are authored and reviewed separately."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

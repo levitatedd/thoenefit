@@ -221,7 +221,39 @@
     "check": [
       "node tests/guides.test.mjs",
       "node docs/guides/render-previews.mjs path/to/guide.json"
-    ]
+    ],
+    "grip": {
+      "only_with": "barbell-v1 held in the hands, on grounded-side-v1 or supine-barbell-v1",
+      "grounded-side-v1": {
+        "width": [
+          "shoulder",
+          "wide"
+        ],
+        "palms": [
+          "up",
+          "down"
+        ]
+      },
+      "supine-barbell-v1": {
+        "width": [
+          "standard",
+          "shoulder"
+        ],
+        "palms": [
+          "down",
+          "up"
+        ]
+      },
+      "example": {
+        "width": "wide",
+        "palms": "up"
+      },
+      "samples": [
+        "docs/guides/samples/reverse-grip-barbell-curl.json",
+        "docs/guides/samples/wide-grip-barbell-curl.json",
+        "docs/guides/samples/close-grip-bench-press.json"
+      ]
+    }
   },
   "exercise": "built-in-exercise-slug",
   "title": "Exercise name, sentence case",

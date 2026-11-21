@@ -1,0 +1,81 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "close-grip-bench-press",
+  "title": "Close-grip bench press",
+  "rig": "supine-barbell-v1",
+  "camera": "front-three-quarter",
+  "equipment": [
+    "flat-bench-v1",
+    "barbell-v1"
+  ],
+  "grip": {
+    "width": "shoulder",
+    "palms": "down"
+  },
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Hold the bar above your chest with a shoulder-width overhand grip.",
+      "joints": {
+        "press": 1,
+        "tuck": 25
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower the bar with your elbows close to your sides.",
+      "joints": {
+        "press": 0.5,
+        "tuck": 22
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "chest",
+      "label": "Chest",
+      "description": "Touch your lower chest, elbows tucked near your ribs.",
+      "joints": {
+        "press": 0,
+        "tuck": 20
+      },
+      "arrow": null
+    },
+    {
+      "id": "press",
+      "label": "Press",
+      "description": "Press back up without lifting your shoulders.",
+      "joints": {
+        "press": 0.5,
+        "tuck": 22
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "sample",
+    "checked": "2026-11-21",
+    "checked_by": "Claude, renderer fixture for straight-bar grips (#262)",
+    "checks": [
+      "Shoulder-width overhand grip, narrower than the standard bench grip, with the elbows near the ribs.",
+      "Both hands stay on their grip points on the bar at every pose and between poses."
+    ],
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/"
+    ],
+    "limitations": [
+      "Renderer fixture only. Final poses are authored and reviewed separately."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
