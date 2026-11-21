@@ -1,0 +1,45 @@
+name: Link movement-guide backlog issues
+on:
+  push:
+    branches: [chore/link-movement-guide-backlog-263]
+    paths: [.github/workflows/link-movement-guide-backlog-263.yml]
+permissions:
+  issues: write
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const groups = [[263,[6525607160,6525606774,6525607603,6525607906,6525608730,6525608334,6525609239]]];
+            const repo = context.repo;
+            const listRoute = 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues';
+            const addRoute = 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues';
+            const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+            let total = 0;
+            for (const [parent, children] of groups) {
+              const options = { ...repo, issue_number: parent, per_page: 100 };
+              const current = await github.paginate(listRoute, options);
+              const existing = new Set(current.map(issue => issue.id));
+              for (const id of children) {
+                if (existing.has(id)) continue;
+                for (let attempt = 1; ; attempt++) {
+                  try {
+                    await github.request(addRoute, { ...repo, issue_number: parent, sub_issue_id: id });
+                    break;
+                  } catch (error) {
+                    if (attempt >= 4 || ![403, 429, 500, 502, 503, 504].includes(error.status)) throw error;
+                    const wait = Number(error.response?.headers?.['retry-after']) || 65;
+                    await delay(wait * 1000);
+                  }
+                }
+                await delay(1100);
+              }
+              const verified = new Set((await github.paginate(listRoute, options)).map(issue => issue.id));
+              if (!children.every(id => verified.has(id))) throw Error('Missing child issue under #' + parent);
+              total += children.length;
+              core.info('Verified ' + children.length + ' children under #' + parent);
+            }
+            await core.summary.addHeading('Movement guide backlog').addRaw('Verified ' + total + ' native sub-issue links.').write();
