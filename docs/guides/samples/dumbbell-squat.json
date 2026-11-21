@@ -1,0 +1,85 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "dumbbell-squat",
+  "title": "Dumbbell Squat",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "dumbbell-pair-v1"
+  ],
+  "timing": {
+    "move_ms": 1300,
+    "hold_ms": 600
+  },
+  "poses": [
+    {
+      "id": "stand",
+      "label": "Stand",
+      "description": "Hold a dumbbell at each side with both feet planted.",
+      "joints": {
+        "shoulder": 4,
+        "elbow": 3,
+        "shin": 1,
+        "knee": 5,
+        "torso": 0
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Bend your hips and knees together and keep your chest up.",
+      "joints": {
+        "shoulder": -13,
+        "elbow": 3,
+        "shin": 19,
+        "knee": 62,
+        "torso": 14
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "bottom",
+      "label": "Bottom",
+      "description": "Lower until your thighs are about parallel, with the weights at your sides.",
+      "joints": {
+        "shoulder": -26,
+        "elbow": 3,
+        "shin": 30,
+        "knee": 118,
+        "torso": 27
+      },
+      "arrow": null
+    },
+    {
+      "id": "rise",
+      "label": "Stand up",
+      "description": "Push through your whole foot to stand.",
+      "joints": {
+        "shoulder": -13,
+        "elbow": 3,
+        "shin": 19,
+        "knee": 62,
+        "torso": 14
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.strengthlog.com/dumbbell-squat/"
+    ],
+    "limitations": [
+      "The draft illustrates the side-hold variation in the app cue.",
+      "Phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

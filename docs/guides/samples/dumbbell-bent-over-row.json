@@ -1,0 +1,86 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "dumbbell-bent-over-row",
+  "title": "Dumbbell Bent-Over Row",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "dumbbell-pair-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "hang",
+      "label": "Hang",
+      "description": "Set your hinge and let your arms hang long under your shoulders.",
+      "joints": {
+        "shoulder": -55,
+        "elbow": 4,
+        "shin": -4,
+        "knee": 22,
+        "torso": 55
+      },
+      "arrow": null
+    },
+    {
+      "id": "pull",
+      "label": "Pull",
+      "description": "Pull both dumbbells toward your hips while holding your torso still.",
+      "joints": {
+        "shoulder": -63,
+        "elbow": 60,
+        "shin": -4,
+        "knee": 22,
+        "torso": 55
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Briefly hold both dumbbells near your hips with your elbows back.",
+      "joints": {
+        "shoulder": -73,
+        "elbow": 99,
+        "shin": -4,
+        "knee": 22,
+        "torso": 55
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower under control until your arms are long again.",
+      "joints": {
+        "shoulder": -63,
+        "elbow": 60,
+        "shin": -4,
+        "knee": 22,
+        "torso": 55
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.muscleandstrength.com/exercises/bent-over-dumbbell-row.html"
+    ],
+    "limitations": [
+      "Draft only: the current grounded rig limits backward upper-arm travel. The load finishes in front of its cue target. Fix the upper-arm path before indexing.",
+      "The loop starts from the hinged working position. Verify the exact load-to-torso path in fit-test.",
+      "Phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
