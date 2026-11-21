@@ -1,0 +1,84 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "bodyweight-squat",
+  "title": "Bodyweight Squat",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [],
+  "timing": {
+    "move_ms": 1300,
+    "hold_ms": 600
+  },
+  "poses": [
+    {
+      "id": "upright",
+      "label": "Upright",
+      "description": "Stand with feet about shoulder-width apart. Reach your arms forward for balance.",
+      "hold_ms": 900,
+      "joints": {
+        "shin": 2,
+        "knee": 4,
+        "torso": 4,
+        "shoulder": 86,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Bend your hips and knees together, with your heels planted and knees following your toes.",
+      "joints": {
+        "shin": 18,
+        "knee": 60,
+        "torso": 16,
+        "shoulder": 74,
+        "elbow": 4
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "bottom",
+      "label": "Bottom",
+      "description": "Lower as far as you can control with your whole foot on the floor.",
+      "joints": {
+        "shin": 32,
+        "knee": 118,
+        "torso": 30,
+        "shoulder": 60,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "stand",
+      "label": "Stand",
+      "description": "Push through both feet to stand tall again.",
+      "joints": {
+        "shin": 18,
+        "knee": 58,
+        "torso": 16,
+        "shoulder": 74,
+        "elbow": 4
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-21",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.acefitness.org/resources/everyone/exercise-library/135/bodyweight-squat/"
+    ],
+    "limitations": [
+      "The illustration uses forward arms to match the ThoeneFit catalog cue.",
+      "Phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
