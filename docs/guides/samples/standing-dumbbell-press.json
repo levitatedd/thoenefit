@@ -1,0 +1,73 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "standing-dumbbell-press",
+  "title": "Standing Dumbbell Press",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "dumbbell-pair-v1"
+  ],
+  "timing": {
+    "move_ms": 800,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "rack",
+      "label": "Rack",
+      "description": "Stand tall with both dumbbells at shoulder height and your ribs down.",
+      "joints": {
+        "shoulder": 45,
+        "elbow": 130
+      },
+      "arrow": null
+    },
+    {
+      "id": "press",
+      "label": "Press",
+      "description": "Press both dumbbells overhead without leaning back.",
+      "joints": {
+        "shoulder": 105,
+        "elbow": 80
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Overhead",
+      "description": "Finish with long arms and the weights above your shoulders.",
+      "joints": {
+        "shoulder": 174,
+        "elbow": 6
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower both dumbbells under control to shoulder height.",
+      "joints": {
+        "shoulder": 105,
+        "elbow": 80
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.strengthlog.com/dumbbell-shoulder-press/"
+    ],
+    "limitations": [
+      "Side view shows the main press path with the upper arms slightly forward.",
+      "Phone playback and admin review are pending."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
