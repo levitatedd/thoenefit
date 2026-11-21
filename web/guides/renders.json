@@ -20,13 +20,16 @@
     "dumbbell-bench-press": "7ab9b31a277574983b6ef603c42b7ff3c5ca66e6e676c4131b6f2506d8d975c8",
     "one-arm-dumbbell-row": "6a48514a82274a20dc1c6d7cd973f1afa357a543b03fdde84d9913f4409038f1",
     "hammer-curl": "3467495453514f701dcc90689fe90340b2572dcd50f67b2cab06d7147dffd3d4",
-    "barbell-curl": "fa818aa522d3e75346da6ffbc4996681b74e3a5686d3550bb56e6d68347a1c5c",
-    "deadlift": "61bb932ba11a0a0f597fc6f9ba66d566107d60ed7069f9576e5f9c914a79330e",
-    "back-squat": "022d2a2c30fb1f02a04869b1afb7bdd14759c42fac4ec7859489340e77a55058",
-    "overhead-press": "d064b95073ee32422e50331c6ab8a327bb5f29a7cfc56b39779cf54f1688643a",
+    "barbell-curl": "b74f7dd3b82078a3904081bd65ad3a48dd6290c2f78ba4c714a31000b3cf0483",
+    "deadlift": "aa74b6702b143513f05653f7fa66811067cc498d35aa524630e2c7819a60f8d9",
+    "back-squat": "181f2d681079488b92b350317c5e70b2424bc781fe3d61f4fb9c792f3738e3fc",
+    "overhead-press": "7153d60e112ed06ed074fb633f0f88e36541dfc468f686077be7a6d44cadbe6f",
     "dumbbell-rdl": "8e8c21b72c49aa0c39d36945276e1b6baac2acefa9dcc1d54bef5d27c15f08d1",
-    "barbell-bench-press": "58ece198ae674e2dff9cae0bfe924c156398ace92e0bb88872fa2605910c8c94",
+    "barbell-bench-press": "866cf91a1da2bba8aa53d1bc9e591a991f4071ab4c4358017c0fec2a62b54453",
     "lat-pulldown": "3479add0d2b277b08db57ab2082e97c28f820cb8dcc16d043c2aed3bcaa1adcd",
-    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a"
+    "seated-cable-row": "fa18b742d981f4529aabe559c3dc19c5e6d2fdfd6cd9a0fdf17c87431c1a791a",
+    "reverse-grip-barbell-curl": "bcf6503c928fc12c2b5270debbd4e2f8d73074aec63187f8317a7b4096192a31",
+    "wide-grip-barbell-curl": "2283755742388b654e07f89f74d1a8f9ec6ff9f669422202454f181572bb6c78",
+    "close-grip-bench-press": "aa73ce93fb866180d415c82607779a15ce869017098b1884ec74726ad099c810"
   }
 }

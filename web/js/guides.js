@@ -261,6 +261,16 @@ export function problems(guide, { slugs = null } = {}) {
     else if (rig && !(rig.equipment || ['dumbbell-v1']).includes(e)) out.push(`equipment "${e}" is not available on the ${guide.rig} rig`);
   }
   if (RIGS3D[guide.rig] && guide.camera !== rig.camera) out.push(`camera must be "${rig.camera}" on the ${guide.rig} rig`);
+  if (guide.grip !== undefined) {
+    const table = GRIPS[guide.rig];
+    const g = guide.grip;
+    if (!table || !(guide.equipment || []).includes('barbell-v1')) out.push(`grip is only for a barbell held in the hands (barbell-v1 on ${Object.keys(GRIPS).join(' or ')})`);
+    else if (!g || typeof g !== 'object' || Object.keys(g).some((k) => !['width', 'palms'].includes(k))) out.push('grip has only width and palms');
+    else {
+      if (!(g.width in table.widths)) out.push(`grip width must be ${Object.keys(table.widths).map((w) => `"${w}"`).join(' or ')} on the ${guide.rig} rig`);
+      if (!table.palms.includes(g.palms)) out.push('grip palms must be "up" or "down"');
+    }
+  }
   if ('_help' in guide) out.push('remove the template\'s _help notes before saving the guide');
   if (!guide.title) out.push('title is missing');
   const poses = guide.poses || [];
@@ -426,6 +436,22 @@ export function viewBoxOf(rig, guide) {
 
 // Barbells: a 20 kg bar, plates the size of bumper plates. Units are about a centimetre.
 const BAR = { half: 64, plateIn: 34, plateOut: 44, plate: 20, grip: 13, wideGrip: 26 };
+/**
+ * Straight-bar grips (#262). A guide may set `grip: { width, palms }`; without it the
+ * rig uses its usual grip. Widths are half the distance between the hands, per rig;
+ * the first listed is the rig's usual grip. `palms` records which way the palms face
+ * for the review; it is not drawn (the written cue says it).
+ */
+export const GRIPS = {
+  'grounded-side-v1': { widths: { shoulder: 13, wide: 24 }, palms: ['up', 'down'] },
+  'supine-barbell-v1': { widths: { standard: 26, shoulder: 15 }, palms: ['down', 'up'] },
+};
+const gripOf = (rigId, guide) => {
+  const g = guide && guide.grip;
+  const table = GRIPS[rigId];
+  if (!g || !table || !((guide.equipment || []).includes('barbell-v1'))) return null;
+  return { half: table.widths[g.width] ?? Object.values(table.widths)[0], palms: g.palms };
+};
 // Seated machines: seat, feet and the handle's path, fixed by the machine.
 const SEATED = {
   hip: [0, 52, 0],
@@ -503,13 +529,15 @@ export function pose3d(rig, pose, guide) {
     P.hip = [P.nearHip[0], P.nearHip[1], 0];
     P.shoulderC = v3.add(P.hip, up3(j.torso, B.torso));
     const goblet = eq.includes('dumbbell-goblet-v1');
+    const bargrip = gripOf('grounded-side-v1', guide);
     for (const [side, s] of [['near', 1], ['far', -1]]) {
       const sh = v3.add(P.shoulderC, [0, 0, s * B.shoulderHalf]);
       // Arm angles are measured from the torso here, so a hold at the chest stays at
       // the chest as the torso leans into the squat.
       const el = v3.add(sh, dn3(j.torso + j.shoulder, B.upperArm));
       // Goblet: the forearms angle in so the hands meet at the middle of the chest.
-      const dz = goblet ? -s * (B.shoulderHalf - 3) : 0;
+      // A wide barbell grip: the forearms angle out so the hands sit outside the shoulders.
+      const dz = goblet ? -s * (B.shoulderHalf - 3) : bargrip ? s * (bargrip.half - B.shoulderHalf) : 0;
       const flat = Math.sqrt(B.forearm * B.forearm - dz * dz);
       const hand = v3.add(el, v3.add(dn3(j.torso + j.shoulder + j.elbow, flat), [0, 0, dz]));
       Object.assign(P, { [`${side}Shoulder`]: sh, [`${side}Elbow`]: el, [`${side}Hand`]: hand });
@@ -527,6 +555,13 @@ export function pose3d(rig, pose, guide) {
       // Both hands on one bar, shoulder width apart: the bar runs through them.
       const mid = v3.mul(v3.add(P.nearHand, P.farHand), 0.5);
       held.push({ id: 'barbell-v1', hand: mid, center: mid, axis: [0, 0, 1] });
+      if (bargrip) {
+        // Each hand on its own place on the bar.
+        held[held.length - 1].grip = bargrip;
+        for (const [side, s] of [['near', 1], ['far', -1]]) {
+          contacts.push({ name: `${side} hand on the bar`, at: P[`${side}Hand`], target: [mid[0], mid[1], s * bargrip.half] });
+        }
+      }
     } else if (eq.includes('barbell-back-v1')) {
       // Bar across the upper back, just below the neck; the hands reach back to hold it.
       // The arm joints are not used: the arms are solved to the bar.
@@ -560,7 +595,8 @@ export function pose3d(rig, pose, guide) {
     const [ax, ay] = seated ? M.from : [-38, 67];
     const [bx, by] = seated ? M.to : [-48, 112];
     const bar = [ax + (bx - ax) * t, ay + (by - ay) * t, 0];
-    const grip = seated ? M.grip : BAR.wideGrip;
+    const bargrip = seated ? null : gripOf('supine-barbell-v1', guide);
+    const grip = seated ? M.grip : bargrip ? bargrip.half : BAR.wideGrip;
     for (const [side, s] of [['near', 1], ['far', -1]]) {
       const hip = v3.add(P.hip, [0, 0, s * (seated ? B.hipHalf : 9)]);
       const foot = seated ? M.feet[side] : SUPINE.feet[side];
@@ -575,7 +611,7 @@ export function pose3d(rig, pose, guide) {
       contacts.push({ name: `${side} hand on the ${seated ? 'handle' : 'bar'}`, at: arm.end, target });
     }
     if (seated) held.push({ id: eq.find((e) => SEATED[e]), hand: bar, center: bar, axis: [0, 0, 1], grip });
-    else held.push({ id: 'barbell-v1', hand: bar, center: bar, axis: [0, 0, 1] });
+    else held.push({ id: 'barbell-v1', hand: bar, center: bar, axis: [0, 0, 1], ...(bargrip ? { grip: bargrip } : {}) });
   } else if (rig === RIGS3D['supine-bench-v1']) {
     P.hip = SUPINE.hip;
     P.shoulderC = v3.add(P.hip, [-B.torso, 0, 0]);
@@ -684,7 +720,7 @@ function disc3d(rig, c, axis, r) {
  * One half of a barbell (the far half, -z, or the near half, +z), so the figure can be
  * drawn between them: bar, collar and a bumper plate.
  */
-function barbellHalf(rig, center, half) {
+function barbellHalf(rig, center, half, { from = null, to = null } = {}) {
   const S = project(rig);
   const z = (d) => v3.add(center, [0, 0, half * d]);
   const line = (a, b, w, col) => `<line x1="${r1(S(a)[0])}" y1="${r1(S(a)[1])}" x2="${r1(S(b)[0])}" y2="${r1(S(b)[1])}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
@@ -693,7 +729,10 @@ function barbellHalf(rig, center, half) {
   const plates = half > 0
     ? plate(BAR.plateIn, C.metalDark) + plate(BAR.plateOut, C.metal) + face
     : plate(BAR.plateOut, C.metalDark) + plate(BAR.plateIn, C.metal) + face;
-  const bar = line(z(0), z(BAR.plateIn), 3.2, C.handle);
+  // `to`: only the bar from the middle to there (inside the hand). `from`: the bar from
+  // there outwards, with the collar and plates.
+  if (to !== null) return `<g class="g-barbell">${line(z(0), z(to), 3.2, C.handle)}</g>`;
+  const bar = line(z(from ?? 0), z(BAR.plateIn), 3.2, C.handle);
   const sleeve = line(z(BAR.plateIn - 2), z(BAR.half), 4.6, C.metalEdge);
   return half > 0 ? `<g class="g-barbell">${bar}${plates}${sleeve}</g>` : `<g class="g-barbell">${sleeve}${plates}${bar}</g>`;
 }
@@ -792,6 +831,7 @@ function render3d(guide, pose, { id, arrowDir, label }) {
     return h?.half ? dumbbell3d(rig, h.center, h.axis, { half: h.half, grip: `<g class="g-grip">${fist}</g>` }) : fist;
   };
   const goblet = held.find((h) => h.id === 'dumbbell-goblet-v1');
+  const nearGripZ = bar ? Math.abs(P.nearHand[2] - bar.center[2]) : 0;
   const parts = [
     `<defs><linearGradient id="${id}-mint" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#b4ffdc"/><stop offset="0.45" stop-color="#6ef3b4"/><stop offset="1" stop-color="#2fd98a"/></linearGradient><linearGradient id="${id}-far" gradientUnits="userSpaceOnUse" x1="${vx}" y1="${vy}" x2="${vx + vw * 0.8}" y2="${vy + vh}"><stop offset="0" stop-color="#5fd6a0"/><stop offset="1" stop-color="#1e9a62"/></linearGradient></defs>`,
     `<ellipse class="g-ground" cx="${r1(shadowX(s))}" cy="${r1(rig.origin[1] + 1)}" rx="${rig.shadow}" ry="3" fill="${C.ground}"/>`,
@@ -813,9 +853,12 @@ function render3d(guide, pose, { id, arrowDir, label }) {
     // A goblet hold sits in front of the arm, cupped by the fists drawn over it.
     goblet ? dumbbell3d(rig, goblet.center, goblet.axis, { half: 9, plate: 8 }) : '',
     weights('near'),
-    bar ? barbellHalf(rig, bar.center, 1) : '',
+    // The bar passes through the near hand, and the near plates are closer to the
+    // camera than the hand, so: the bar up to the hand, then the hand, then the rest.
+    bar ? barbellHalf(rig, bar.center, 1, { to: nearGripZ }) : '',
     machine ? machineParts(rig, machine.id, MP, 'front') : '',
-    grip('near', mint),
+    bar ? `<g class="g-fist">${grip('near', mint)}</g>` : grip('near', mint),
+    bar ? barbellHalf(rig, bar.center, 1, { from: nearGripZ }) : '',
     arrowDir ? arrowStraight(s[rig.arrowAt] || s.hip, arrowDir, rig.arrowDx ?? 20) : '',
   ];
   const title = label ? `<title>${label.replace(/[<&]/g, '')}</title>` : '';
