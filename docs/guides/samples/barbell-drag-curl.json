@@ -1,0 +1,72 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "barbell-drag-curl",
+  "title": "Barbell Drag Curl",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "setup",
+      "label": "Setup",
+      "description": "Hold the bar at your thighs with your palms up.",
+      "joints": {
+        "shoulder": 0,
+        "elbow": 4
+      },
+      "arrow": null
+    },
+    {
+      "id": "drag",
+      "label": "Drag up",
+      "description": "Let your elbows move behind you as you draw the bar close to your body.",
+      "joints": {
+        "shoulder": -25,
+        "elbow": 65
+      },
+      "arrow": "up"
+    },
+    {
+      "id": "top",
+      "label": "Top",
+      "description": "Keep the bar close and stop before your shoulders roll forward.",
+      "joints": {
+        "shoulder": -37,
+        "elbow": 116
+      },
+      "arrow": null
+    },
+    {
+      "id": "lower",
+      "label": "Lower",
+      "description": "Lower along the same path and return your elbows to your sides.",
+      "joints": {
+        "shoulder": -25,
+        "elbow": 65
+      },
+      "arrow": "down"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.jefit.com/exercises/254/barbell-drag-curl"
+    ],
+    "limitations": [
+      "Check the bar path and visibility in the in-app side view before indexing."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "romanian-deadlift",
+  "title": "Barbell Romanian Deadlift",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "stand",
+      "label": "Stand",
+      "description": "Stand with the bar at your hips and your knees slightly bent.",
+      "hold_ms": 750,
+      "joints": {
+        "shin": 0,
+        "knee": 8,
+        "torso": 0,
+        "shoulder": 10
+      },
+      "arrow": null
+    },
+    {
+      "id": "descend",
+      "label": "Hinge",
+      "description": "Push your hips back and keep the bar close as it slides down your thighs.",
+      "joints": {
+        "shin": -4,
+        "knee": 16,
+        "torso": 28,
+        "shoulder": -31
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "stretch",
+      "label": "Stretch",
+      "description": "Stop at a hamstring stretch while keeping your back steady and your arms long.",
+      "joints": {
+        "shin": -8,
+        "knee": 21,
+        "torso": 54,
+        "shoulder": -61
+      },
+      "arrow": null
+    },
+    {
+      "id": "rise",
+      "label": "Stand up",
+      "description": "Drive your hips forward and stand tall with the bar close.",
+      "joints": {
+        "shin": -4,
+        "knee": 16,
+        "torso": 28,
+        "shoulder": -31
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://www.nsca.com/education/articles/nsca-coach/exercise-progressions-for-resuming-strength-training-following-posterior-chain-muscle-injury/"
+    ],
+    "limitations": [
+      "The loop starts from standing and illustrates the working range. It does not show picking up the bar."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}

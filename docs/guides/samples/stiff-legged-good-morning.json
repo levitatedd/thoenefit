@@ -1,0 +1,77 @@
+{
+  "format": "thoenefit-movement-guide",
+  "version": 1,
+  "exercise": "stiff-legged-good-morning",
+  "title": "Stiff-Legged Good Morning",
+  "rig": "grounded-side-v1",
+  "camera": "side",
+  "equipment": [
+    "barbell-back-v1"
+  ],
+  "timing": {
+    "move_ms": 1050,
+    "hold_ms": 450
+  },
+  "poses": [
+    {
+      "id": "stand",
+      "label": "Stand",
+      "description": "Rest the bar on your upper back with your knees almost straight.",
+      "joints": {
+        "shin": 0,
+        "knee": 4,
+        "torso": 0
+      },
+      "arrow": null
+    },
+    {
+      "id": "descend",
+      "label": "Hinge",
+      "description": "Push your hips back and tip forward with a flat back.",
+      "joints": {
+        "shin": -3,
+        "knee": 6,
+        "torso": 25
+      },
+      "arrow": "down"
+    },
+    {
+      "id": "stretch",
+      "label": "Stretch",
+      "description": "Stop when your hamstrings stretch and your back is still steady.",
+      "joints": {
+        "shin": -6,
+        "knee": 7,
+        "torso": 49
+      },
+      "arrow": null
+    },
+    {
+      "id": "rise",
+      "label": "Stand up",
+      "description": "Bring your hips forward to return to standing.",
+      "joints": {
+        "shin": -3,
+        "knee": 6,
+        "torso": 25
+      },
+      "arrow": "up"
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "checked": "2026-11-20",
+    "checked_by": "Codex",
+    "references": [
+      "https://doi.org/10.1519/SSC.0000000000000802"
+    ],
+    "limitations": [
+      "The loop starts after unracking. The current renderer has no rack prop for this setup.",
+      "The two catalog variants use different knee bend throughout the working path."
+    ]
+  },
+  "source": {
+    "artwork": "Original. Drawn in code from the shared rig in web/js/guides.js.",
+    "license": "Part of ThoeneFit"
+  }
+}
